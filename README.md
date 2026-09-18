@@ -4,7 +4,7 @@ Outbound messaging for Cloudflare Workers. Send over WhatsApp first and fall bac
 
 The name is the feature: a message *falls* from the preferred channel to the next one, driven by real delivery status rather than hope.
 
-It is deliberately small. Providers are plain `fetch` calls behind a transport interface, so a local SMS gateway is ten lines and no vendor is assumed. State lives in KV, with an optional Durable Object for timed fallback. Nothing runs outside your Worker.
+It is deliberately small. Every provider, including WhatsApp, is a plugin behind one contract: a `send` function and, if the provider reports delivery, a webhook handler. Built-in providers cover the common vendors; a local SMS gateway is ten lines. State lives in KV, with an optional Durable Object for timed fallback. Nothing runs outside your Worker.
 
 > **Status:** pre-release. The API described here is the target for 0.1.0 and may change before then.
 
@@ -16,7 +16,7 @@ It is deliberately small. Providers are plain `fetch` calls behind a transport i
 - [Quick start](#quick-start)
 - [How delivery works](#how-delivery-works)
 - [Templates](#templates)
-- [Channels and transports](#channels-and-transports)
+- [Providers](#providers)
 - [One-time codes](#one-time-codes)
 - [Delivery status](#delivery-status)
 - [Sending from another Worker](#sending-from-another-worker)
@@ -37,6 +37,7 @@ On Workers that has some specific shape:
 - **Delivery status arrives as a webhook**, not a return value. Deciding to fall back means correlating a status event with a message you sent a moment ago, across isolates.
 - **"Fall back after N seconds" needs a timer.** Workers have no `setTimeout` that outlives the request. A Durable Object alarm is the clean answer.
 - **Credentials belong in one place.** Every Worker that sends should hold a service binding, not the WhatsApp token.
+- **Vendors change.** A gateway that is cheapest this year is not next year. Swapping one should touch a config line, not the pipeline.
 - **Codes must never be logged.** A one-time code passing through a messaging layer is a secret in transit.
 
 This package handles those four things and leaves the rest to you.
@@ -48,8 +49,9 @@ This package handles those four things and leaves the rest to you.
 - **Delivery policy at three levels**: a default, a per-template override, and a per-send override, including "every channel this template defines".
 - **Email** as a channel with the same template and transport contract.
 - **Typed templates**: define a message once with an input schema and per-channel renderings, including Meta template names and parameters. Sending a template with the wrong input is a type error.
-- **Transports are plain functions.** The Meta Cloud API transport is included. SMS and email transports are whatever `fetch` call your provider needs.
-- **Meta webhook handling**: verification handshake, signature check, status parsing, and correlation back to the original send.
+- **Pluggable providers.** One contract for WhatsApp, SMS and email. Built in: Meta Cloud API and Twilio for WhatsApp; Twilio, Vonage and a generic HTTP gateway for SMS; Resend, Postmark and Cloudflare Email for email; a console provider for development.
+- **Provider-owned webhooks.** Each provider that reports delivery verifies and parses its own status callbacks at `/webhooks/<provider>`, and the package correlates them back to the send.
+- **Several gateways on one channel.** Route by destination, for example a local gateway for domestic numbers and Twilio for the rest.
 - **Delivery-status store in KV** with a TTL, queryable by message id.
 - **Timed fallback through a Durable Object alarm**, optional. Without it, fallback still happens on a failed status.
 - **`createMessagingClient`** for other Workers: send over a service binding with the same typed template catalog.
@@ -127,32 +129,32 @@ export const templates = defineTemplates({
 **src/index.ts**
 
 ```ts
-import { createMessagingApp, metaWhatsApp, type MessagingEnv } from 'messagefall-workers';
+import { createMessagingApp, type MessagingEnv } from 'messagefall-workers';
+import { metaWhatsApp } from 'messagefall-workers/providers/meta-whatsapp';
+import { httpSms } from 'messagefall-workers/providers/http-sms';
+import { resend } from 'messagefall-workers/providers/resend';
 import { templates } from './templates';
 
 export { FallbackTimer } from 'messagefall-workers/durable';
 
-type Env = MessagingEnv & { SMS_GATEWAY_URL: string; SMS_GATEWAY_KEY: string };
+type Env = MessagingEnv & { SMS_GATEWAY_URL: string; SMS_GATEWAY_KEY: string; RESEND_API_KEY: string };
 
 export default createMessagingApp<Env>({
   templates,
-  channels: (env) => ({
+  providers: (env) => ({
     whatsapp: metaWhatsApp({
       token: env.WHATSAPP_TOKEN,
       phoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID,
       appSecret: env.WHATSAPP_APP_SECRET,
       verifyToken: env.WHATSAPP_VERIFY_TOKEN,
     }),
-    sms: {
-      send: async ({ to, text }) => {
-        const res = await fetch(env.SMS_GATEWAY_URL, {
-          method: 'POST',
-          headers: { authorization: `Bearer ${env.SMS_GATEWAY_KEY}` },
-          body: JSON.stringify({ to, text }),
-        });
-        return res.ok ? { ok: true, providerId: (await res.json()).id } : { ok: false, error: await res.text() };
-      },
-    },
+    sms: httpSms({
+      url: env.SMS_GATEWAY_URL,
+      headers: { authorization: `Bearer ${env.SMS_GATEWAY_KEY}` },
+      body: ({ to, text }) => ({ to, text }),
+      messageId: (json) => json.id,
+    }),
+    email: resend({ apiKey: env.RESEND_API_KEY, from: 'no-reply@example.com' }),
   }),
   delivery: {
     fallback: ['whatsapp', 'sms'],
@@ -168,8 +170,7 @@ That Worker now serves:
 | --- | --- |
 | `POST /send` | Send a template to a recipient. |
 | `GET /status/:id` | Delivery status of a message. |
-| `GET /webhooks/whatsapp` | Meta verification handshake. |
-| `POST /webhooks/whatsapp` | Meta status events. |
+| `GET|POST /webhooks/:provider` | Delivery-status callbacks, dispatched to the named provider. |
 
 Sending:
 
@@ -238,18 +239,66 @@ A template with only `sms` defined skips WhatsApp regardless of the policy's `fa
 
 Meta requires one-time codes to use an approved **authentication-category** template. The package does not submit templates for you; it does refuse to send a `kind: 'otp'` template over WhatsApp as free text.
 
-## Channels and transports
+## Providers
 
-A transport is one function:
+A provider is one object that knows how to send on one channel and, optionally, how to read its own delivery callbacks:
 
 ```ts
-type Transport<Rendered> = (message: Rendered & { to: string; messageId: string }) =>
-  Promise<{ ok: true; providerId?: string } | { ok: false; error: string; retryable?: boolean }>;
+interface Provider<Rendered> {
+  name: string;                                   // used in /webhooks/:name and in status records
+  channel: 'whatsapp' | 'sms' | 'email';
+  send(message: Rendered & { to: string; messageId: string }): Promise<
+    | { ok: true; providerId?: string }
+    | { ok: false; error: string; retryable?: boolean }
+  >;
+  webhook?: {
+    verify?(request: Request): Promise<Response | null>;  // e.g. Meta's GET handshake
+    parse(request: Request): Promise<StatusEvent[]>;      // must check the signature; throw to reject
+  };
+}
 ```
 
-- **WhatsApp**: `metaWhatsApp(config)` is included. It sends template and text messages through the Cloud API and owns the webhook routes. Bring your own transport for a BSP if you use one.
-- **SMS**: no vendor is assumed. Write the `fetch` call. Examples in `examples/transports` cover a generic HTTP gateway and Twilio.
-- **Email**: same contract, with `subject`, `text` and `html` on the rendered message. Examples cover Resend and Cloudflare Email Workers.
+`StatusEvent` is `{ providerId, status: 'sent' | 'delivered' | 'read' | 'failed', error?, at }`. The package correlates `providerId` back to the attempt and drives fallback from there. A provider with no `webhook` still works; its attempts simply stay `sent` until the chain timeout.
+
+### Built in
+
+Each provider is its own entry point so unused vendors never reach your bundle.
+
+| Import | Channel | Delivery status |
+| --- | --- | --- |
+| `messagefall-workers/providers/meta-whatsapp` | whatsapp | webhook, signed with the app secret |
+| `messagefall-workers/providers/twilio-whatsapp` | whatsapp | webhook, signed |
+| `messagefall-workers/providers/twilio-sms` | sms | webhook, signed |
+| `messagefall-workers/providers/vonage-sms` | sms | webhook, signed |
+| `messagefall-workers/providers/http-sms` | sms | none, or a mapping you supply |
+| `messagefall-workers/providers/resend` | email | webhook, signed |
+| `messagefall-workers/providers/postmark` | email | webhook |
+| `messagefall-workers/providers/cloudflare-email` | email | none |
+| `messagefall-workers/providers/console` | any | simulated, for development |
+
+`httpSms` is the escape hatch for a regional gateway with a plain HTTP API. You give it the URL, headers, a body mapper and how to read the message id from the response, and optionally a `webhook.parse` if the gateway posts delivery reports.
+
+### Writing your own
+
+Implement the interface above and pass it in `providers`. There is no registration step. A provider is a plain object, so it can be tested without the package. The `console` provider's source is the smallest complete example; `meta-whatsapp` is the reference for a signed webhook.
+
+### Several providers on one channel
+
+`route()` picks a provider per destination:
+
+```ts
+import { route } from 'messagefall-workers';
+
+sms: route({
+  select: ({ to }) => (to.startsWith('+94') ? 'local' : 'twilio'),
+  providers: {
+    local: httpSms({ /* domestic gateway */ }),
+    twilio: twilioSms({ /* everything else */ }),
+  },
+}),
+```
+
+Each inner provider keeps its own name, so webhooks still dispatch correctly and status records show which gateway carried the attempt. `route()` is itself a provider, so it composes.
 
 Phone numbers must be E.164 on the way in. A normaliser for one country is a few lines and belongs in your app, not here.
 
@@ -321,7 +370,7 @@ Service-binding calls stay inside Cloudflare's network. The API Worker never hol
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
 | `templates` | `Templates` | required | From `defineTemplates`. |
-| `channels` | `(env) => { whatsapp?, sms?, email? }` | required | Transports, built from bindings per request. |
+| `providers` | `(env) => { whatsapp?, sms?, email? }` | required | One provider per channel, built from bindings per request. Use `route()` for several on one channel. |
 | `delivery.fallback` | `Channel[]` | `['whatsapp', 'sms']` | Ordered chain. Each channel is tried only if the previous failed or timed out. |
 | `delivery.always` | `Channel[]` | `[]` | Channels sent in parallel with the chain on every message. |
 | `delivery.timeout` | `{ otp?: number; notification?: number }` | `{ otp: 30000, notification: 300000 }` | Milliseconds before the chain moves to the next channel when no status has arrived. Needs the Durable Object binding. |
@@ -333,17 +382,25 @@ Service-binding calls stay inside Cloudflare's network. The API Worker never hol
 
 ## Routing and webhooks
 
-Point Meta's webhook at `<public-url>/webhooks/whatsapp` and subscribe to the `messages` field. The `GET` handler answers the verification challenge with `WHATSAPP_VERIFY_TOKEN`; the `POST` handler verifies `X-Hub-Signature-256` with `WHATSAPP_APP_SECRET` and rejects anything unsigned.
+Every provider that reports delivery gets its own route at `/webhooks/<provider name>`. Point each vendor's callback there:
 
-The webhook route is the only route that needs to be public. `/send` and `/status` are meant to be reached over a service binding. If the Worker is exposed on a public hostname, put those behind your own authentication or a Cloudflare Access policy; the package does not add auth of its own.
+| Provider | Vendor setting |
+| --- | --- |
+| `meta-whatsapp` | Meta app dashboard, webhook URL `<public-url>/webhooks/meta-whatsapp`, subscribe to `messages`. The `GET` handshake uses `WHATSAPP_VERIFY_TOKEN`; `POST` is verified with `WHATSAPP_APP_SECRET`. |
+| `twilio-sms`, `twilio-whatsapp` | Status callback URL on the messaging service; verified with the auth token. |
+| `resend` | Webhook endpoint in the Resend dashboard; verified with the signing secret. |
+
+A request to `/webhooks/<name>` for a provider that is not configured returns 404. A provider whose `parse` throws returns 401. Unsigned payloads are never accepted outside development.
+
+The webhook routes are the only routes that need to be public. `/send` and `/status` are meant to be reached over a service binding. If the Worker is exposed on a public hostname, put those behind your own authentication or a Cloudflare Access policy; the package does not add auth of its own.
 
 ## Local development
 
 `wrangler dev` provides local KV and Durable Objects automatically.
 
-- Use a console transport for each channel during development. `consoleTransport()` prints the recipient and channel, and deliberately not the body for `otp` templates.
-- Meta webhooks cannot reach localhost. `POST /webhooks/whatsapp` accepts an unsigned payload when `MESSAGING_DEV_UNSIGNED=true` is set, so you can replay a status event from a file. Never set that in production.
-- The `examples/basic` directory has a runnable Worker with console transports and a script that replays failed and delivered statuses to exercise fallback.
+- Use the `console` provider for each channel during development. It prints the recipient and channel, deliberately not the body for `otp` templates, and can simulate a delivered or failed status after a delay so fallback is exercised without any vendor.
+- Vendor webhooks cannot reach localhost. `POST /webhooks/<provider>` accepts an unsigned payload when `MESSAGING_DEV_UNSIGNED=true` is set, so you can replay a status event from a file. Never set that in production.
+- The `examples/basic` directory has a runnable Worker with console providers and a script that replays failed and delivered statuses to exercise fallback.
 
 ## Compatibility
 
@@ -365,7 +422,13 @@ They do, at their SMS rates and only for codes. If you have a cheaper local gate
 Yes. Set the default policy once, override it on the templates that differ, and override again on a single send when needed. `delivery: 'all'` is the shorthand for every channel the template defines. See [Overriding the policy](#overriding-the-policy).
 
 **Does it retry within a channel?**
-Once, for transport results marked `retryable`. Beyond that it moves to the next channel. Provider-side retries are the provider's job.
+Once, for provider results marked `retryable`. Beyond that it moves to the next channel. Vendor-side retries are the vendor's job.
+
+**My SMS gateway is not on the list.**
+Use `httpSms` if it has a plain HTTP API, which covers most regional gateways. If it needs signing or a session, implement the provider interface; it is one object with a `send` function.
+
+**Can I use a WhatsApp BSP instead of Meta directly?**
+Yes. `twilio-whatsapp` is built in, and any other BSP is a provider like the rest. The template catalog does not care which provider carries a WhatsApp message.
 
 **Why a Durable Object rather than Queues for the timer?**
 An alarm per pending message is exact, cheap, and available on the free plan. Queues with a delay also work and may come later as an alternative timer, but they add a consumer to deploy.
@@ -377,7 +440,7 @@ Yes. `createMessaging(env, options)` gives you `send`, `status` and `handleWebho
 No. This is outbound only. Inbound events other than delivery statuses are acknowledged and dropped. If you need two-way chat, you want a different kind of library.
 
 **What about push notifications or Telegram?**
-Not planned. The channel contract is small enough that a custom transport takes an afternoon, but the package stays focused on the WhatsApp, SMS and email triangle.
+Not planned as channels. The provider contract is small enough that a custom one takes an afternoon, but the package stays focused on the WhatsApp, SMS and email triangle.
 
 ## Contributing
 
