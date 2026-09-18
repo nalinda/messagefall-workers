@@ -47,7 +47,7 @@ This package handles those four things and leaves the rest to you.
 - **WhatsApp first, SMS fallback**, triggered by a failed delivery status or by a timeout you configure per message kind.
 - **Always-on channels** that send in parallel with the fallback chain, for example email with every message.
 - **Delivery policy at three levels**: a default, a per-template override, and a per-send override, including "every channel this template defines".
-- **Email** as a channel with the same template and transport contract.
+- **Email** as a channel with the same template and provider contract.
 - **Typed templates**: define a message once with an input schema and per-channel renderings, including Meta template names and parameters. Sending a template with the wrong input is a type error.
 - **Pluggable providers.** One contract for WhatsApp, SMS and email. Built in: Meta Cloud API and Twilio for WhatsApp; Twilio, Vonage and a generic HTTP gateway for SMS; Resend, Postmark and Cloudflare Email for email; a console provider for development.
 - **Provider-owned webhooks.** Each provider that reports delivery verifies and parses its own status callbacks at `/webhooks/<provider>`, and the package correlates them back to the send.
