@@ -44,7 +44,7 @@ This package handles those four things and leaves the rest to you.
 ## Features
 
 - **WhatsApp first, SMS fallback**, triggered by a failed delivery status or by a timeout you configure per message kind.
-- **Email** as a channel with the same template and transport model.
+- **Email** as a channel with the same template and transport contract.
 - **Typed templates**: define a message once with an input schema and per-channel renderings, including Meta template names and parameters. Sending a template with the wrong input is a type error.
 - **Transports are plain functions.** The Meta Cloud API transport is included. SMS and email transports are whatever `fetch` call your provider needs.
 - **Meta webhook handling**: verification handshake, signature check, status parsing, and correlation back to the original send.
