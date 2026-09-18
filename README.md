@@ -1,6 +1,6 @@
 # messagefall-workers
 
-Outbound messaging for Cloudflare Workers. Send over WhatsApp first and fall back to SMS when delivery fails or times out, send email, define templates once with typed inputs, receive delivery-status webhooks, and let other Workers send through a service binding.
+Outbound messaging for Cloudflare Workers. Send over WhatsApp first and fall back to SMS when delivery fails or times out, send email alongside or instead, define templates once with typed inputs, receive delivery-status webhooks, and let other Workers send through a service binding.
 
 The name is the feature: a message *falls* from the preferred channel to the next one, driven by real delivery status rather than hope.
 
@@ -14,7 +14,7 @@ It is deliberately small. Providers are plain `fetch` calls behind a transport i
 - [Features](#features)
 - [Installation](#installation)
 - [Quick start](#quick-start)
-- [How fallback works](#how-fallback-works)
+- [How delivery works](#how-delivery-works)
 - [Templates](#templates)
 - [Channels and transports](#channels-and-transports)
 - [One-time codes](#one-time-codes)
@@ -44,6 +44,8 @@ This package handles those four things and leaves the rest to you.
 ## Features
 
 - **WhatsApp first, SMS fallback**, triggered by a failed delivery status or by a timeout you configure per message kind.
+- **Always-on channels** that send in parallel with the fallback chain, for example email with every message.
+- **Delivery policy at three levels**: a default, a per-template override, and a per-send override, including "every channel this template defines".
 - **Email** as a channel with the same template and transport contract.
 - **Typed templates**: define a message once with an input schema and per-channel renderings, including Meta template names and parameters. Sending a template with the wrong input is a type error.
 - **Transports are plain functions.** The Meta Cloud API transport is included. SMS and email transports are whatever `fetch` call your provider needs.
@@ -152,8 +154,9 @@ export default createMessagingApp<Env>({
       },
     },
   }),
-  fallback: {
-    order: ['whatsapp', 'sms'],
+  delivery: {
+    fallback: ['whatsapp', 'sms'],
+    always: ['email'],
     timeout: { otp: 30_000, notification: 5 * 60_000 },
   },
 });
@@ -175,18 +178,48 @@ curl -X POST https://messaging.example.com/send \
   -d '{"template":"loginCode","to":"+94771234567","locale":"si","input":{"code":"482913"}}'
 ```
 
-## How fallback works
+## How delivery works
 
-1. The message is rendered for the first channel in `fallback.order` that the template defines and the recipient can receive, and sent.
-2. The provider's message id is stored in KV under the message id, with status `sent`.
-3. If a Durable Object timer is bound, an alarm is set for the template kind's timeout.
-4. When a status webhook arrives it is verified, matched to the message, and stored. A `delivered` or `read` status cancels the alarm. A `failed` status triggers the next channel immediately.
-5. If the alarm fires and the status is still `sent`, the next channel is tried.
-6. When no channels remain, the message is marked `failed` with the last error.
+A delivery policy has two parts:
 
-Without the Durable Object binding, steps 3 and 5 do not happen: fallback is driven only by explicit failure statuses. That is enough for notifications. For one-time codes you want the timer, because "no status yet" after thirty seconds is the common failure mode, not an explicit rejection.
+- **`fallback`**: an ordered chain. The first channel the template defines is tried; the next is tried only if the previous one fails or times out.
+- **`always`**: a set of channels sent in parallel with the chain, every time, regardless of how the chain goes.
 
-Fallback never re-renders with a different input. The same rendered content goes to the next channel's rendering of the same template.
+With `fallback: ['whatsapp', 'sms']` and `always: ['email']`, a message goes out over WhatsApp and email at once; SMS follows only if WhatsApp fails.
+
+The chain runs like this:
+
+1. The message is rendered for the first channel in `fallback` that the template defines and the recipient can receive, and sent. Every channel in `always` that the template defines is rendered and sent at the same time.
+2. Each attempt's provider message id is stored in KV under the message id, with status `sent`.
+3. If a Durable Object timer is bound, an alarm is set for the template kind's timeout. The alarm watches the chain only.
+4. When a status webhook arrives it is verified, matched to the attempt, and stored. For the chain, `delivered` or `read` cancels the alarm and `failed` triggers the next channel immediately. For an `always` channel, the status is recorded and nothing else happens.
+5. If the alarm fires and the chain's current attempt is still `sent`, the next channel is tried.
+6. When no chain channels remain, the chain is marked `failed` with the last error. `always` channels do not affect the chain's outcome.
+
+Without the Durable Object binding, steps 3 and 5 do not happen: chain fallback is driven only by explicit failure statuses. That is enough for notifications. For one-time codes you want the timer, because "no status yet" after thirty seconds is the common failure mode, not an explicit rejection.
+
+### Overriding the policy
+
+The policy resolves in this order, most specific wins:
+
+1. **Per send.** `delivery` on the send call.
+2. **Per template.** `delivery` on the template definition.
+3. **Default.** `delivery` in the configuration.
+
+Each level may set `fallback`, `always`, or both; unset parts inherit from the next level. Two shorthands exist:
+
+- `delivery: 'all'` sends every channel the template defines in parallel, with no chain.
+- `delivery: { fallback: ['sms'] , always: [] }` sends SMS only, ignoring the default's email.
+
+```ts
+// default is WhatsApp -> SMS, always email
+await messages.send('accountLocked', { to, locale, input, delivery: 'all' });          // all three at once
+await messages.send('loginCode',     { to, locale, input, delivery: { always: [] } }); // chain only, no email
+```
+
+A channel that appears in both `fallback` and `always` is sent once, as part of `always`. A template that defines none of the resolved channels is a send-time error with a clear message.
+
+Fallback never re-renders with a different input. The same input renders each channel's version of the same template.
 
 ## Templates
 
@@ -199,8 +232,9 @@ Fallback never re-renders with a different input. The same rendered content goes
 | `whatsapp` | no | Meta template name, language per locale, and a function from input to the template's parameters. Or `text` for free-form messages inside a 24-hour service window. |
 | `sms` | no | Function from input and locale to text. |
 | `email` | no | Subject, text and optional HTML, each a function of input and locale. |
+| `delivery` | no | Policy override for this template: `{ fallback?, always? }` or `'all'`. See [Overriding the policy](#overriding-the-policy). |
 
-A template with only `sms` defined skips WhatsApp regardless of `fallback.order`. Sending to a template that defines no channel in the order is a configuration error at startup, not at send time.
+A template with only `sms` defined skips WhatsApp regardless of the policy's `fallback`. Sending to a template that defines no channel in the order is a configuration error at startup, not at send time.
 
 Meta requires one-time codes to use an approved **authentication-category** template. The package does not submit templates for you; it does refuse to send a `kind: 'otp'` template over WhatsApp as free text.
 
@@ -224,7 +258,7 @@ Phone numbers must be E.164 on the way in. A normaliser for one country is a few
 Templates with `kind: 'otp'` get four behaviours:
 
 - The send is dispatched under `ctx.waitUntil` and `POST /send` returns as soon as the message is accepted and recorded, so response time does not reveal whether a number exists.
-- The fallback timeout is the `otp` value, defaulting to thirty seconds.
+- The chain timeout is the `otp` value, defaulting to thirty seconds. `always` channels for an OTP template are allowed but unusual; most codes want the chain only.
 - Rendered bodies and inputs are never written to logs, status records, or error messages. Only the message id, channel, provider id and status are stored.
 - Codes are never queued. If every channel fails, the status is `failed` and the caller decides what to do.
 
@@ -239,15 +273,21 @@ Every send gets a message id. `GET /status/:id` returns:
   "id": "msg_01J...",
   "template": "loginCode",
   "kind": "otp",
-  "attempts": [
-    { "channel": "whatsapp", "providerId": "wamid.HBg...", "status": "failed", "at": "..." },
-    { "channel": "sms", "providerId": "8f2c...", "status": "sent", "at": "..." }
+  "chain": {
+    "status": "sent",
+    "attempts": [
+      { "channel": "whatsapp", "providerId": "wamid.HBg...", "status": "failed", "at": "..." },
+      { "channel": "sms", "providerId": "8f2c...", "status": "sent", "at": "..." }
+    ]
+  },
+  "always": [
+    { "channel": "email", "providerId": "re_...", "status": "delivered", "at": "..." }
   ],
   "status": "sent"
 }
 ```
 
-Records live in KV with a TTL, seven days by default. There is no history beyond that; if you want reporting, subscribe with `onStatus` in the configuration and write wherever you like.
+The top-level `status` is the chain's status, or the worst of the `always` attempts when there is no chain. Records live in KV with a TTL, seven days by default. There is no history beyond that; if you want reporting, subscribe with `onStatus` in the configuration and write wherever you like.
 
 ## Sending from another Worker
 
@@ -268,6 +308,7 @@ await messages.send('matchFound', {
   to: '+94771234567',
   locale: 'en',
   input: { title: 'Bicycle, Kandy', url: 'https://example.com/m/123' },
+  delivery: 'all', // optional per-send override
 });
 ```
 
@@ -281,8 +322,9 @@ Service-binding calls stay inside Cloudflare's network. The API Worker never hol
 | --- | --- | --- | --- |
 | `templates` | `Templates` | required | From `defineTemplates`. |
 | `channels` | `(env) => { whatsapp?, sms?, email? }` | required | Transports, built from bindings per request. |
-| `fallback.order` | `Channel[]` | `['whatsapp', 'sms']` | Channel preference. Email is only used when listed. |
-| `fallback.timeout` | `{ otp?: number; notification?: number }` | `{ otp: 30000, notification: 300000 }` | Milliseconds before trying the next channel when no status has arrived. Needs the Durable Object binding. |
+| `delivery.fallback` | `Channel[]` | `['whatsapp', 'sms']` | Ordered chain. Each channel is tried only if the previous failed or timed out. |
+| `delivery.always` | `Channel[]` | `[]` | Channels sent in parallel with the chain on every message. |
+| `delivery.timeout` | `{ otp?: number; notification?: number }` | `{ otp: 30000, notification: 300000 }` | Milliseconds before the chain moves to the next channel when no status has arrived. Needs the Durable Object binding. |
 | `kv` | `KVNamespace` | `env.MESSAGES_KV` | Status store. |
 | `timer` | `DurableObjectNamespace` | `env.FALLBACK_TIMER` | Optional. Enables timed fallback. |
 | `statusTtl` | `number` | `604800` | Seconds to keep status records. |
@@ -318,6 +360,9 @@ No Node compatibility flag is required.
 
 **Why not a verification service that does WhatsApp-then-SMS already?**
 They do, at their SMS rates and only for codes. If you have a cheaper local gateway, or want notifications on the same path, you need the router yourself. This package is that router.
+
+**Can I send on every channel for some messages and use fallback for others?**
+Yes. Set the default policy once, override it on the templates that differ, and override again on a single send when needed. `delivery: 'all'` is the shorthand for every channel the template defines. See [Overriding the policy](#overriding-the-policy).
 
 **Does it retry within a channel?**
 Once, for transport results marked `retryable`. Beyond that it moves to the next channel. Provider-side retries are the provider's job.
