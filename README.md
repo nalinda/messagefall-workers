@@ -49,9 +49,8 @@ This package handles those four things and leaves the rest to you.
 - **Delivery policy at three levels**: a default, a per-template override, and a per-send override, including "every channel this template defines".
 - **Email** as a channel with the same template and provider contract.
 - **Typed templates**: define a message once with an input schema and per-channel renderings, including Meta template names and parameters. Sending a template with the wrong input is a type error.
-- **Pluggable providers.** One contract for WhatsApp, SMS and email. Built in: Meta Cloud API and Twilio for WhatsApp; Twilio, Vonage and a generic HTTP gateway for SMS; Resend, Postmark and Cloudflare Email for email; a console provider for development.
+- **Pluggable providers.** One contract for WhatsApp, SMS and email. The first release ships Meta Cloud API for WhatsApp, a generic HTTP gateway for SMS, Gmail for email, and a console provider for development. More vendors follow as separate entry points.
 - **Provider-owned webhooks.** Each provider that reports delivery verifies and parses its own status callbacks at `/webhooks/<provider>`, and the package correlates them back to the send.
-- **Several gateways on one channel.** Route by destination, for example a local gateway for domestic numbers and Twilio for the rest.
 - **Delivery-status store in KV** with a TTL, queryable by message id.
 - **Timed fallback through a Durable Object alarm**, optional. Without it, fallback still happens on a failed status.
 - **`createMessagingClient`** for other Workers: send over a service binding with the same typed template catalog.
@@ -93,7 +92,8 @@ Secrets, set with `wrangler secret put`:
 | `WHATSAPP_PHONE_NUMBER_ID` | The sending number's id. |
 | `WHATSAPP_APP_SECRET` | Verifies webhook signatures. |
 | `WHATSAPP_VERIFY_TOKEN` | Answers Meta's webhook verification handshake. |
-| `SMS_GATEWAY_URL`, `SMS_GATEWAY_KEY` | Whatever your SMS provider needs. |
+| `SMS_GATEWAY_URL`, `SMS_GATEWAY_KEY` | Whatever your SMS gateway needs. |
+| `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` | OAuth credentials for the sending Gmail account, scope `gmail.send`. |
 
 **src/templates.ts**
 
@@ -132,12 +132,15 @@ export const templates = defineTemplates({
 import { createMessagingApp, type MessagingEnv } from 'messagefall-workers';
 import { metaWhatsApp } from 'messagefall-workers/providers/meta-whatsapp';
 import { httpSms } from 'messagefall-workers/providers/http-sms';
-import { resend } from 'messagefall-workers/providers/resend';
+import { gmail } from 'messagefall-workers/providers/gmail';
 import { templates } from './templates';
 
 export { FallbackTimer } from 'messagefall-workers/durable';
 
-type Env = MessagingEnv & { SMS_GATEWAY_URL: string; SMS_GATEWAY_KEY: string; RESEND_API_KEY: string };
+type Env = MessagingEnv & {
+  SMS_GATEWAY_URL: string; SMS_GATEWAY_KEY: string;
+  GMAIL_CLIENT_ID: string; GMAIL_CLIENT_SECRET: string; GMAIL_REFRESH_TOKEN: string;
+};
 
 export default createMessagingApp<Env>({
   templates,
@@ -154,7 +157,12 @@ export default createMessagingApp<Env>({
       body: ({ to, text }) => ({ to, text }),
       messageId: (json) => json.id,
     }),
-    email: resend({ apiKey: env.RESEND_API_KEY, from: 'no-reply@example.com' }),
+    email: gmail({
+      clientId: env.GMAIL_CLIENT_ID,
+      clientSecret: env.GMAIL_CLIENT_SECRET,
+      refreshToken: env.GMAIL_REFRESH_TOKEN,
+      from: 'no-reply@example.com',
+    }),
   }),
   delivery: {
     fallback: ['whatsapp', 'sms'],
@@ -264,19 +272,20 @@ interface Provider<Rendered> {
 
 Each provider is its own entry point so unused vendors never reach your bundle.
 
+Shipped in 0.1.0:
+
 | Import | Channel | Delivery status |
 | --- | --- | --- |
 | `messagefall-workers/providers/meta-whatsapp` | whatsapp | webhook, signed with the app secret |
-| `messagefall-workers/providers/twilio-whatsapp` | whatsapp | webhook, signed |
-| `messagefall-workers/providers/twilio-sms` | sms | webhook, signed |
-| `messagefall-workers/providers/vonage-sms` | sms | webhook, signed |
-| `messagefall-workers/providers/http-sms` | sms | none, or a mapping you supply |
-| `messagefall-workers/providers/resend` | email | webhook, signed |
-| `messagefall-workers/providers/postmark` | email | webhook |
-| `messagefall-workers/providers/cloudflare-email` | email | none |
+| `messagefall-workers/providers/http-sms` | sms | none, or a `webhook.parse` you supply |
+| `messagefall-workers/providers/gmail` | email | none |
 | `messagefall-workers/providers/console` | any | simulated, for development |
 
+Planned as separate entry points after 0.1.0: `twilio-whatsapp`, `twilio-sms`, `vonage-sms`, `resend`, `postmark`, `cloudflare-email`, and `route()` for several providers on one channel.
+
 `httpSms` is the escape hatch for a regional gateway with a plain HTTP API. You give it the URL, headers, a body mapper and how to read the message id from the response, and optionally a `webhook.parse` if the gateway posts delivery reports.
+
+`gmail` sends through the Gmail API with an OAuth refresh token for the sending account. Gmail reports no delivery status, so email attempts stay `sent`; that is fine for an always-on channel and is why email is not the default first link in a fallback chain.
 
 ### Writing your own
 
@@ -284,21 +293,7 @@ Implement the interface above and pass it in `providers`. There is no registrati
 
 ### Several providers on one channel
 
-`route()` picks a provider per destination:
-
-```ts
-import { route } from 'messagefall-workers';
-
-sms: route({
-  select: ({ to }) => (to.startsWith('+94') ? 'local' : 'twilio'),
-  providers: {
-    local: httpSms({ /* domestic gateway */ }),
-    twilio: twilioSms({ /* everything else */ }),
-  },
-}),
-```
-
-Each inner provider keeps its own name, so webhooks still dispatch correctly and status records show which gateway carried the attempt. `route()` is itself a provider, so it composes.
+Planned after 0.1.0: `route()` picks a provider per destination, for example a domestic gateway for local numbers and a global carrier for the rest, and is itself a provider so it composes. Until then, one provider per channel.
 
 Phone numbers must be E.164 on the way in. A normaliser for one country is a few lines and belongs in your app, not here.
 
@@ -370,7 +365,7 @@ Service-binding calls stay inside Cloudflare's network. The API Worker never hol
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
 | `templates` | `Templates` | required | From `defineTemplates`. |
-| `providers` | `(env) => { whatsapp?, sms?, email? }` | required | One provider per channel, built from bindings per request. Use `route()` for several on one channel. |
+| `providers` | `(env) => { whatsapp?, sms?, email? }` | required | One provider per channel, built from bindings per request. |
 | `delivery.fallback` | `Channel[]` | `['whatsapp', 'sms']` | Ordered chain. Each channel is tried only if the previous failed or timed out. |
 | `delivery.always` | `Channel[]` | `[]` | Channels sent in parallel with the chain on every message. |
 | `delivery.timeout` | `{ otp?: number; notification?: number }` | `{ otp: 30000, notification: 300000 }` | Milliseconds before the chain moves to the next channel when no status has arrived. Needs the Durable Object binding. |
@@ -387,8 +382,8 @@ Every provider that reports delivery gets its own route at `/webhooks/<provider 
 | Provider | Vendor setting |
 | --- | --- |
 | `meta-whatsapp` | Meta app dashboard, webhook URL `<public-url>/webhooks/meta-whatsapp`, subscribe to `messages`. The `GET` handshake uses `WHATSAPP_VERIFY_TOKEN`; `POST` is verified with `WHATSAPP_APP_SECRET`. |
-| `twilio-sms`, `twilio-whatsapp` | Status callback URL on the messaging service; verified with the auth token. |
-| `resend` | Webhook endpoint in the Resend dashboard; verified with the signing secret. |
+| `http-sms` | Only if you supplied `webhook.parse`: point the gateway's delivery-report URL at `<public-url>/webhooks/http-sms`. |
+| `gmail` | None. Gmail reports no delivery status. |
 
 A request to `/webhooks/<name>` for a provider that is not configured returns 404. A provider whose `parse` throws returns 401. Unsigned payloads are never accepted outside development.
 
@@ -428,7 +423,7 @@ Once, for provider results marked `retryable`. Beyond that it moves to the next 
 Use `httpSms` if it has a plain HTTP API, which covers most regional gateways. If it needs signing or a session, implement the provider interface; it is one object with a `send` function.
 
 **Can I use a WhatsApp BSP instead of Meta directly?**
-Yes. `twilio-whatsapp` is built in, and any other BSP is a provider like the rest. The template catalog does not care which provider carries a WhatsApp message.
+Yes, as a provider like any other; a Twilio WhatsApp provider is planned after 0.1.0. The template catalog does not care which provider carries a WhatsApp message.
 
 **Why a Durable Object rather than Queues for the timer?**
 An alarm per pending message is exact, cheap, and available on the free plan. Queues with a delay also work and may come later as an alternative timer, but they add a consumer to deploy.
