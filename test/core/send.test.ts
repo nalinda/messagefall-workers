@@ -19,6 +19,7 @@ import { PolicyError } from '../../src/core/policy.js';
 import { kvStatusStore } from '../../src/core/status.js';
 import { consoleProvider } from '../../src/providers/console/index.js';
 import type {
+  Channel,
   OutboundMeta,
   RenderedEmail,
   RenderedSms,
@@ -133,10 +134,10 @@ function testContext(): TestExecutionContext & { promises: Promise<unknown>[] } 
 }
 
 /**
- * SMS provider whose `send` records the call and blocks until `release()` is called.
+ * Provider whose `send` records the call and blocks until `release()` is called.
  */
-function gatedSmsProvider(name: string, providerId: string) {
-  const calls: (RenderedSms & OutboundMeta)[] = [];
+function gatedProvider<R>(channel: Channel, name: string, providerId: string) {
+  const calls: (R & OutboundMeta)[] = [];
   const { promise: gate, resolve: release } = Promise.withResolvers<void>();
   return {
     calls,
@@ -145,14 +146,24 @@ function gatedSmsProvider(name: string, providerId: string) {
     },
     provider: {
       name,
-      channel: 'sms' as const,
-      send: async (message: RenderedSms & OutboundMeta): Promise<SendResult> => {
+      channel,
+      send: async (message: R & OutboundMeta): Promise<SendResult> => {
         calls.push(message);
         await gate;
         return { ok: true, providerId };
       },
     },
   };
+}
+
+/**
+ * Polls until `isDone` returns true or `timeoutMs` elapses.
+ */
+async function waitFor(isDone: () => boolean, timeoutMs = 500): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!isDone() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 /**
@@ -265,6 +276,9 @@ describe('Issue #3: createMessaging send pipeline', () => {
 
         const allAttempts = [...record!.chain.attempts, ...record!.always];
         expect(allAttempts.some((a) => a.channel === 'sms')).toBe(false);
+
+        expect(record!.chain.status).toBe('sent');
+        expect(record!.status).toBe('sent');
       } finally {
         silenced.restore();
       }
@@ -543,10 +557,14 @@ describe('Issue #3: createMessaging send pipeline', () => {
         { ok: false, error: 'rate limited again', retryable: true },
       ]);
 
+      const events: StatusCallbackEvent[] = [];
       const messaging = api.createMessaging(newEnv(), {
         templates,
         providers: () => ({ sms }),
         delivery: { fallback: [], always: ['sms'] },
+        onStatus: (event) => {
+          events.push(event);
+        },
       });
 
       const { id } = await messaging.send({
@@ -570,6 +588,10 @@ describe('Issue #3: createMessaging send pipeline', () => {
         status: 'failed',
         error: 'rate limited again',
       });
+      expect(record!.status).toBe('failed');
+
+      // onStatus fires once per settled result, not once per retry attempt.
+      expect(events).toEqual([{ id, channel: 'sms', provider: 'flaky-sms', status: 'failed' }]);
     });
 
     it('records sent when the single retry succeeds', async () => {
@@ -578,10 +600,14 @@ describe('Issue #3: createMessaging send pipeline', () => {
         { ok: true, providerId: 'sms-retry-ok' },
       ]);
 
+      const events: StatusCallbackEvent[] = [];
       const messaging = api.createMessaging(newEnv(), {
         templates,
         providers: () => ({ sms }),
         delivery: { fallback: [], always: ['sms'] },
+        onStatus: (event) => {
+          events.push(event);
+        },
       });
 
       const { id } = await messaging.send({
@@ -602,6 +628,8 @@ describe('Issue #3: createMessaging send pipeline', () => {
         providerId: 'sms-retry-ok',
         status: 'sent',
       });
+      expect(record!.status).toBe('sent');
+      expect(events).toEqual([{ id, channel: 'sms', provider: 'flaky-sms', status: 'sent' }]);
     });
 
     it('retries a retryable failure exactly once on the fallback chain path too', async () => {
@@ -610,10 +638,14 @@ describe('Issue #3: createMessaging send pipeline', () => {
         { ok: false, error: 'rate limited again', retryable: true },
       ]);
 
+      const events: StatusCallbackEvent[] = [];
       const messaging = api.createMessaging(newEnv(), {
         templates,
         providers: () => ({ sms }),
         delivery: { fallback: ['sms'], always: [] },
+        onStatus: (event) => {
+          events.push(event);
+        },
       });
 
       const { id } = await messaging.send({
@@ -636,6 +668,10 @@ describe('Issue #3: createMessaging send pipeline', () => {
         error: 'rate limited again',
       });
       expect(record!.always).toHaveLength(0);
+      // The chain is exhausted: chain and overall status are failed.
+      expect(record!.chain.status).toBe('failed');
+      expect(record!.status).toBe('failed');
+      expect(events).toEqual([{ id, channel: 'sms', provider: 'flaky-sms', status: 'failed' }]);
     });
 
     it('does not retry a failure that is not retryable', async () => {
@@ -712,6 +748,72 @@ describe('Issue #3: createMessaging send pipeline', () => {
 
   });
 
+  describe('chain and always run in parallel', () => {
+    it('calls the first chain provider and the always provider before either has settled', async () => {
+      const wa = gatedProvider<RenderedWhatsApp>('whatsapp', 'gated-wa', 'wa-pid');
+      const email = gatedProvider<RenderedEmail>('email', 'gated-email', 'email-pid');
+
+      const messaging = api.createMessaging(newEnv(), {
+        templates,
+        providers: () => ({ whatsapp: wa.provider, email: email.provider }),
+        delivery: { fallback: ['whatsapp', 'sms'], always: ['email'] },
+      });
+
+      const pending = messaging.send({
+        template: 'orderUpdate',
+        to: TO,
+        locale: 'en',
+        input: INPUT,
+      });
+
+      // Both providers must have been invoked while both are still held open.
+      await waitFor(() => wa.calls.length === 1 && email.calls.length === 1);
+      expect(wa.calls).toHaveLength(1);
+      expect(email.calls).toHaveLength(1);
+
+      wa.release();
+      email.release();
+      const { id } = await pending;
+
+      const record = await messaging.status(id);
+      expect(record).not.toBeNull();
+      expect(record!.chain.attempts[0]).toMatchObject({ channel: 'whatsapp', status: 'sent' });
+      expect(record!.always[0]).toMatchObject({ channel: 'email', status: 'sent' });
+    });
+  });
+
+  describe('kv option', () => {
+    it('stores the record in options.kv rather than env.MESSAGES_KV when given', async () => {
+      const envKv = memoryKV();
+      const optionKv = memoryKV();
+      const sms = recordingProvider<RenderedSms>('sms', 'rec-sms');
+
+      const messaging = api.createMessaging(
+        { MESSAGES_KV: envKv },
+        {
+          templates,
+          providers: () => ({ sms }),
+          delivery: { fallback: ['sms'], always: [] },
+          kv: optionKv,
+        }
+      );
+
+      const { id } = await messaging.send({
+        template: 'smsOnly',
+        to: TO,
+        locale: 'en',
+        input: { body: 'hello' },
+      });
+
+      expect(optionKv.dump().has(`msg:${id}`)).toBe(true);
+      expect(envKv.dump().has(`msg:${id}`)).toBe(false);
+
+      const record = await messaging.status(id);
+      expect(record).not.toBeNull();
+      expect(record!.id).toBe(id);
+    });
+  });
+
   describe('provider-id index', () => {
     it('indexes each attempt providerId back to { id, channel, provider }', async () => {
       const env = newEnv();
@@ -752,7 +854,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
   describe('otp sends and ExecutionContext', () => {
     it('with ctx: resolves { id } after the record is created and runs delivery under ctx.waitUntil', async () => {
       const env = newEnv();
-      const gated = gatedSmsProvider('otp-sms', 'otp-pid');
+      const gated = gatedProvider<RenderedSms>('sms', 'otp-sms', 'otp-pid');
       const ctx = testContext();
 
       const messaging = api.createMessaging(env, {
@@ -825,8 +927,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
         ctx
       );
 
-      // Nothing was deferred to waitUntil, and the attempt is already recorded.
-      expect(ctx.promises).toHaveLength(0);
+      // The attempt is already recorded when send() resolves: delivery ran inline.
       expect(wa.calls).toHaveLength(1);
       const record = await messaging.status(id);
       expect(record).not.toBeNull();
