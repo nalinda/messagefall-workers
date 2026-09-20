@@ -14,6 +14,7 @@
  */
 
 import type { DurableObjectNamespace } from '@cloudflare/workers-types';
+import { Database, type SQLQueryBindings } from 'bun:sqlite';
 import { mock, setSystemTime } from 'bun:test';
 
 import type { MessagingEnv } from '../../src/env.js';
@@ -28,18 +29,15 @@ import type {
 import { defineTemplates } from '../../src/templates.js';
 
 /**
- * Arguments accepted by `FallbackTimer#arm` and `armTimer`.
+ * Arguments accepted by `FallbackTimer#arm` and `armTimer` (the issue's literal interface).
+ * The recipient is not part of it: `advanceChain` reads it from the `in:<id>` KV entry that
+ * `send` writes (#7).
  */
 export interface ArmArgs {
   id: string;
   afterMs: number;
   input: unknown;
   locale: string;
-  /**
-   * Recipient for the fallback attempt. The record does not carry it, so the timer must (the
-   * `in:<id>` key is not written by send); `advanceChain` renders `to` from the stored value.
-   */
-  to?: string;
 }
 
 /**
@@ -115,8 +113,24 @@ function inertTimerApi(): TimerApi {
 }
 
 /**
+ * True only for "the module at `specifier` itself does not exist". Any other import-time error
+ * (a broken dependency, a throw at module evaluation) is a real failure and must surface.
+ */
+function isModuleMissing(error: unknown, specifier: string): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  const { code, message } = error as { code?: unknown; message?: unknown };
+  if (typeof message !== 'string' || !message.includes(specifier)) {
+    return false;
+  }
+  return code === 'ERR_MODULE_NOT_FOUND' || message.startsWith('Cannot find module');
+}
+
+/**
  * Loads the timer API from `src/durable/fallback-timer.js` (class) and `src/core/timer.js`
- * (helpers), each falling back to the other and finally to the inert stubs.
+ * (helpers), each falling back to the other and finally to the inert stubs. Only a missing
+ * module falls back; every other import error is rethrown.
  *
  * @returns The timer API to test against.
  */
@@ -131,7 +145,10 @@ export async function loadTimerApi(): Promise<TimerApi> {
       loaded.FallbackTimer ??= mod.FallbackTimer;
       loaded.armTimer ??= mod.armTimer;
       loaded.cancelTimer ??= mod.cancelTimer;
-    } catch {
+    } catch (error) {
+      if (!isModuleMissing(error, specifier)) {
+        throw error;
+      }
       // not implemented yet (RED phase)
     }
   }
@@ -158,7 +175,30 @@ export interface FakeClock {
 }
 
 /**
- * The key/value storage API of a Durable Object (the SQLite-backed KV surface).
+ * A row cursor in the shape of workerd's `SqlStorageCursor`.
+ */
+export interface FakeSqlCursor<Row> extends Iterable<Row> {
+  columnNames: string[];
+  rowsRead: number;
+  rowsWritten: number;
+  toArray(): Row[];
+  one(): Row;
+  raw(): unknown[][];
+}
+
+/**
+ * The `ctx.storage.sql` surface, backed by an in-memory `bun:sqlite` database.
+ */
+export interface FakeSqlStorage {
+  exec<Row extends Record<string, unknown> = Record<string, unknown>>(
+    query: string,
+    ...bindings: unknown[]
+  ): FakeSqlCursor<Row>;
+  databaseSize: number;
+}
+
+/**
+ * The storage API of a SQLite-backed Durable Object: the key/value surface plus `sql`.
  */
 export interface FakeStorage {
   get<T = unknown>(key: string): Promise<T | undefined>;
@@ -174,8 +214,11 @@ export interface FakeStorage {
   deleteAlarm(): Promise<void>;
   sync(): Promise<void>;
   transaction<T>(closure: (txn: FakeStorage) => Promise<T>): Promise<T>;
+  transactionSync<T>(closure: () => T): T;
+  sql: FakeSqlStorage;
   /**
-   * Test-only snapshot of every stored entry.
+   * Test-only snapshot of everything stored on either surface: every key/value entry, plus
+   * one `sql:<table>` entry (its rows) for every user table that has rows.
    */
   dump(): Map<string, unknown>;
 }
@@ -232,8 +275,68 @@ interface Scheduled {
   at: number;
 }
 
+const SQL_PLACEHOLDER = /\?|:\w+|\$\w+|@\w+/;
+
+/**
+ * Rows of every user table (internal `_cf_*` / `sqlite_*` tables excluded), by table name.
+ */
+function userTables(db: Database): Map<string, Record<string, unknown>[]> {
+  const names = db
+    .query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table'")
+    .all()
+    .map((row) => row.name)
+    .filter((tableName) => !tableName.startsWith('_cf_') && !tableName.startsWith('sqlite_'));
+  const out = new Map<string, Record<string, unknown>[]>();
+  for (const tableName of names) {
+    out.set(tableName, db.query<Record<string, unknown>, []>(`SELECT * FROM "${tableName}"`).all());
+  }
+  return out;
+}
+
+function createSql(db: Database): FakeSqlStorage {
+  return {
+    exec<Row extends Record<string, unknown> = Record<string, unknown>>(
+      query: string,
+      ...bindings: unknown[]
+    ): FakeSqlCursor<Row> {
+      const statements = query
+        .split(';')
+        .map((part) => part.trim())
+        .filter((part) => part.length > 0);
+      let rows: Row[] = [];
+      let columnNames: string[] = [];
+      let rowsWritten = 0;
+      for (const statement of statements) {
+        const prepared = db.prepare<Row, SQLQueryBindings[]>(statement);
+        const before = db.query<{ n: number }, []>('SELECT total_changes() AS n').get()?.n ?? 0;
+        const args = SQL_PLACEHOLDER.test(statement) ? (bindings as SQLQueryBindings[]) : [];
+        rows = prepared.all(...args);
+        columnNames = prepared.columnNames;
+        const after = db.query<{ n: number }, []>('SELECT total_changes() AS n').get()?.n ?? 0;
+        rowsWritten += after - before;
+      }
+      return {
+        columnNames,
+        rowsRead: rows.length,
+        rowsWritten,
+        toArray: () => rows,
+        one: () => {
+          if (rows.length !== 1) {
+            throw new Error(`Expected exactly one result, got ${rows.length}`);
+          }
+          return rows[0];
+        },
+        raw: () => rows.map((row) => columnNames.map((column) => Reflect.get(row, column))),
+        [Symbol.iterator]: () => rows[Symbol.iterator](),
+      };
+    },
+    databaseSize: 0,
+  };
+}
+
 function createStorage(schedule: Scheduled[], name: string): FakeStorage {
   const data = new Map<string, unknown>();
+  const db = new Database(':memory:');
   let alarm: number | null = null;
 
   const setAlarm = (scheduledTime: number | Date): Promise<void> => {
@@ -292,6 +395,9 @@ function createStorage(schedule: Scheduled[], name: string): FakeStorage {
     }) as FakeStorage['delete'],
     deleteAll: () => {
       data.clear();
+      for (const tableName of userTables(db).keys()) {
+        db.run(`DROP TABLE IF EXISTS "${tableName}"`);
+      }
       return Promise.resolve();
     },
     list: (() => Promise.resolve(new Map(data))) as FakeStorage['list'],
@@ -300,7 +406,17 @@ function createStorage(schedule: Scheduled[], name: string): FakeStorage {
     deleteAlarm,
     sync: () => Promise.resolve(),
     transaction: (closure) => closure(storage),
-    dump: () => new Map(data),
+    transactionSync: (closure) => closure(),
+    sql: createSql(db),
+    dump: () => {
+      const snapshot = new Map<string, unknown>(data);
+      for (const [tableName, rows] of userTables(db)) {
+        if (rows.length > 0) {
+          snapshot.set(`sql:${tableName}`, rows);
+        }
+      }
+      return snapshot;
+    },
   };
   return storage;
 }

@@ -158,7 +158,6 @@ class Harness {
     afterMs: number;
     input: unknown;
     locale: string;
-    to: string;
   }): Promise<void> {
     await this.json(await this.post('/__test/arm', args));
   }
@@ -354,13 +353,13 @@ describe('Issue #8: FallbackTimer under miniflare', () => {
     const b = 'msg_workerd_B';
     const armedAt = Date.now();
     for (const id of [a, b]) {
-      await w.arm({ id, afterMs: OTP_TIMEOUT, input: { code: CODE }, locale: 'en', to: TO });
+      await w.arm({ id, afterMs: OTP_TIMEOUT, input: { code: CODE }, locale: 'en' });
     }
     expectArmed(await w.inspect(a), OTP_TIMEOUT, armedAt);
     expectArmed(await w.inspect(b), OTP_TIMEOUT, armedAt);
 
     // Re-arming the same id replaces the alarm in the same object rather than adding one.
-    await w.arm({ id: a, afterMs: OTP_TIMEOUT * 2, input: { code: CODE }, locale: 'en', to: TO });
+    await w.arm({ id: a, afterMs: OTP_TIMEOUT * 2, input: { code: CODE }, locale: 'en' });
     expectArmed(await w.inspect(a), OTP_TIMEOUT * 2, armedAt);
     expectArmed(await w.inspect(b), OTP_TIMEOUT, armedAt);
 

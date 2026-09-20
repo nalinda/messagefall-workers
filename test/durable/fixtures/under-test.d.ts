@@ -8,7 +8,7 @@ declare module 'messagefall-under-test/fallback-timer' {
   import type { DurableObject } from 'cloudflare:workers';
 
   export class FallbackTimer extends DurableObject {
-    arm(args: { id: string; afterMs: number; input: unknown; locale: string; to?: string }): Promise<void>;
+    arm(args: { id: string; afterMs: number; input: unknown; locale: string }): Promise<void>;
     cancel(id: string): Promise<void>;
     alarm(): Promise<void>;
   }
@@ -19,7 +19,7 @@ declare module 'messagefall-under-test/timer' {
 
   export function armTimer(
     ns: DurableObjectNamespace | undefined,
-    args: { id: string; afterMs: number; input: unknown; locale: string; to?: string }
+    args: { id: string; afterMs: number; input: unknown; locale: string }
   ): Promise<void>;
   export function cancelTimer(ns: DurableObjectNamespace | undefined, id: string): Promise<void>;
 }

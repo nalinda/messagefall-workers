@@ -149,7 +149,6 @@ async function handleTest(url: URL, request: Request, env: Env): Promise<Respons
         afterMs: number;
         input: unknown;
         locale: string;
-        to?: string;
       };
       await armTimer(env.FALLBACK_TIMER, args);
       return Response.json({ ok: true });

@@ -59,6 +59,20 @@ function optionsFor(
   };
 }
 
+/**
+ * Seeds a record whose whatsapp attempt is `sent`, plus the `in:<id>` entry `send` writes for
+ * the async fallback path (#7): recipient, locale and raw input, which is where
+ * `advanceChain` takes the recipient from.
+ */
+async function seedSent(
+  store: StatusStore,
+  kv: MessagingEnv['MESSAGES_KV'],
+  record: MessageRecord
+): Promise<void> {
+  await store.create(record);
+  await kv.put(`in:${record.id}`, JSON.stringify({ input: { code: CODE }, to: TO, locale: 'en' }));
+}
+
 function sentRecord(id: string): MessageRecord {
   return {
     id,
@@ -112,6 +126,10 @@ async function chainOf(store: StatusStore, id: string): Promise<MessageRecord['c
   return record.chain;
 }
 
+function isTimerLine(line: string): boolean {
+  return /timer|timed fallback/i.test(line);
+}
+
 function statusRequest(providerId: string, status: DeliveryStatus): Request {
   return new Request('https://worker.test/webhooks/x', {
     method: 'POST',
@@ -124,6 +142,7 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
   let api: TimerApi;
   let providers: TimerProviders;
   let env: MessagingEnv;
+  let kv: MessagingEnv['MESSAGES_KV'];
   let store: StatusStore;
   let ns: FakeNamespace;
   let clock: FakeClock;
@@ -142,7 +161,7 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
   beforeEach(async () => {
     api = await loadTimerApi();
     providers = timerProviders();
-    const kv = memoryKV();
+    kv = memoryKV();
     const runtime = createFakeDurableRuntime(api.FallbackTimer, () => env, T0);
     ns = runtime.ns;
     clock = runtime.clock;
@@ -158,7 +177,7 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
   describe('arm → timeout → alarm → cleanup lifecycle (local status store, mocked clock)', () => {
     it('armTimer schedules the alarm, the alarm fires advanceChain({ reason: "timeout" }) producing an SMS attempt, and cancelTimer on delivered empties storage', async () => {
       const id = 'msg_01J9FB0000000000000000TM01';
-      await store.create(sentRecord(id));
+      await seedSent(store, kv, sentRecord(id));
       await store.indexProviderId('wa_1', { id, channel: 'whatsapp', provider: 'wa' });
 
       await api.armTimer(env.FALLBACK_TIMER, {
@@ -166,7 +185,6 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
         afterMs: OTP_TIMEOUT,
         input: { code: CODE },
         locale: 'en',
-        to: TO,
       });
 
       // One object per message, addressed by idFromName(messageId), holding the record.
@@ -221,7 +239,7 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
 
     it('an alarm whose advance exhausts the chain leaves storage empty (terminal reached by the alarm itself)', async () => {
       const id = 'msg_01J9FB0000000000000000TM02';
-      await store.create(sentRecord(id));
+      await seedSent(store, kv, sentRecord(id));
       providers.sms.failNext('gateway down');
 
       await api.armTimer(env.FALLBACK_TIMER, {
@@ -229,7 +247,6 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
         afterMs: OTP_TIMEOUT,
         input: { code: CODE },
         locale: 'en',
-        to: TO,
       });
       await clock.advance(OTP_TIMEOUT);
 
@@ -244,7 +261,7 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
 
     it('an alarm that finds the chain already terminal makes no attempt and cleans up', async () => {
       const id = 'msg_01J9FB0000000000000000TM03';
-      await store.create({
+      await seedSent(store, kv, {
         ...sentRecord(id),
         chain: {
           status: 'delivered',
@@ -258,7 +275,6 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
         afterMs: OTP_TIMEOUT,
         input: { code: CODE },
         locale: 'en',
-        to: TO,
       });
       expect(ns.storageOf(id).size).toBeGreaterThan(0);
 
@@ -273,8 +289,8 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
 
     it('arming the same message again reuses the one object (idFromName) and replaces its alarm', async () => {
       const id = 'msg_01J9FB0000000000000000TM04';
-      await store.create(sentRecord(id));
-      const args = { id, afterMs: OTP_TIMEOUT, input: { code: CODE }, locale: 'en', to: TO };
+      await seedSent(store, kv, sentRecord(id));
+      const args = { id, afterMs: OTP_TIMEOUT, input: { code: CODE }, locale: 'en' };
 
       await api.armTimer(env.FALLBACK_TIMER, args);
       await clock.advance(10_000);
@@ -505,26 +521,27 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
   });
 
   describe('binding absent', () => {
-    it('armTimer and cancelTimer are no-ops, one startup log line says timed fallback is off, and explicit failures still advance', async () => {
-      const kv = memoryKV();
-      const bare = timerEnv(kv);
-      const bareStore = kvStatusStore(kv);
+    it('armTimer and cancelTimer are no-ops, each createMessagingApp instance logs exactly one non-error "timed fallback off" line on its first request, and explicit failures still advance', async () => {
+      const bareKv = memoryKV();
+      const bare = timerEnv(bareKv);
+      const bareStore = kvStatusStore(bareKv);
       const options = optionsFor(providers);
+      const sendBody = (to: string): string =>
+        JSON.stringify({ template: 'loginCode', to, locale: 'en', input: { code: CODE } });
+      const sendInit = (to: string): RequestInit => ({
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: sendBody(to),
+      });
 
-      // Positive control: the same app with the binding does arm.
+      // Positive control: the same options with the binding do arm.
       const appWithTimer = createMessagingApp(options);
-      const armedResponse = await appWithTimer.request(
-        '/send',
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ template: 'loginCode', to: TO, locale: 'en', input: { code: CODE } }),
-        },
-        env
-      );
+      const armedResponse = await appWithTimer.request('/send', sendInit(TO), env);
       expect(armedResponse.status).toBe(200);
       expect(ns.calls.filter((c) => c.method === 'arm')).toHaveLength(1);
 
+      // The scope of "startup" is one createMessagingApp instance: this test does not depend
+      // on any module-level once-flag another test file may already have consumed.
       const app = createMessagingApp(options);
       const captured = captureConsole(['log', 'info', 'warn']);
       const errors = captureConsole(['error']);
@@ -535,22 +552,13 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
           afterMs: OTP_TIMEOUT,
           input: { code: CODE },
           locale: 'en',
-          to: TO,
         });
         expect(await armed).toBeUndefined();
         const cancelled = api.cancelTimer(undefined, 'msg_none');
         expect(await cancelled).toBeUndefined();
 
         for (const to of [TO, '+94770000002']) {
-          const response = await app.request(
-            '/send',
-            {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ template: 'loginCode', to, locale: 'en', input: { code: CODE } }),
-            },
-            bare
-          );
+          const response = await app.request('/send', sendInit(to), bare);
           expect(response.status).toBe(200);
           const body = (await response.json()) as { id: string };
           ids = [...ids, body.id];
@@ -560,11 +568,24 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
         errors.restore();
       }
 
-      // Exactly one line, at startup, not an error, and without content.
-      const timerLines = captured.logs.filter((line) => /timer|timed fallback/i.test(line));
+      // Exactly one line for this instance across two requests, not an error, without content.
+      const timerLines = captured.logs.filter((line) => isTimerLine(line));
       expect(timerLines).toHaveLength(1);
       expect(timerLines[0]).not.toContain(CODE);
-      expect(errors.logs.filter((line) => /timer|timed fallback/i.test(line))).toHaveLength(0);
+      expect(errors.logs.filter((line) => isTimerLine(line))).toHaveLength(0);
+
+      // A second instance without the binding logs its own single line.
+      const secondApp = createMessagingApp(options);
+      const secondCapture = captureConsole(['log', 'info', 'warn']);
+      try {
+        for (const to of [TO, '+94770000003']) {
+          const response = await secondApp.request('/send', sendInit(to), bare);
+          expect(response.status).toBe(200);
+        }
+      } finally {
+        secondCapture.restore();
+      }
+      expect(secondCapture.logs.filter((line) => isTimerLine(line))).toHaveLength(1);
 
       // No timer was touched for the bare env; the sends still went out.
       expect(ns.calls.filter((c) => c.method === 'arm')).toHaveLength(1);
