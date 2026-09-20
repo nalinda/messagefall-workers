@@ -45,7 +45,7 @@ function missingProviderFields(p: Partial<Provider>): string[] {
  * @param p - The candidate provider.
  * @returns One message per problem; empty when the slot is sound.
  */
-export function slotProblems(slot: string, p: Partial<Provider>): string[] {
+function slotProblems(slot: string, p: Partial<Provider>): string[] {
   const problems: string[] = [];
   if (!KNOWN_SLOTS.has(slot)) {
     // Same union `providerFor` switches on; anything else could never be sent through.
