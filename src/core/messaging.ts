@@ -6,6 +6,7 @@
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 
+import type { Provider } from '../providers/types.js';
 import type { InputOf, TemplateDef, Templates } from '../templates.js';
 import type { MessagingEnv } from '../types.js';
 import { DEFAULT_POLICY, type DeliveryOverride, type DeliveryPolicy } from './policy.js';
@@ -63,19 +64,61 @@ export class MessagingConfigError extends Error {
   }
 }
 
-const providerCache = new WeakMap<MessagingEnv, WeakMap<object, ProviderSet>>();
+const providerCache = new WeakMap<MessagingEnv, ProviderSet>();
+
+/**
+ * Thrown by createMessaging when the provider set built from env is invalid.
+ */
+export class ProviderConfigError extends Error {
+  readonly problems: string[];
+
+  constructor(problems: string[]) {
+    const bullets = problems.map((problem) => `- ${problem}`).join('\n');
+    super(`Provider configuration validation failed:\n${bullets}`);
+    this.name = 'ProviderConfigError';
+    this.problems = problems;
+  }
+}
+
+function missingProviderFields(p: Partial<Provider>): string[] {
+  const missing: string[] = [];
+  if (!p.name) missing.push('name');
+  if (!p.channel) missing.push('channel');
+  if (typeof p.send !== 'function') missing.push('send');
+  return missing;
+}
+
+function validateProviderSet(set: ProviderSet): void {
+  const problems: string[] = [];
+  const seen = new Set<string>();
+  for (const [slot, candidate] of Object.entries(set)) {
+    const p = candidate as Partial<Provider> | undefined;
+    if (!p) {
+      continue;
+    }
+    const missing = missingProviderFields(p);
+    if (missing.length > 0) {
+      problems.push(`Provider "${slot}" is missing required field(s): ${missing.join(', ')}`);
+    }
+    if (p.name && seen.has(p.name)) {
+      problems.push(`Duplicate provider name "${p.name}" configured across multiple providers`);
+    }
+    if (p.name) {
+      seen.add(p.name);
+    }
+  }
+  if (problems.length > 0) {
+    throw new ProviderConfigError(problems);
+  }
+}
 const storeCache = new WeakMap<KVNamespace, Map<number, StatusStore>>();
 
 function memoProviders(env: MessagingEnv, build: (env: MessagingEnv) => ProviderSet): ProviderSet {
-  let byBuilder = providerCache.get(env);
-  if (!byBuilder) {
-    byBuilder = new WeakMap();
-    providerCache.set(env, byBuilder);
-  }
-  let set = byBuilder.get(build);
+  let set = providerCache.get(env);
   if (!set) {
     set = build(env);
-    byBuilder.set(build, set);
+    validateProviderSet(set);
+    providerCache.set(env, set);
   }
   return set;
 }
@@ -104,6 +147,7 @@ function memoStore(kv: KVNamespace, ttlSeconds: number): StatusStore {
  * @param options - Templates, provider factory, delivery defaults and callbacks.
  * @returns The messaging instance.
  * @throws {MessagingConfigError} If no KV namespace is available.
+ * @throws {ProviderConfigError} If the provider set is missing fields or repeats a name.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function createMessaging<T extends Templates<any>>(
@@ -119,6 +163,7 @@ export function createMessaging<T extends Templates<any>>(
     always: options.delivery?.always ?? DEFAULT_POLICY.always,
   };
   const store = memoStore(kv, options.statusTtl ?? DEFAULT_STATUS_TTL);
+  const providers = memoProviders(env, options.providers);
   const templates = new Map<string, TemplateDef<unknown>>(Object.entries(options.templates));
 
   return {
@@ -130,7 +175,7 @@ export function createMessaging<T extends Templates<any>>(
       }
       return runSend(
         {
-          providers: memoProviders(env, options.providers),
+          providers,
           store,
           defaults,
           onStatus: options.onStatus,

@@ -158,7 +158,9 @@ async function attemptChannel(
       kind: req.template.kind,
       locale: req.locale,
     };
-    payload = Object.assign(rendered, meta);
+    // Spread meta first so a rendered WhatsApp `template` config ({ name, language, params })
+    // is never overwritten by OutboundMeta.template (the catalogue name).
+    payload = { ...meta, ...rendered } as AnyRendered & OutboundMeta;
   } catch (error) {
     return { ...base, status: 'failed', error: errorMessage(error), at: new Date().toISOString() };
   }
@@ -176,6 +178,11 @@ async function attemptChannel(
 
 /**
  * Walks the fallback chain in order until one channel accepts the message.
+ *
+ * Seam for #7: this covers only failures the provider reports synchronously. The async
+ * path (a `failed` delivery status arriving by webhook, or a timer expiry from #8) resumes
+ * from `record.chain.attempts.length` as the index into `policy.fallback` and reuses
+ * `attemptChannel` + `chainStatus` to advance and re-derive the record.
  */
 async function runChain(
   req: SendRequest,
@@ -243,19 +250,28 @@ async function deliver(deps: SendDeps, req: SendRequest, id: string, policy: Del
   });
 
   for (const attempt of [...chainAttempts, ...alwaysAttempts]) {
-    if (attempt.providerId) {
-      await deps.store.indexProviderId(attempt.providerId, {
-        id,
-        channel: attempt.channel,
-        provider: attempt.provider,
-      });
+    await observe(deps, id, attempt);
+  }
+}
+
+/**
+ * Indexes the providerId and notifies `onStatus` for one attempt. Both are observers of a
+ * send that has already happened, so their failures are logged (without content) and swallowed
+ * rather than allowed to fail the send.
+ */
+async function observe(deps: SendDeps, id: string, attempt: Attempt): Promise<void> {
+  const { channel, provider, status } = attempt;
+  if (attempt.providerId) {
+    try {
+      await deps.store.indexProviderId(attempt.providerId, { id, channel, provider });
+    } catch {
+      console.warn(`[messagefall] indexProviderId failed id=${id} channel=${channel}`);
     }
-    await deps.onStatus?.({
-      id,
-      channel: attempt.channel,
-      provider: attempt.provider,
-      status: attempt.status,
-    });
+  }
+  try {
+    await deps.onStatus?.({ id, channel, provider, status });
+  } catch {
+    console.warn(`[messagefall] onStatus failed id=${id} channel=${channel}`);
   }
 }
 

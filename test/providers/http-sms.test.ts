@@ -11,9 +11,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 
-import { createMessaging } from '../../src/index.js';
+import { createMessaging, defineTemplates } from '../../src/index.js';
 import { httpSms } from '../../src/providers/http-sms/index.js';
 import type { OutboundMeta, RenderedSms, StatusEvent } from '../../src/providers/types.js';
+import { memoryKV } from '../helpers/messaging.js';
 
 describe('httpSms provider', () => {
   let fetchSpy: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>>;
@@ -337,13 +338,15 @@ describe('httpSms provider', () => {
     expect(provider.name).toBe('regional-gateway-lk');
     expect(provider.channel).toBe('sms');
 
-    const messaging = createMessaging({
-      providers: () => ({
-        sms: provider,
-      }),
-    });
+    const messaging = createMessaging(
+      { MESSAGES_KV: memoryKV() },
+      {
+        templates: defineTemplates({ ping: { kind: 'notification', sms: () => 'ping' } }),
+        providers: () => ({ sms: provider }),
+      }
+    );
 
-    expect(messaging.providers.get('regional-gateway-lk')).toBeDefined();
+    expect(typeof messaging.send).toBe('function');
   });
 
   it('is not present in the root bundle exports', async () => {

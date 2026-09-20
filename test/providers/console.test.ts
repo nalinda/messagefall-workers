@@ -16,7 +16,8 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'bun:test';
 
-import { createMessaging } from '../../src/index.js';
+import { createMessaging, defineTemplates } from '../../src/index.js';
+import { memoryKV } from '../helpers/messaging.js';
 import type {
   Channel,
   DeliveryStatus,
@@ -563,11 +564,20 @@ describe('Provider contract shape and optional methods', () => {
   });
 });
 
+const validationTemplates = defineTemplates({ ping: { kind: 'notification', sms: () => 'ping' } });
+
+function newEnv() {
+  return { MESSAGES_KV: memoryKV() };
+}
+
 describe('Startup provider validation', () => {
+  const templates = validationTemplates;
+
   it('rejects duplicate provider names across configured providers with a bulleted error', () => {
     // If two providers share the same name (e.g. 'console'), startup validation must fail
     expect(() => {
-      createMessaging({
+      createMessaging(newEnv(), {
+        templates,
         providers: () => ({
           whatsapp: {
             name: 'console',
@@ -592,8 +602,10 @@ describe('Startup provider validation', () => {
 
   it('rejects a provider missing a required field (name, channel, send) with a bulleted error', () => {
     expect(() => {
-      createMessaging({
+      createMessaging(newEnv(), {
+        templates,
         providers: () => ({
+          // @ts-expect-error -- deliberately malformed provider
           sms: {
             // missing name and send
             channel: 'sms',
@@ -606,12 +618,15 @@ describe('Startup provider validation', () => {
   it('lists every validation problem at once in a bulleted error message', () => {
     let thrownError: Error | null = null;
     try {
-      createMessaging({
+      createMessaging(newEnv(), {
+        templates,
         providers: () => ({
+          // @ts-expect-error -- deliberately malformed provider
           whatsapp: {
             // missing channel and send
             name: 'dup-name',
           },
+          // @ts-expect-error -- deliberately malformed provider
           sms: {
             // duplicate name 'dup-name' and missing send
             name: 'dup-name',

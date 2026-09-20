@@ -70,6 +70,16 @@ const templates = defineTemplates({
     kind: 'otp' as const,
     sms: ({ code }: { code: string }) => `Your code is ${code}`,
   },
+  loginCodeWa: {
+    input: z.object({ code: z.string().length(6) }),
+    kind: 'otp' as const,
+    whatsapp: {
+      template: 'auth_code',
+      language: { en: 'en_US', default: 'en_US' },
+      params: ({ code }: { code: string }) => [code],
+    },
+    sms: ({ code }: { code: string }) => `Your code is ${code}`,
+  },
   emailFirst: {
     input: orderInput,
     kind: 'notification' as const,
@@ -314,6 +324,93 @@ describe('Issue #3: createMessaging send pipeline', () => {
       } finally {
         silenced.restore();
       }
+    });
+  });
+
+  describe('rendered payload and outbound meta do not collide', () => {
+    it('hands a WhatsApp otp provider the full Meta template config, not the catalogue name', async () => {
+      const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'rec-wa');
+      const messaging = api.createMessaging(newEnv(), {
+        templates,
+        providers: () => ({ whatsapp: wa }),
+        delivery: { fallback: ['whatsapp'], always: [] },
+      });
+
+      const { id } = await messaging.send({
+        template: 'loginCodeWa',
+        to: TO,
+        locale: 'en',
+        input: { code: '654321' },
+      });
+
+      expect(wa.calls).toHaveLength(1);
+      const call = wa.calls[0];
+      // Read through the rendered type: the contract's `R & OutboundMeta` collapses `template`.
+      const rendered: RenderedWhatsApp = call;
+      expect(rendered.template).toEqual({ name: 'auth_code', language: 'en_US', params: ['654321'] });
+      expect(call).toMatchObject({ to: TO, messageId: id, kind: 'otp', locale: 'en' });
+      expect(call.text).toBeUndefined();
+
+      const record = await messaging.status(id);
+      expect(record!.template).toBe('loginCodeWa');
+      expect(record!.chain.attempts[0]).toMatchObject({ channel: 'whatsapp', status: 'sent' });
+    });
+  });
+
+  describe('chain advance on a failed chain attempt', () => {
+    it('tries the next fallback channel when the first fails and records both attempts', async () => {
+      const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'dead-wa', [
+        { ok: false, error: 'number not on whatsapp' },
+      ]);
+      const sms = recordingProvider<RenderedSms>('sms', 'rec-sms', [
+        { ok: true, providerId: 'sms-after-wa' },
+      ]);
+      const email = recordingProvider<RenderedEmail>('email', 'rec-email');
+      const events: StatusCallbackEvent[] = [];
+
+      const messaging = api.createMessaging(newEnv(), {
+        templates,
+        providers: () => ({ whatsapp: wa, sms, email }),
+        delivery: { fallback: ['whatsapp', 'sms', 'email'], always: [] },
+        onStatus: (event) => {
+          events.push(event);
+        },
+      });
+
+      const { id } = await messaging.send({
+        template: 'orderUpdate',
+        to: TO,
+        locale: 'en',
+        input: INPUT,
+      });
+
+      expect(wa.calls).toHaveLength(1);
+      expect(sms.calls).toHaveLength(1);
+      expect(sms.calls[0].text).toBe('Ann: order A-100 shipped');
+      expect(email.calls).toHaveLength(0);
+
+      const record = await messaging.status(id);
+      expect(record).not.toBeNull();
+      expect(record!.chain.attempts).toHaveLength(2);
+      expect(record!.chain.attempts[0]).toMatchObject({
+        channel: 'whatsapp',
+        provider: 'dead-wa',
+        status: 'failed',
+        error: 'number not on whatsapp',
+      });
+      expect(record!.chain.attempts[1]).toMatchObject({
+        channel: 'sms',
+        provider: 'rec-sms',
+        providerId: 'sms-after-wa',
+        status: 'sent',
+      });
+      expect(record!.always).toHaveLength(0);
+      expect(record!.chain.status).toBe('sent');
+      expect(record!.status).toBe('sent');
+      expect(events).toEqual([
+        { id, channel: 'whatsapp', provider: 'dead-wa', status: 'failed' },
+        { id, channel: 'sms', provider: 'rec-sms', status: 'sent' },
+      ]);
     });
   });
 

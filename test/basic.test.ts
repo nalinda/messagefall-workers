@@ -6,46 +6,41 @@
 
 import { describe, expect, it } from 'bun:test';
 
-import { createMessaging, defineTemplates } from '../src/index.js';
-import { createMockKV } from './helpers/index.js';
+import { createMessaging, defineTemplates, type Provider, type RenderedSms } from '../src/index.js';
+import { memoryKV } from './helpers/messaging.js';
+
+function stubSms(name: string): Provider<RenderedSms> {
+  return { name, channel: 'sms', send: () => Promise.resolve({ ok: true }) };
+}
+
+const templates = defineTemplates({
+  ping: { kind: 'notification', sms: () => 'ping' },
+});
 
 describe('createMessaging', () => {
-  it('creates a messaging state with stub provider', () => {
-    const config = {
-      kv: createMockKV(),
-      providers: [
-        {
-          id: 'stub',
-          config: {},
-          state: { kv: {} },
-        },
-      ],
-    };
+  it('creates a messaging instance with send and status', () => {
+    const messaging = createMessaging(
+      { MESSAGES_KV: memoryKV() },
+      { templates, providers: () => ({ sms: stubSms('stub') }) }
+    );
 
-    const state = createMessaging(config);
-
-    expect(state).toBeDefined();
-    expect(state.providers.size).toBe(1);
+    expect(messaging).toBeDefined();
+    expect(typeof messaging.send).toBe('function');
+    expect(typeof messaging.status).toBe('function');
   });
 
-  it('registers the stub provider', () => {
-    const config = {
-      kv: createMockKV(),
-      providers: [
-        {
-          id: 'stub',
-          config: {},
-          state: { kv: {} },
-        },
-      ],
+  it('builds providers from env once per env object', () => {
+    const env = { MESSAGES_KV: memoryKV() };
+    let builds = 0;
+    const providers = () => {
+      builds += 1;
+      return { sms: stubSms('stub') };
     };
 
-    const state = createMessaging(config);
-    const provider = state.providers.get('stub');
+    createMessaging(env, { templates, providers });
+    createMessaging(env, { templates, providers });
 
-    expect(provider).toBeDefined();
-    expect(provider?.id).toBe('stub');
-    expect(provider?.channel).toBe('whatsapp');
+    expect(builds).toBe(1);
   });
 });
 
