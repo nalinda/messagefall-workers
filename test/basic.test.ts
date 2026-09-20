@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import { createMessaging, defineTemplates, type Provider, type RenderedSms } from '../src/index.js';
-import { newEnv, pingTemplates as templates } from './helpers/messaging.js';
+import { captureConsole, newEnv, pingTemplates as templates } from './helpers/messaging.js';
 
 function stubSms(name: string): Provider<RenderedSms> & { calls: number } {
   const provider = {
@@ -79,6 +79,52 @@ describe('createMessaging.handleWebhook', () => {
     ]);
     const unknown = await messaging.handleWebhook('nope', new Request('https://worker.local/x'));
     expect(unknown.status).toBe(404);
+  });
+});
+
+describe('createMessaging.handleWebhook observer failures', () => {
+  it('logs a throwing onStatus per event, keeps applying the batch and still answers 200', async () => {
+    const provider: Provider<RenderedSms> = {
+      name: 'hooked-sms',
+      channel: 'sms',
+      send: () => Promise.resolve({ ok: true, providerId: 'hooked-2' }),
+      webhook: {
+        parse: () =>
+          Promise.resolve([
+            { providerId: 'hooked-2', status: 'delivered' as const, at: '2026-09-20T00:00:00.000Z' },
+            { providerId: 'hooked-2', status: 'read' as const, at: '2026-09-20T00:00:01.000Z' },
+          ]),
+      },
+    };
+    const seen: string[] = [];
+    const messaging = createMessaging(newEnv(), {
+      templates,
+      providers: () => ({ sms: provider }),
+      onStatus: (event) => {
+        seen.push(event.status);
+        if (event.status === 'delivered') {
+          throw new Error('observer exploded');
+        }
+      },
+    });
+    const captured = captureConsole(['warn']);
+
+    try {
+      const { id } = await messaging.send({ template: 'ping', to: '+14155550123', locale: 'en', input: undefined });
+      const response = await messaging.handleWebhook(
+        'hooked-sms',
+        new Request('https://worker.local/webhooks/hooked-sms', { method: 'POST' })
+      );
+
+      expect(response.status).toBe(200);
+      // Both events were applied and observed despite the first observer throwing.
+      expect(seen).toEqual(['sent', 'delivered', 'read']);
+      const record = await messaging.status(id);
+      expect(record!.chain.attempts[0].status).toBe('read');
+      expect(captured.logs.some((line) => line.includes(`onStatus failed id=${id}`))).toBe(true);
+    } finally {
+      captured.restore();
+    }
   });
 });
 

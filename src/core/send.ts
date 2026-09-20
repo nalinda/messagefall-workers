@@ -241,17 +241,13 @@ export interface AttemptRecorder {
  * rebuild the render from the stored record as things stand; they must either persist a
  * redacted/derived form of what a resume needs, or take a different approach. That decision is
  * theirs, not #3's.
- *
- * `fallback` here is the slice being walked; `offset` is how many chain channels were already
- * attempted before it (0 for a fresh send), so progress counts against the whole policy.
  */
 export async function runChain(
   req: ValidatedSendRequest,
   id: string,
   providers: ProviderSet,
   fallback: Channel[],
-  recorder: AttemptRecorder,
-  offset = 0
+  recorder: AttemptRecorder
 ): Promise<Attempt[]> {
   const attempts: Attempt[] = [];
   let persistError: Error | undefined;
@@ -259,7 +255,7 @@ export async function runChain(
   for (const channel of fallback) {
     const attempt = await attemptChannel(req, id, providers, channel);
     attempts.push(attempt);
-    progress = { attempted: offset + attempts.length, last: attempt.status };
+    progress = { attempted: attempts.length, last: attempt.status };
     try {
       await recorder.record(attempt, 'chain', progress);
     } catch (error) {

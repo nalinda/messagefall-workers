@@ -229,14 +229,19 @@ export function createMessaging<T extends Templates<any>>(
     providers: providers as Record<string, Provider>,
     store,
     env,
-    // The webhook module reports raw StatusEvents; resolve them to this module's onStatus shape
-    // so callers see one event type whether a status comes from a send or a webhook.
+    // The webhook module reports raw StatusEvents plus the ref it already resolved; forward them
+    // in this module's onStatus shape so callers see one event type from sends and webhooks.
+    // As on the send path, a throwing observer is logged (without content) and never fails the
+    // batch or the webhook response.
     onStatus: options.onStatus
-      ? async (raw) => {
-          const event = raw as StatusEvent;
-          const ref = await store.lookupProviderId(event.providerId);
-          if (ref) {
-            await options.onStatus?.({ ...ref, status: event.status });
+      ? async (raw, ref) => {
+          if (!ref) {
+            return;
+          }
+          try {
+            await options.onStatus?.({ ...ref, status: (raw as StatusEvent).status });
+          } catch {
+            console.warn(`[messagefall] onStatus failed id=${ref.id} channel=${ref.channel}`);
           }
         }
       : undefined,

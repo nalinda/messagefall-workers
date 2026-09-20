@@ -55,7 +55,11 @@ export interface WebhookDispatchOptions {
     | ((env: unknown) => Record<string, Provider>);
   kv?: KVNamespace;
   store?: StatusStore;
-  onStatus?: (event: unknown) => void | Promise<void>;
+  /**
+   * Called with each parsed status event. When the event was matched to a message (a store is
+   * configured and the providerId is indexed) the resolved `ProviderRef` is passed as well.
+   */
+  onStatus?: (event: unknown, ref?: ProviderRef) => void | Promise<void>;
   onStatusApplied?: (event: StatusApplied) => void | Promise<void>;
   env?: Record<string, unknown>;
 }
@@ -216,7 +220,7 @@ async function handleSingleEvent(
   await store.update(ref.id, (record) => applyStatusUpdate(record, event, ref).updatedRecord);
 
   if (options.onStatus) {
-    await options.onStatus(event);
+    await options.onStatus(event, ref);
   }
 
   if (isChain && options.onStatusApplied) {

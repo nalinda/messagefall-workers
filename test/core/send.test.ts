@@ -18,6 +18,7 @@ import { z } from 'zod';
 import { createMessaging, RecipientError } from '../../src/core/messaging.js';
 import { PolicyError } from '../../src/core/policy.js';
 import { NO_PROVIDER } from '../../src/core/send.js';
+import * as statusModule from '../../src/core/status.js';
 import { kvStatusStore } from '../../src/core/status.js';
 import { consoleProvider } from '../../src/providers/console/index.js';
 import type {
@@ -1464,6 +1465,24 @@ describe('Issue #3: createMessaging send pipeline', () => {
       await b.send({ template: 'smsOnly', to: TO, locale: 'en', input: { body: 'two' } });
 
       expect(builds).toBe(1);
+    });
+
+    it('shares one StatusStore for two createMessaging calls with the same env', () => {
+      const env = newEnv();
+      const stores = spyOn(statusModule, 'kvStatusStore');
+      const before = stores.mock.calls.length;
+
+      try {
+        createMessaging(env, { templates, providers: () => ({}) });
+        createMessaging(env, { templates, providers: () => ({}) });
+        expect(stores.mock.calls.length - before).toBe(1);
+
+        // A different env (different KV namespace) gets its own store.
+        createMessaging(newEnv(), { templates, providers: () => ({}) });
+        expect(stores.mock.calls.length - before).toBe(2);
+      } finally {
+        stores.mockRestore();
+      }
     });
 
     it('reuses the memoised providers for the same env even when the factory closure differs', async () => {
