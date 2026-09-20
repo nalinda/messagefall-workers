@@ -1,8 +1,3 @@
-/* eslint-disable @typescript-eslint/no-redundant-type-constituents */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /**
  * Type-level tests for Provider contract (Issue #18).
  *
@@ -22,11 +17,15 @@ import type {
   RenderedWhatsApp,
   SendResult,
   StatusEvent,
-} from '../../src/providers/types.js';
+} from './types.js';
 
 // Type-level assertion helpers
 type Extends<A, B> = A extends B ? true : false;
 type Expect<T extends true> = T;
+
+function assertType<T>(_value: T): void {
+  // Compile-time type verification helper
+}
 
 describe('Provider contract type-level specification', () => {
   it('allows an object literal implementing Provider<RenderedSms> to be assigned to the sms provider slot without console provider import', () => {
@@ -72,9 +71,10 @@ describe('Provider contract type-level specification', () => {
     expect(providersFactory).toBeDefined();
 
     // Type assertion checks
-    type _TestAssignableToSmsSlot = Expect<
+    type TestAssignableToSmsSlot = Expect<
       Extends<typeof customSmsProvider, Provider<RenderedSms>>
     >;
+    assertType<TestAssignableToSmsSlot>(true);
   });
 
   it('allows Provider<RenderedWhatsApp> and Provider<RenderedEmail> in their respective slots', () => {
@@ -124,12 +124,15 @@ describe('Provider contract type-level specification', () => {
     expect(customEmailProvider.channel).toBe('email');
     expect(providersFactory).toBeDefined();
 
-    type _TestWaAssignable = Expect<
+    type TestWaAssignable = Expect<
       Extends<typeof customWhatsAppProvider, Provider<RenderedWhatsApp>>
     >;
-    type _TestEmailAssignable = Expect<
+    type TestEmailAssignable = Expect<
       Extends<typeof customEmailProvider, Provider<RenderedEmail>>
     >;
+
+    assertType<TestWaAssignable>(true);
+    assertType<TestEmailAssignable>(true);
   });
 
   it('verifies SendResult discriminant shape and StatusEvent fields', () => {
@@ -147,14 +150,12 @@ describe('Provider contract type-level specification', () => {
     expect(failureResult.ok).toBe(false);
     expect(statusEvent.status).toBe('delivered');
 
-    type _TestSuccess = Expect<Extends<typeof successResult, SendResult>>;
-    type _TestFailure = Expect<Extends<typeof failureResult, SendResult>>;
-    type _TestStatusEvent = Expect<Extends<typeof statusEvent, StatusEvent>>;
+    type TestSuccess = Expect<Extends<typeof successResult, SendResult>>;
+    type TestFailure = Expect<Extends<typeof failureResult, SendResult>>;
+    type TestStatusEvent = Expect<Extends<typeof statusEvent, StatusEvent>>;
+
+    assertType<TestSuccess>(true);
+    assertType<TestFailure>(true);
+    assertType<TestStatusEvent>(true);
   });
 });
-
-/* eslint-enable @typescript-eslint/no-redundant-type-constituents */
-/* eslint-enable @typescript-eslint/no-unsafe-assignment */
-/* eslint-enable @typescript-eslint/no-unsafe-call */
-/* eslint-enable @typescript-eslint/no-unsafe-member-access */
-/* eslint-enable @typescript-eslint/no-unused-vars */

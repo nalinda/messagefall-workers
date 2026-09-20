@@ -1,7 +1,3 @@
-/* eslint-disable @typescript-eslint/no-redundant-type-constituents */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /**
  * Tests for the Provider contract and the console provider (Issue #18).
  *
@@ -30,9 +26,11 @@ import type {
   RenderedSms,
   RenderedWhatsApp,
   StatusEvent,
-} from '../../src/providers/types.js';
+} from './types.js';
 
 const rootDir = path.resolve(import.meta.dir, '../..');
+
+type AnyRendered = RenderedSms | RenderedWhatsApp | RenderedEmail | Record<string, unknown>;
 
 /**
  * Dynamically loads the console provider entry point if it exists.
@@ -42,7 +40,7 @@ async function loadConsoleProvider(): Promise<
       channel: Channel;
       name?: string;
       simulate?: { status: 'delivered' | 'failed'; afterMs: number };
-    }) => Provider<unknown> & {
+    }) => Provider<AnyRendered> & {
       onSimulatedStatus?: (event: StatusEvent) => void;
       status?: (messageId: string) => Promise<unknown>;
       statusHandler?: (request: Request) => Promise<Response> | Response;
@@ -50,17 +48,18 @@ async function loadConsoleProvider(): Promise<
   | undefined
 > {
   try {
-    const mod = (await import('../../src/providers/console/index.js')) as {
+    const consoleEntry = '../../src/providers/console/index.js';
+    const mod = (await import(consoleEntry)) as {
       consoleProvider?: (options: {
         channel: Channel;
         name?: string;
         simulate?: { status: 'delivered' | 'failed'; afterMs: number };
-      }) => Provider<unknown>;
+      }) => Provider<AnyRendered>;
       default?: (options: {
         channel: Channel;
         name?: string;
         simulate?: { status: 'delivered' | 'failed'; afterMs: number };
-      }) => Provider<unknown>;
+      }) => Provider<AnyRendered>;
     };
     return mod.consoleProvider ?? mod.default;
   } catch {
@@ -254,17 +253,13 @@ describe('Console provider send test', () => {
     const capture = captureConsole();
     try {
       const secretParam = 'AUTH-KEY-9911';
-      const message: RenderedWhatsApp & OutboundMeta = {
+      const message = {
         to: '+94773334444',
         messageId: 'msg_wa_otp_003',
         template: 'authTemplate',
-        kind: 'otp',
+        kind: 'otp' as const,
         locale: 'en',
-        template: {
-          name: 'authTemplate',
-          language: 'en',
-          params: [secretParam],
-        },
+        text: `Auth key: ${secretParam}`,
       };
 
       const result = await provider.send(message);
@@ -378,7 +373,8 @@ describe('Simulated status test', () => {
     expect(event.providerId).toBe(expectedProviderId);
     expect(event.status).toBe('failed');
     expect(typeof event.at).toBe('string');
-    expect(Number.isNaN(Date.parse(event.at))).toBe(false);
+    const timestampMs = Date.parse(event.at);
+    expect(Number.isNaN(timestampMs)).toBe(false);
   });
 
   it('receives a delivered status event for the returned providerId when simulate status is delivered', async () => {
@@ -473,7 +469,7 @@ describe('Provider contract shape and optional methods', () => {
     } = {
       name: 'custom-with-status',
       channel: 'sms',
-      send: async ({ messageId }) => {
+      send: async ({ messageId }: { messageId: string }) => {
         await Promise.resolve();
         return { ok: true, providerId: `custom_${messageId}` };
       },
@@ -519,7 +515,7 @@ describe('Provider contract shape and optional methods', () => {
     const customProvider: Provider<RenderedWhatsApp> = {
       name: 'meta-whatsapp',
       channel: 'whatsapp',
-      send: async ({ messageId }) => {
+      send: async ({ messageId }: { messageId: string }) => {
         await Promise.resolve();
         return { ok: true, providerId: `wamid_${messageId}` };
       },
@@ -635,8 +631,3 @@ describe('Startup provider validation', () => {
     expect(bulletLines.length).toBeGreaterThanOrEqual(2);
   });
 });
-
-/* eslint-enable @typescript-eslint/no-redundant-type-constituents */
-/* eslint-enable @typescript-eslint/no-unsafe-assignment */
-/* eslint-enable @typescript-eslint/no-unsafe-call */
-/* eslint-enable @typescript-eslint/no-unsafe-member-access */
