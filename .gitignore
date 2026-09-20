@@ -6,3 +6,8 @@ dist/
 .DS_Store
 .eslintcache
 *.tsbuildinfo
+
+# no AI-tooling files tracked in this repo
+AGENTS.md
+.agents/
+.claude/

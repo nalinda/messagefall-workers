@@ -38,6 +38,50 @@ describe('createMessaging', () => {
   });
 });
 
+describe('createMessaging.handleWebhook', () => {
+  it('routes a provider status webhook to the record and reports it through onStatus', async () => {
+    const provider: Provider<RenderedSms> = {
+      name: 'hooked-sms',
+      channel: 'sms',
+      send: () => Promise.resolve({ ok: true, providerId: 'hooked-1' }),
+      webhook: {
+        parse: async (request) => {
+          const body = (await request.json()) as { id: string; status: 'delivered' };
+          return [{ providerId: body.id, status: body.status, at: '2026-09-20T00:00:00.000Z' }];
+        },
+      },
+    };
+    const events: unknown[] = [];
+    const messaging = createMessaging(newEnv(), {
+      templates,
+      providers: () => ({ sms: provider }),
+      onStatus: (event) => {
+        events.push(event);
+      },
+    });
+
+    const { id } = await messaging.send({ template: 'ping', to: '+14155550123', locale: 'en', input: undefined });
+    const response = await messaging.handleWebhook(
+      'hooked-sms',
+      new Request('https://worker.local/webhooks/hooked-sms', {
+        method: 'POST',
+        body: JSON.stringify({ id: 'hooked-1', status: 'delivered' }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const record = await messaging.status(id);
+    expect(record!.chain.attempts[0]).toMatchObject({ providerId: 'hooked-1', status: 'delivered' });
+    expect(record!.status).toBe('delivered');
+    expect(events).toEqual([
+      { id, channel: 'sms', provider: 'hooked-sms', status: 'sent' },
+      { id, channel: 'sms', provider: 'hooked-sms', status: 'delivered' },
+    ]);
+    const unknown = await messaging.handleWebhook('nope', new Request('https://worker.local/x'));
+    expect(unknown.status).toBe(404);
+  });
+});
+
 describe('defineTemplates', () => {
   it('returns the defined template catalog', () => {
     const templates = defineTemplates({

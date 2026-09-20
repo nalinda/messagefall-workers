@@ -80,6 +80,8 @@ export type {
   StatusStoreOptions,
 } from './core/status.js';
 export { DEFAULT_STATUS_TTL, deriveOverallStatus, kvStatusStore } from './core/status.js';
+export type { StatusApplied, WebhookDispatchOptions, WebhookHandler } from './core/webhook.js';
+export { createWebhookHandler, handleWebhook } from './core/webhook.js';
 
 /**
  * Base environment bindings for messaging.

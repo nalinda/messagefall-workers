@@ -6,7 +6,7 @@
 
 import type { DurableObjectNamespace, KVNamespace } from '@cloudflare/workers-types';
 
-import type { Provider } from '../providers/types.js';
+import type { Provider, StatusEvent } from '../providers/types.js';
 import type { InputOf, TemplateDef, Templates } from '../templates.js';
 import { CHANNELS, type MessagingEnv } from '../types.js';
 import { DEFAULT_POLICY, type DeliveryOverride, type DeliveryPolicy } from './policy.js';
@@ -17,6 +17,7 @@ import {
   type MessageRecord,
   type StatusStore,
 } from './status.js';
+import { createWebhookHandler, type StatusApplied } from './webhook.js';
 
 export type { ProviderSet, SendContext, StatusCallbackEvent } from './send.js';
 export { E164, RecipientError } from './send.js';
@@ -33,6 +34,11 @@ export interface MessagingOptions<T extends Templates<any> = Templates<any>> {
   timer?: DurableObjectNamespace;
   statusTtl?: number;
   onStatus?: (event: StatusCallbackEvent) => void | Promise<void>;
+  /**
+   * Fired by the webhook path (#5) when a delivery status lands on a chain attempt; consumed
+   * by fallback (#7) and the timer cancel path (#8).
+   */
+  onStatusApplied?: (event: StatusApplied) => void | Promise<void>;
 }
 
 /**
@@ -53,7 +59,8 @@ export interface Messaging<T> {
   send<K extends keyof T>(args: SendArgs<T, K>, ctx?: SendContext): Promise<{ id: string }>;
   status(id: string): Promise<MessageRecord | null>;
   /**
-   * Handles a provider's delivery-status webhook. Implemented in #5; until then responds 501.
+   * Handles a provider's delivery-status webhook (#5): 404 for an unknown provider or one
+   * without a webhook, 401 for a rejected payload, 200 once the status events are applied.
    */
   handleWebhook(provider: string, request: Request, ctx?: SendContext): Promise<Response>;
 }
@@ -218,6 +225,23 @@ export function createMessaging<T extends Templates<any>>(
   const store = memoStore(kv, options.statusTtl ?? DEFAULT_STATUS_TTL);
   const providers = memoProviders(env, options.providers);
   const templates = new Map<string, TemplateDef<unknown>>(Object.entries(options.templates));
+  const webhook = createWebhookHandler({
+    providers: providers as Record<string, Provider>,
+    store,
+    env,
+    // The webhook module reports raw StatusEvents; resolve them to this module's onStatus shape
+    // so callers see one event type whether a status comes from a send or a webhook.
+    onStatus: options.onStatus
+      ? async (raw) => {
+          const event = raw as StatusEvent;
+          const ref = await store.lookupProviderId(event.providerId);
+          if (ref) {
+            await options.onStatus?.({ ...ref, status: event.status });
+          }
+        }
+      : undefined,
+    onStatusApplied: options.onStatusApplied,
+  });
 
   return {
     send(args, ctx) {
@@ -245,6 +269,7 @@ export function createMessaging<T extends Templates<any>>(
       );
     },
     status: (id) => store.get(id),
-    handleWebhook: () => Promise.resolve(new Response('Not Implemented', { status: 501 })),
+    handleWebhook: (provider, request, ctx) =>
+      webhook(provider, request, ctx as Parameters<typeof webhook>[2]),
   };
 }
