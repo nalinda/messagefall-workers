@@ -15,6 +15,7 @@
 import { beforeAll, describe, expect, it, spyOn } from 'bun:test';
 import { z } from 'zod';
 
+import { PolicyError } from '../../src/core/policy.js';
 import { kvStatusStore } from '../../src/core/status.js';
 import { consoleProvider } from '../../src/providers/console/index.js';
 import type {
@@ -67,6 +68,19 @@ const templates = defineTemplates({
     input: z.object({ code: z.string().length(6) }),
     kind: 'otp' as const,
     sms: ({ code }: { code: string }) => `Your code is ${code}`,
+  },
+  emailFirst: {
+    input: orderInput,
+    kind: 'notification' as const,
+    delivery: { fallback: ['email', 'sms'], always: [] },
+    whatsapp: {
+      text: ({ orderId }: OrderInput) => `Order ${orderId} update`,
+    },
+    sms: ({ orderId }: OrderInput) => `Order ${orderId} update`,
+    email: {
+      subject: ({ orderId }: OrderInput) => `Order ${orderId} update`,
+      text: ({ name }: OrderInput) => `Hi ${name}`,
+    },
   },
 });
 
@@ -152,6 +166,21 @@ async function rejection(promise: Promise<unknown>): Promise<unknown> {
   }
   return undefined;
 }
+
+/**
+ * Three recording providers, one per channel, plus the set to hand to createMessaging.
+ */
+  function threeProviders(): {
+    wa: RecordingProvider<RenderedWhatsApp>;
+    sms: RecordingProvider<RenderedSms>;
+    email: RecordingProvider<RenderedEmail>;
+    set: ProviderSet;
+  } {
+    const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'rec-wa');
+    const sms = recordingProvider<RenderedSms>('sms', 'rec-sms');
+    const email = recordingProvider<RenderedEmail>('email', 'rec-email');
+    return { wa, sms, email, set: { whatsapp: wa, sms, email } };
+  }
 
 describe('Issue #3: createMessaging send pipeline', () => {
   let api: MessagingApi;
@@ -315,6 +344,112 @@ describe('Issue #3: createMessaging send pipeline', () => {
       } finally {
         silenced.restore();
       }
+    });
+  });
+
+  describe('delivery resolution: send override, template override, defined channels', () => {
+    it('a send-level delivery override replaces the configured default for that send', async () => {
+      const { wa, sms, email, set } = threeProviders();
+      const messaging = api.createMessaging(newEnv(), {
+        templates,
+        providers: () => set,
+        delivery: { fallback: ['whatsapp', 'sms'], always: ['email'] },
+      });
+
+      const { id } = await messaging.send({
+        template: 'orderUpdate',
+        to: TO,
+        locale: 'en',
+        input: INPUT,
+        delivery: { fallback: ['sms'], always: [] },
+      });
+
+      expect(sms.calls).toHaveLength(1);
+      expect(wa.calls).toHaveLength(0);
+      expect(email.calls).toHaveLength(0);
+
+      const record = await messaging.status(id);
+      expect(record).not.toBeNull();
+      expect(record!.policy).toEqual({ fallback: ['sms'], always: [] });
+      expect(record!.chain.attempts).toHaveLength(1);
+      expect(record!.chain.attempts[0]).toMatchObject({ channel: 'sms', provider: 'rec-sms' });
+      expect(record!.always).toHaveLength(0);
+    });
+
+    it("a template's own delivery wins over the configured default when no send override is given", async () => {
+      const { wa, sms, email, set } = threeProviders();
+      const messaging = api.createMessaging(newEnv(), {
+        templates,
+        providers: () => set,
+        delivery: { fallback: ['whatsapp', 'sms'], always: [] },
+      });
+
+      const { id } = await messaging.send({
+        template: 'emailFirst',
+        to: TO,
+        locale: 'en',
+        input: INPUT,
+      });
+
+      expect(email.calls).toHaveLength(1);
+      expect(email.calls[0].subject).toBe('Order A-100 update');
+      expect(wa.calls).toHaveLength(0);
+      expect(sms.calls).toHaveLength(0);
+
+      const record = await messaging.status(id);
+      expect(record).not.toBeNull();
+      expect(record!.policy).toEqual({ fallback: ['email', 'sms'], always: [] });
+      expect(record!.chain.attempts[0]).toMatchObject({ channel: 'email', provider: 'rec-email' });
+    });
+
+    it('sends to the channel the template defines, not blindly to fallback[0] from config', async () => {
+      const { wa, sms, email, set } = threeProviders();
+      const messaging = api.createMessaging(newEnv(), {
+        templates,
+        providers: () => set,
+        delivery: { fallback: ['whatsapp', 'sms'], always: [] },
+      });
+
+      const { id } = await messaging.send({
+        template: 'smsOnly',
+        to: TO,
+        locale: 'en',
+        input: { body: 'only sms here' },
+      });
+
+      expect(sms.calls).toHaveLength(1);
+      expect(sms.calls[0].text).toBe('only sms here');
+      expect(wa.calls).toHaveLength(0);
+      expect(email.calls).toHaveLength(0);
+
+      const record = await messaging.status(id);
+      expect(record).not.toBeNull();
+      expect(record!.policy).toEqual({ fallback: ['sms'], always: [] });
+      expect(record!.chain.attempts).toHaveLength(1);
+      expect(record!.chain.attempts[0]).toMatchObject({ channel: 'sms', provider: 'rec-sms' });
+    });
+
+    it('rejects with PolicyError before creating a record or calling a provider when no channel is selectable', async () => {
+      const env = newEnv();
+      const kv = env.MESSAGES_KV as ReturnType<typeof memoryKV>;
+      const { wa, sms, email, set } = threeProviders();
+      const messaging = api.createMessaging(env, {
+        templates,
+        providers: () => set,
+        // smsOnly defines only sms; neither part names it.
+        delivery: { fallback: ['whatsapp'], always: ['email'] },
+      });
+
+      const error = await rejection(
+        messaging.send({ template: 'smsOnly', to: TO, locale: 'en', input: { body: 'x' } })
+      );
+      expect(error).toBeInstanceOf(PolicyError);
+      expect((error as PolicyError).templateName).toBe('smsOnly');
+
+      expect(wa.calls).toHaveLength(0);
+      expect(sms.calls).toHaveLength(0);
+      expect(email.calls).toHaveLength(0);
+      expect(kv.dump().keys().filter((k) => k.startsWith('msg:')).toArray()).toHaveLength(0);
     });
   });
 
@@ -688,6 +823,37 @@ describe('Issue #3: createMessaging send pipeline', () => {
         id,
         channel: 'sms',
         provider: 'otp-sms',
+      });
+    });
+
+    it('a notification send with ctx present still runs delivery inline', async () => {
+      const ctx = testContext();
+      const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'rec-wa', [
+        { ok: true, providerId: 'wa-inline' },
+      ]);
+
+      const messaging = api.createMessaging(newEnv(), {
+        templates,
+        providers: () => ({ whatsapp: wa }),
+        delivery: { fallback: ['whatsapp'], always: [] },
+      });
+
+      const { id } = await messaging.send(
+        { template: 'orderUpdate', to: TO, locale: 'en', input: INPUT },
+        ctx
+      );
+
+      // Nothing handed to waitUntil is awaited: the attempt must already be recorded.
+      expect(wa.calls).toHaveLength(1);
+      const record = await messaging.status(id);
+      expect(record).not.toBeNull();
+      expect(record!.kind).toBe('notification');
+      expect(record!.chain.attempts).toHaveLength(1);
+      expect(record!.chain.attempts[0]).toMatchObject({
+        channel: 'whatsapp',
+        provider: 'rec-wa',
+        providerId: 'wa-inline',
+        status: 'sent',
       });
     });
 
