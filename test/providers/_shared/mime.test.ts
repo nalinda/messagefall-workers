@@ -11,12 +11,11 @@
 
 import { describe, expect, it } from 'bun:test';
 
-import { decodeRfc2047, loadBuildMimeMessage } from '../../helpers/gmail.js';
+import { buildMimeMessage } from '../../../src/providers/_shared/mime.js';
+import { decodeRfc2047 } from '../../helpers/gmail.js';
 
 describe('MIME message builder (Issue #20)', () => {
-  it('builds a text-only MIME message with required headers and CRLF line endings', async () => {
-    const buildMimeMessage = await loadBuildMimeMessage();
-
+  it('builds a text-only MIME message with required headers and CRLF line endings', () => {
     const date = new Date('2026-09-20T12:00:00.000Z');
     const mime = buildMimeMessage({
       from: 'sender@example.com',
@@ -48,9 +47,7 @@ describe('MIME message builder (Issue #20)', () => {
     expect(strippedCrLf).not.toContain('\r');
   });
 
-  it('builds a multipart/alternative MIME message with text before html when html is provided', async () => {
-    const buildMimeMessage = await loadBuildMimeMessage();
-
+  it('builds a multipart/alternative MIME message with text before html when html is provided', () => {
     const date = new Date('2026-09-20T12:00:00.000Z');
     const mime = buildMimeMessage({
       from: 'sender@example.com',
@@ -95,9 +92,7 @@ describe('MIME message builder (Issue #20)', () => {
     expect(strippedCrLf).not.toContain('\r');
   });
 
-  it('encodes non-ASCII Subject headers with RFC 2047 encoded words', async () => {
-    const buildMimeMessage = await loadBuildMimeMessage();
-
+  it('encodes non-ASCII Subject headers with RFC 2047 encoded words', () => {
     const testSubjects = [
       { raw: 'Welcome 👋 to our service!', desc: 'emoji' },
       { raw: 'Überprüfung Ihrer Bestellung #987', desc: 'German umlaut' },
@@ -129,9 +124,7 @@ describe('MIME message builder (Issue #20)', () => {
     }
   });
 
-  it('leaves ASCII-only Subject unencoded without RFC 2047 wrappers', async () => {
-    const buildMimeMessage = await loadBuildMimeMessage();
-
+  it('leaves ASCII-only Subject unencoded without RFC 2047 wrappers', () => {
     const asciiSubject = 'Simple ASCII Subject 12345';
     const mime = buildMimeMessage({
       from: 'sender@example.com',
@@ -151,9 +144,7 @@ describe('MIME message builder (Issue #20)', () => {
     expect(subjectHeader).not.toContain('?=');
   });
 
-  it('formats Date header per RFC 2822', async () => {
-    const buildMimeMessage = await loadBuildMimeMessage();
-
+  it('formats Date header per RFC 2822', () => {
     const testDate = new Date('2026-09-20T16:22:45.000Z');
     const mime = buildMimeMessage({
       from: 'sender@example.com',
