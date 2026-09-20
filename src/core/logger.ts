@@ -44,6 +44,7 @@ export type LogEvent =
   | 'timer.armed'
   | 'timer.arm-failed'
   | 'timer.cancelled'
+  | 'timer.gave-up'
   | 'timer.off'
   | 'timer.unconfigured';
 

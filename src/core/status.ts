@@ -233,6 +233,23 @@ export class MessageRecordNotFoundError extends Error {
  */
 export const DEFAULT_STATUS_TTL = 604_800;
 
+/**
+ * Whether a chain status is terminal: nothing further can happen to the chain, so the fallback
+ * timer is cancelled (or, when it fires anyway, only cleans up). `sent` and `pending` are not.
+ *
+ * @param status - The chain's status.
+ * @returns True for `delivered`, `read` and `failed`.
+ */
+export function isTerminalChainStatus(status: DeliveryStatus | 'pending'): boolean {
+  return TERMINAL_CHAIN_STATUSES.has(status);
+}
+
+const TERMINAL_CHAIN_STATUSES: ReadonlySet<DeliveryStatus | 'pending'> = new Set([
+  'delivered',
+  'read',
+  'failed',
+]);
+
 function getStatusPrecedence(status: DeliveryStatus): number {
   switch (status) {
     case 'failed': {

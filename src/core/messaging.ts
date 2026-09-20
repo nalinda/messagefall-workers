@@ -23,6 +23,7 @@ import {
 import {
   DEFAULT_STATUS_TTL,
   type FallbackTimerClient,
+  isTerminalChainStatus,
   kvStatusStore,
   type MessageRecord,
   resolveTimer,
@@ -212,7 +213,7 @@ async function handleChainStatusApplied<T extends Templates<Record<string, Templ
     return;
   }
 
-  if (event.status === 'delivered' || event.status === 'read') {
+  if (isTerminalChainStatus(event.status)) {
     // The chain is terminal: nothing is left to fall back to, so drop the timer (if this chain
     // ever armed one) and the input.
     await releaseChain(resolveTimer(env, options.timer), kv, id, record.policy.fallback);

@@ -20,7 +20,7 @@
 import { createLogger } from '../core/logger.js';
 import { advanceChainFor, MessagingConfigError, statusStoreFor } from '../core/messaging.js';
 import { pickRenderInput, type RenderInput } from '../core/render-input.js';
-import type { FallbackTimerClient } from '../core/status.js';
+import { type FallbackTimerClient, isTerminalChainStatus } from '../core/status.js';
 import { armArgs, type ArmTimerArgs, registeredMessagingOptions } from '../core/timer.js';
 import type { MessagingEnv } from '../env.js';
 import { DurableObjectBase } from './base.js';
@@ -29,9 +29,11 @@ const STATE_KEY = 'timer';
 
 /**
  * How many times an alarm that finds the chain still `pending` (the first attempt has not
- * settled yet) re-schedules itself for another `afterMs` before giving the message up.
+ * settled yet) re-schedules itself for another `afterMs` before giving the message up. An
+ * addition to the issue's two alarm outcomes (`sent` → advance, terminal → clean up), documented
+ * in the README's "How delivery works".
  */
-const MAX_PENDING_RECHECKS = 3;
+export const MAX_PENDING_RECHECKS = 3;
 
 const logger = createLogger();
 
@@ -44,8 +46,6 @@ type StoredTimer = RenderInput & { id: string; afterMs: number; rechecks: number
 function toStored(args: ArmTimerArgs): StoredTimer {
   return { ...pickRenderInput(args), id: args.id, afterMs: args.afterMs, rechecks: 0 };
 }
-
-const TERMINAL = new Set(['delivered', 'read', 'failed']);
 
 /**
  * Durable Object for timed fallback: fires `advanceChain({ reason: 'timeout' })` when a chain
@@ -68,7 +68,7 @@ export class FallbackTimer extends DurableObjectBase<MessagingEnv> {
       );
     }
     const record = await statusStoreFor(this.env, options).get(stored.id);
-    if (!record || TERMINAL.has(record.chain.status)) {
+    if (!record || isTerminalChainStatus(record.chain.status)) {
       return;
     }
     if (record.chain.status === 'pending') {
@@ -104,7 +104,7 @@ export class FallbackTimer extends DurableObjectBase<MessagingEnv> {
    */
   private async recheck(stored: StoredTimer): Promise<void> {
     if (stored.rechecks >= MAX_PENDING_RECHECKS) {
-      logger.warn('timer.cancelled', { id: stored.id, count: stored.rechecks });
+      logger.warn('timer.gave-up', { id: stored.id, count: stored.rechecks });
       return;
     }
     this.generation += 1;

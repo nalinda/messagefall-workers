@@ -26,7 +26,7 @@ import { createMessagingApp } from '../../src/app/hono.js';
 import { createMessaging, type Messaging, type MessagingOptions } from '../../src/core/messaging.js';
 import { kvStatusStore, type MessageRecord, type StatusStore } from '../../src/core/status.js';
 import { armTimer, cancelTimer } from '../../src/core/timer.js';
-import { FallbackTimer } from '../../src/durable/fallback-timer.js';
+import { FallbackTimer, MAX_PENDING_RECHECKS } from '../../src/durable/fallback-timer.js';
 import type { MessagingEnv } from '../../src/env.js';
 import type { DeliveryStatus } from '../../src/providers/types.js';
 import { captureConsole, memoryKV } from '../helpers/messaging.js';
@@ -71,6 +71,17 @@ async function seedSent(
 ): Promise<void> {
   await store.create(record);
   await kv.put(`in:${record.id}`, JSON.stringify({ input: { code: CODE }, to: TO, locale: 'en' }));
+}
+
+/**
+ * A record as `send` leaves it before the first attempt settles: chain `pending`, no attempts.
+ */
+function pendingRecord(id: string): MessageRecord {
+  return {
+    ...sentRecord(id),
+    chain: { status: 'pending', attempts: [] },
+    status: 'pending',
+  };
 }
 
 function sentRecord(id: string): MessageRecord {
@@ -124,6 +135,13 @@ async function chainProviderId(store: StatusStore, id: string, index: number): P
 async function chainOf(store: StatusStore, id: string): Promise<MessageRecord['chain']> {
   const record = await recordOf(store, id);
   return record.chain;
+}
+
+/**
+ * How many times the object for `id` has had its alarm invoked.
+ */
+function alarmCount(ns: FakeNamespace, id: string): number {
+  return ns.calls.filter((c) => c.name === id && c.method === 'alarm').length;
 }
 
 function isTimerLine(line: string): boolean {
@@ -304,6 +322,80 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
       expect(providers.sms.calls).toHaveLength(0);
       await clock.advance(10_000);
       expect(providers.sms.calls).toHaveLength(1);
+    });
+  });
+
+  describe('an alarm that finds the chain still pending (first attempt not settled)', () => {
+
+    it('re-schedules itself for another timeout instead of clearing storage or advancing', async () => {
+      const id = 'msg_01J9FB0000000000000000TM10';
+      await seedSent(store, kv, pendingRecord(id));
+      await armTimer(env.FALLBACK_TIMER, { id, afterMs: OTP_TIMEOUT, input: { code: CODE }, locale: 'en' });
+
+      await clock.advance(OTP_TIMEOUT);
+
+      expect(alarmCount(ns, id)).toBe(1);
+      expect(providers.sms.calls).toHaveLength(0);
+      expect(providers.whatsapp.calls).toHaveLength(0);
+      const chain = await chainOf(store, id);
+      expect(chain.status).toBe('pending');
+      expect(chain.attempts).toHaveLength(0);
+      // Still armed: same object, storage intact, next alarm one more timeout out.
+      expect(ns.storageOf(id).size).toBeGreaterThan(0);
+      expect(await ns.alarmOf(id)).toBe(T0 + OTP_TIMEOUT * 2);
+    });
+
+    it('gives up after MAX_PENDING_RECHECKS consecutive pending alarms and clears storage', async () => {
+      const id = 'msg_01J9FB0000000000000000TM11';
+      await seedSent(store, kv, pendingRecord(id));
+      await armTimer(env.FALLBACK_TIMER, { id, afterMs: OTP_TIMEOUT, input: { code: CODE }, locale: 'en' });
+
+      // The first alarm plus every allowed re-check keep the object armed ...
+      for (let fired = 1; fired <= MAX_PENDING_RECHECKS; fired += 1) {
+        await clock.advance(OTP_TIMEOUT);
+        expect(alarmCount(ns, id)).toBe(fired);
+        expect(ns.storageOf(id).size).toBeGreaterThan(0);
+        expect(await ns.alarmOf(id)).toBe(T0 + OTP_TIMEOUT * (fired + 1));
+      }
+
+      // ... the one after the budget gives up.
+      await clock.advance(OTP_TIMEOUT);
+      expect(alarmCount(ns, id)).toBe(MAX_PENDING_RECHECKS + 1);
+      expect(ns.storageOf(id).size).toBe(0);
+      expect(await ns.alarmOf(id)).toBeNull();
+
+      // Nothing more happens, and the chain was never touched.
+      await clock.advance(OTP_TIMEOUT * 10);
+      expect(alarmCount(ns, id)).toBe(MAX_PENDING_RECHECKS + 1);
+      expect(providers.sms.calls).toHaveLength(0);
+      const untouched = await chainOf(store, id);
+      expect(untouched.attempts).toHaveLength(0);
+    });
+
+    it('a chain that becomes sent between re-checks is advanced normally on the next alarm', async () => {
+      const id = 'msg_01J9FB0000000000000000TM12';
+      await seedSent(store, kv, pendingRecord(id));
+      await armTimer(env.FALLBACK_TIMER, { id, afterMs: OTP_TIMEOUT, input: { code: CODE }, locale: 'en' });
+
+      await clock.advance(OTP_TIMEOUT);
+      expect(alarmCount(ns, id)).toBe(1);
+      expect(providers.sms.calls).toHaveLength(0);
+
+      // The slow first attempt finally records `sent`.
+      await store.update(id, () => sentRecord(id));
+      await store.indexProviderId('wa_1', { id, channel: 'whatsapp', provider: 'wa' });
+
+      await clock.advance(OTP_TIMEOUT);
+      expect(alarmCount(ns, id)).toBe(2);
+      expect(providers.sms.calls).toHaveLength(1);
+      expect(providers.sms.calls[0].to).toBe(TO);
+      expect(providers.sms.calls[0].text).toBe(`Your code is ${CODE}`);
+      const advanced = await chainOf(store, id);
+      expect(advanced.attempts.map((a) => a.channel)).toEqual(['whatsapp', 'sms']);
+      expect(advanced.status).toBe('sent');
+      // Re-armed after the non-terminal SMS attempt, with a fresh re-check budget.
+      expect(await ns.alarmOf(id)).toBe(T0 + OTP_TIMEOUT * 3);
+      expect(ns.storageOf(id).size).toBeGreaterThan(0);
     });
   });
 
