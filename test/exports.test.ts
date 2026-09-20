@@ -160,25 +160,32 @@ describe('Entry points export documented functions', () => {
     const provider = await loadExport('./providers/stub');
     expect(typeof provider.StubProvider).toBe('function');
   });
+
+  it('exports httpSms provider from the built ./providers/http-sms entry point', async () => {
+    const provider = await loadExport('./providers/http-sms');
+    expect(typeof provider.httpSms).toBe('function');
+  });
 });
 
 describe('Node runtime package resolution', () => {
-  it('resolves messagefall-workers, ./client, ./durable, and ./providers/stub via package.json exports', () => {
+  it('resolves messagefall-workers, ./client, ./durable, ./providers/stub, and ./providers/http-sms via package.json exports', () => {
     const script = `
       Promise.all([
         import('messagefall-workers'),
         import('messagefall-workers/client'),
         import('messagefall-workers/durable'),
         import('messagefall-workers/providers/stub'),
-      ]).then(([root, client, durable, stub]) => {
+        import('messagefall-workers/providers/http-sms'),
+      ]).then(([root, client, durable, stub, httpSmsMod]) => {
         if (typeof root.createMessaging !== 'function') process.exit(1);
         if (typeof client.createMessagingClient !== 'function') process.exit(2);
         if (typeof durable.FallbackTimer !== 'function') process.exit(3);
         if (typeof stub.StubProvider !== 'function') process.exit(4);
+        if (typeof httpSmsMod.httpSms !== 'function') process.exit(5);
         process.exit(0);
       }).catch((err) => {
         console.error(err);
-        process.exit(5);
+        process.exit(6);
       });
     `;
     const result = spawnSync('node', ['--input-type=module', '-e', script], {
