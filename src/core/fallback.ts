@@ -4,9 +4,10 @@
  * Advances delivery across configured fallback channels when a channel fails
  * or times out.
  *
- * The chain walk itself is NOT implemented here: this module resolves the remaining channels,
- * the render inputs and the provider set, then hands them to `runChain` / `attemptRecorder` in
- * `./send.js`, which is the single chain-advance implementation. Everything below is the
+ * The chain walk itself is NOT implemented here: this module resolves the remaining channels
+ * and the render inputs, normalises the providers through `./provider-set.js`, then hands them
+ * to `runChain` / `attemptRecorder` in `./send.js`, which is the single chain-advance
+ * implementation. Everything below is the
  * asynchronous entry point's own concerns — where the input comes from (`in:<id>` in KV, the
  * timer's state, or a synchronous pass-through) and what happens to the fallback timer and the
  * `in:<id>` key once the chain settles.
@@ -17,9 +18,9 @@
 import type { KVNamespace } from '@cloudflare/workers-types';
 
 import type { MessagingEnv } from '../env.js';
-import type { Channel, Provider } from '../providers/types.js';
-import { type AnyRendered, type TemplateDef, validateInput } from '../templates.js';
+import { type TemplateDef, validateInput } from '../templates.js';
 import type { MessagingOptions } from './messaging.js';
+import { type ProviderSource, toProviderSet } from './provider-set.js';
 import { asRenderInput, readRenderInput, releaseChain, type RenderInput } from './render-input.js';
 import {
   attemptRecorder,
@@ -64,12 +65,7 @@ export interface AdvanceChainArgs<Env = MessagingEnv> {
    */
   options: Omit<Partial<MessagingOptions>, 'templates' | 'providers' | 'onStatus' | 'timer'> & {
     templates?: Record<string, TemplateDef<unknown>> | Map<string, TemplateDef<unknown>>;
-    providers?:
-      | Record<string, Provider>
-      | Provider[]
-      | Map<string, Provider>
-      | ProviderSet
-      | ((env: MessagingEnv) => ProviderSet);
+    providers?: ProviderSource<MessagingEnv>;
     onStatus?: (event: StatusCallbackEvent) => void | Promise<void>;
     fallbackTimeoutMs?: number;
     kv?: KVNamespace;
@@ -102,67 +98,6 @@ function rearmTimer(
   } catch {
     // Best-effort rearming
   }
-}
-
-function findInMap(
-  providers: Map<string, Provider>,
-  channel: Channel
-): Provider<AnyRendered> | undefined {
-  for (const p of providers.values()) {
-    if (p.channel === channel) return p;
-  }
-  return undefined;
-}
-
-function findInObject(
-  providers: Record<string, unknown>,
-  channel: Channel
-): Provider<AnyRendered> | undefined {
-  for (const p of Object.values(providers)) {
-    if (p && typeof p === 'object' && 'channel' in p && p.channel === channel) {
-      return p as Provider<AnyRendered>;
-    }
-  }
-  return undefined;
-}
-
-function findProviderForChannel(
-  providers: AdvanceChainArgs['options']['providers'],
-  env: MessagingEnv,
-  channel: Channel
-): Provider<AnyRendered> | undefined {
-  if (!providers) return undefined;
-  const resolved = typeof providers === 'function' ? providers(env) : providers;
-  if (resolved instanceof Map) {
-    return findInMap(resolved, channel);
-  }
-  if (Array.isArray(resolved)) {
-    return resolved.find((p) => p.channel === channel);
-  }
-  if (typeof resolved === 'object') {
-    return findInObject(resolved as Record<string, unknown>, channel);
-  }
-  return undefined;
-}
-
-/**
- * Normalises whatever shape the caller configured providers in into the per-channel
- * {@link ProviderSet} the send pipeline expects.
- */
-function toProviderSet(
-  providers: AdvanceChainArgs['options']['providers'],
-  env: MessagingEnv
-): ProviderSet {
-  const find = (channel: Channel): Provider<AnyRendered> | undefined =>
-    findProviderForChannel(providers, env, channel);
-  const set: ProviderSet = {};
-  const whatsapp = find('whatsapp');
-  const sms = find('sms');
-  const email = find('email');
-  if (whatsapp) set.whatsapp = whatsapp;
-  if (sms) set.sms = sms;
-  if (email) set.email = email;
-  return set;
 }
 
 function extractFromTimer(
