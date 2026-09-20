@@ -17,7 +17,7 @@ import type { MessagingEnv } from '../env.js';
 import type { Templates } from '../templates.js';
 import { createLogger } from './logger.js';
 import type { MessagingOptions } from './messaging.js';
-import { pickRenderInput, type RenderInput } from './render-input.js';
+import { DEFAULT_LOCALE, pickRenderInput, type RenderInput } from './render-input.js';
 import type { FallbackTimerClient } from './status.js';
 
 const logger = createLogger();
@@ -164,43 +164,40 @@ export function armArgs(id: string, afterMs: number, payload?: RenderInput): Arm
     ...pickRenderInput(payload ?? { input: undefined }),
     id,
     afterMs,
-    locale: payload?.locale ?? 'en',
+    locale: payload?.locale ?? DEFAULT_LOCALE,
   };
 }
 
 /**
- * Envs for which the "timed fallback is off" line has been written in this isolate.
+ * Scopes (envs and app instances) for which the "timed fallback is off" line has been written
+ * in this isolate.
  */
 const timerOffAnnounced = new WeakSet<object>();
 
 /**
  * Writes the one startup line saying timed fallback is off — `timer.off` — when neither the
- * `timer` option nor `env.FALLBACK_TIMER` is present, once per env in this isolate. Chain
- * fallback then runs on explicit failure statuses only. `createMessaging` calls this on every
- * construction; `createMessagingApp` writes the line itself once per app and then calls
- * {@link markTimerOffAnnounced} so the routes' `createMessaging` calls do not repeat it.
+ * `timer` option nor `env.FALLBACK_TIMER` is present. Chain fallback then runs on explicit
+ * failure statuses only.
+ *
+ * The line is written once per `scope`, which defaults to `env`: `createMessaging` (called per
+ * request) announces once per env in the isolate; `createMessagingApp` passes its app instance
+ * so each app says it once on its first request, and the env is marked at the same time so the
+ * routes' `createMessaging` calls do not repeat it.
  *
  * @param env - Worker bindings.
  * @param timer - The `timer` option, if any.
+ * @param scope - The object the "once" is tied to; defaults to `env`.
  */
-export function announceTimerOff(env: MessagingEnv, timer: unknown): void {
+export function announceTimerOff(env: MessagingEnv, timer: unknown, scope: object = env): void {
   // Same "is there a timer at all" test as `resolveTimer`, inlined to keep this module free of
   // a value import from `./status.js` (which imports the adapter from here).
   const raw = timer ?? env.FALLBACK_TIMER;
-  if ((raw && typeof raw === 'object') || timerOffAnnounced.has(env)) {
+  if ((raw && typeof raw === 'object') || timerOffAnnounced.has(scope)) {
     return;
   }
+  timerOffAnnounced.add(scope);
   timerOffAnnounced.add(env);
   logger.info('timer.off');
-}
-
-/**
- * Records that the "timed fallback is off" line has already been written for `env`.
- *
- * @param env - Worker bindings.
- */
-export function markTimerOffAnnounced(env: MessagingEnv): void {
-  timerOffAnnounced.add(env);
 }
 
 const registry: { options: MessagingOptions | undefined } = { options: undefined };

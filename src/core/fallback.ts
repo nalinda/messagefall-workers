@@ -19,10 +19,12 @@ import type { KVNamespace } from '@cloudflare/workers-types';
 
 import type { MessagingEnv } from '../env.js';
 import { type TemplateDef, validateInput } from '../templates.js';
+import { createLogger } from './logger.js';
 import type { MessagingOptions } from './messaging.js';
 import { type ProviderSource, toProviderSet } from './provider-set.js';
 import {
   asRenderInput,
+  DEFAULT_LOCALE,
   pickRenderInput,
   readRenderInput,
   releaseChain,
@@ -45,6 +47,8 @@ import {
   type StatusStore,
 } from './status.js';
 import { chainTimeoutMs } from './timer.js';
+
+const logger = createLogger();
 
 /**
  * Arguments for advancing the delivery fallback chain.
@@ -226,15 +230,24 @@ async function finalizeExhaustion(
     });
   }
 
-  await release(args, kv);
+  await release(args, record, kv);
 }
 
 /**
  * This module's call into the shared terminal-state cleanup, with the timer resolved the same
  * way every other path here resolves it.
  */
-async function release(args: AdvanceChainArgs, kv: KVNamespace | undefined): Promise<void> {
-  await releaseChain(resolveTimer(args.env, args.options.timer), kv, args.id);
+async function release(
+  args: AdvanceChainArgs,
+  record: MessageRecord,
+  kv: KVNamespace | undefined
+): Promise<void> {
+  await releaseChain(
+    resolveTimer(args.env, args.options.timer),
+    kv,
+    args.id,
+    record.policy.fallback
+  );
 }
 
 /**
@@ -255,7 +268,7 @@ function rebuildRequest(
   template: TemplateDef<unknown> | undefined,
   payload: RenderInput
 ): ValidatedSendRequest {
-  const locale = payload.locale ?? 'en';
+  const locale = payload.locale ?? DEFAULT_LOCALE;
   return {
     templateName: record.template,
     template: template ?? missingTemplate(record.kind),
@@ -284,6 +297,8 @@ export async function advanceChain(args: AdvanceChainArgs): Promise<void> {
   }
 
   const initialRecord = record as MessageRecord;
+  // One line per chain advance, whatever triggered it (failed status or timer).
+  logger.info('fallback.advance', { id: args.id, kind: initialRecord.kind });
   const lastAttempt = initialRecord.chain.attempts.at(-1) as Attempt;
   const fallback = initialRecord.policy.fallback;
   const lastIndex = fallback.indexOf(lastAttempt.channel);
@@ -314,7 +329,7 @@ export async function advanceChain(args: AdvanceChainArgs): Promise<void> {
 
   const last = attempts.at(-1);
   if (!last || last.status === 'failed') {
-    await release(args, kv);
+    await release(args, initialRecord, kv);
     return;
   }
 

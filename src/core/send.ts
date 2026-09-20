@@ -27,7 +27,7 @@ import {
 import { createLogger } from './logger.js';
 import { type DeliveryOverride, type DeliveryPolicy, resolveDelivery } from './policy.js';
 import { scrubError } from './redact.js';
-import { releaseChain, type RenderInput, renderInputKey } from './render-input.js';
+import { isTimedChain, releaseChain, type RenderInput, renderInputKey } from './render-input.js';
 import {
   type Attempt,
   deriveOverallStatus,
@@ -470,7 +470,7 @@ async function cleanupExhaustedChain(
   }
   const lastAttempt = chainAttempts.at(-1);
   if (lastAttempt?.status === 'failed' && chainAttempts.length >= policy.fallback.length) {
-    await releaseChain(deps.timer, deps.kv, id);
+    await releaseChain(deps.timer, deps.kv, id, policy.fallback);
   }
 }
 
@@ -624,7 +624,7 @@ async function stashChainInput(
       expirationTtl: ttlSeconds,
     });
   }
-  if (policy.fallback.length > 1 && typeof deps.timer?.setState === 'function') {
+  if (isTimedChain(policy.fallback) && typeof deps.timer?.setState === 'function') {
     try {
       await deps.timer.setState(id, timeoutMs, inputPayload);
     } catch {

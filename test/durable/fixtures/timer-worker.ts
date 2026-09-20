@@ -21,37 +21,10 @@ import type {
   RenderedSms,
   RenderedWhatsApp,
   SendResult,
-  StatusEvent,
 } from '../../../src/providers/types.js';
-import { defineTemplates } from '../../../src/templates.js';
+import { parseStatusEvents, timerTemplates } from './timer-catalogue.js';
 
 type Env = MessagingEnv & { CALLS_KV: KVNamespace };
-
-const templates = defineTemplates({
-  loginCode: {
-    kind: 'otp',
-    whatsapp: {
-      template: 'auth_code',
-      language: 'en',
-      params: (input: { code: string }) => [input.code],
-    },
-    sms: (input: { code: string }) => `Your code is ${input.code}`,
-  },
-  reminder: {
-    kind: 'notification',
-    whatsapp: { text: (input: { text: string }) => `Reminder: ${input.text}` },
-    sms: (input: { text: string }) => `Reminder: ${input.text}`,
-  },
-});
-
-async function parseStatuses(request: Request): Promise<StatusEvent[]> {
-  const body = (await request.json()) as
-    Array<{ providerId: string; status: StatusEvent['status']; error?: string }> | { providerId: string; status: StatusEvent['status']; error?: string };
-  return (Array.isArray(body) ? body : [body]).map((e) => ({
-    ...e,
-    at: new Date().toISOString(),
-  }));
-}
 
 function recordingProvider<R>(
   env: Env,
@@ -71,12 +44,12 @@ function recordingProvider<R>(
       );
       return { ok: true, providerId: `${name}:${message.messageId}:${previous.length + 1}` };
     },
-    webhook: { parse: parseStatuses },
+    webhook: { parse: parseStatusEvents },
   };
 }
 
 const app = createMessagingApp<Env>({
-  templates,
+  templates: timerTemplates,
   providers: (env) => ({
     whatsapp: recordingProvider<RenderedWhatsApp>(env as Env, 'wa', 'whatsapp', () => ({})),
     sms: recordingProvider<RenderedSms>(env as Env, 'sms', 'sms', (m) => ({ text: m.text })),

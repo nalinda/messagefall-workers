@@ -202,6 +202,7 @@ export async function advanceChainFor<T extends Templates<Record<string, Templat
 async function handleChainStatusApplied<T extends Templates<Record<string, TemplateDef<unknown>>>>(
   id: string,
   event: StatusEvent,
+  record: MessageRecord,
   env: MessagingEnv,
   options: MessagingOptions<T>,
   kv: KVNamespace
@@ -212,8 +213,9 @@ async function handleChainStatusApplied<T extends Templates<Record<string, Templ
   }
 
   if (event.status === 'delivered' || event.status === 'read') {
-    // The chain is terminal: nothing is left to fall back to, so drop the timer and the input.
-    await releaseChain(resolveTimer(env, options.timer), kv, id);
+    // The chain is terminal: nothing is left to fall back to, so drop the timer (if this chain
+    // ever armed one) and the input.
+    await releaseChain(resolveTimer(env, options.timer), kv, id, record.policy.fallback);
   }
 }
 
@@ -285,8 +287,8 @@ export function createMessaging<T extends Templates<any>>(
             ? notifyStatus(options.onStatus, { ...ref, status: (raw as StatusEvent).status })
             : undefined
       : undefined,
-    onStatusApplied: ({ id, part, event }) =>
-      part === 'chain' ? handleChainStatusApplied(id, event, env, options, kv) : undefined,
+    onStatusApplied: ({ id, part, event, record }) =>
+      part === 'chain' ? handleChainStatusApplied(id, event, record, env, options, kv) : undefined,
   });
 
   return {

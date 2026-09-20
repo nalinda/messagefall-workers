@@ -6,7 +6,6 @@
 
 import { Hono } from 'hono';
 
-import { createLogger } from '../core/logger.js';
 import {
   createMessaging,
   type MessagingOptions,
@@ -15,12 +14,9 @@ import {
 } from '../core/messaging.js';
 import { PolicyError } from '../core/policy.js';
 import { RecipientError, type SendContext } from '../core/send.js';
-import { resolveTimer } from '../core/status.js';
-import { markTimerOffAnnounced, registerMessagingOptions } from '../core/timer.js';
+import { announceTimerOff, registerMessagingOptions } from '../core/timer.js';
 import { type MessagingEnv, validateEnv } from '../env.js';
 import { TemplateValidationError } from '../templates.js';
-
-const logger = createLogger();
 
 function getExecutionContext(c: { executionCtx: unknown }): SendContext | undefined {
   try {
@@ -96,13 +92,9 @@ export function createMessagingApp<E extends MessagingEnv = MessagingEnv>(
   app.use('*', async (c, next) => {
     if (!isValidated) {
       validateEnv(c.env, options);
-      if (!resolveTimer(c.env, options.timer)) {
-        // Without the FALLBACK_TIMER binding chain fallback is driven by explicit failure
-        // statuses only; said once per app so a missing binding is visible in the logs, and
-        // marked so the routes' createMessaging calls do not repeat it for this env.
-        logger.info('timer.off');
-        markTimerOffAnnounced(c.env);
-      }
+      // Without the FALLBACK_TIMER binding chain fallback is driven by explicit failure
+      // statuses only; said once per app so a missing binding is visible in the logs.
+      announceTimerOff(c.env, options.timer, app);
       isValidated = true;
     }
     await next();

@@ -24,9 +24,10 @@ import type {
   RenderedSms,
   RenderedWhatsApp,
   SendResult,
-  StatusEvent,
 } from '../../src/providers/types.js';
-import { defineTemplates } from '../../src/templates.js';
+import { parseStatusEvents } from '../durable/fixtures/timer-catalogue.js';
+
+export { timerTemplates } from '../durable/fixtures/timer-catalogue.js';
 
 /**
  * The public surface of a FallbackTimer instance (RPC methods). `ArmTimerArgs` is the issue's
@@ -454,14 +455,7 @@ export function timerTestProvider<R>(
       }
       return Promise.resolve({ ok: true, providerId: `${name}_${calls.length}` });
     },
-    webhook: {
-      parse: async (request: Request): Promise<StatusEvent[]> => {
-        const body = (await request.json()) as
-          Array<{ providerId: string; status: StatusEvent['status']; error?: string }> | { providerId: string; status: StatusEvent['status']; error?: string };
-        const events = Array.isArray(body) ? body : [body];
-        return events.map((e) => ({ ...e, at: new Date().toISOString() }));
-      },
-    },
+    webhook: { parse: parseStatusEvents },
   };
 }
 
@@ -484,26 +478,6 @@ export function timerProviders(): TimerProviders {
     sms: timerTestProvider<RenderedSms>('sms', 'sms'),
   };
 }
-
-/**
- * Template catalogue for the timer specs: an OTP template (whatsapp → sms) and a notification.
- */
-export const timerTemplates = defineTemplates({
-  loginCode: {
-    kind: 'otp',
-    whatsapp: {
-      template: 'auth_code',
-      language: 'en',
-      params: (input: { code: string }) => [input.code],
-    },
-    sms: (input: { code: string }) => `Your code is ${input.code}`,
-  },
-  reminder: {
-    kind: 'notification',
-    whatsapp: { text: (input: { text: string }) => `Reminder: ${input.text}` },
-    sms: (input: { text: string }) => `Reminder: ${input.text}`,
-  },
-});
 
 /**
  * Builds a Worker env for the timer specs.

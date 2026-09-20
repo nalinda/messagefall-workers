@@ -3,7 +3,9 @@
  *
  * One object per message, addressed by `idFromName(messageId)`. `arm` stores the render input
  * and sets the alarm; `cancel` clears both; `alarm` advances the chain when the message is
- * still `sent` — a status that simply never arrived — and cleans up.
+ * still `sent` — a status that simply never arrived — and cleans up. A chain still `pending`
+ * at alarm time is re-checked after another delay rather than abandoned; a terminal chain
+ * (`delivered`, `read`, `failed`) is only cleaned up.
  *
  * The object rebuilds the core from the options the Worker registered with
  * `createMessagingApp` / `createMessaging`. An isolate woken only by an alarm runs nothing but
@@ -25,16 +27,25 @@ import { DurableObjectBase } from './base.js';
 
 const STATE_KEY = 'timer';
 
+/**
+ * How many times an alarm that finds the chain still `pending` (the first attempt has not
+ * settled yet) re-schedules itself for another `afterMs` before giving the message up.
+ */
+const MAX_PENDING_RECHECKS = 3;
+
 const logger = createLogger();
 
 /**
- * What one armed timer keeps in its storage: the render input plus the message id.
+ * What one armed timer keeps in its storage: the render input, the message id, the delay it
+ * was armed with (so a `pending` chain can be re-checked) and how often that has happened.
  */
-type StoredTimer = RenderInput & { id: string };
+type StoredTimer = RenderInput & { id: string; afterMs: number; rechecks: number };
 
 function toStored(args: ArmTimerArgs): StoredTimer {
-  return { ...pickRenderInput(args), id: args.id };
+  return { ...pickRenderInput(args), id: args.id, afterMs: args.afterMs, rechecks: 0 };
 }
+
+const TERMINAL = new Set(['delivered', 'read', 'failed']);
 
 /**
  * Durable Object for timed fallback: fires `advanceChain({ reason: 'timeout' })` when a chain
@@ -57,10 +68,16 @@ export class FallbackTimer extends DurableObjectBase<MessagingEnv> {
       );
     }
     const record = await statusStoreFor(this.env, options).get(stored.id);
-    if (record?.chain.status !== 'sent') {
+    if (!record || TERMINAL.has(record.chain.status)) {
       return;
     }
-    logger.info('fallback.advance', { id: stored.id, kind: record.kind });
+    if (record.chain.status === 'pending') {
+      // The first attempt has not settled yet (a slow provider, or the OTP waitUntil path
+      // outlasting the timeout). Nothing to advance from, but clearing now would leave the
+      // message without a timer once it does record `sent`: come back after another delay.
+      await this.recheck(stored);
+      return;
+    }
     await advanceChainFor(this.env, options, {
       id: stored.id,
       reason: 'timeout',
@@ -79,6 +96,20 @@ export class FallbackTimer extends DurableObjectBase<MessagingEnv> {
       setState: (id, timeoutMs, input) => this.arm(armArgs(id, timeoutMs, input)),
       cancel: (id) => this.cancel(id),
     };
+  }
+
+  /**
+   * Re-schedules the alarm for a chain still `pending`, up to {@link MAX_PENDING_RECHECKS}
+   * times; after that the alarm gives up and the storage is cleared by the caller.
+   */
+  private async recheck(stored: StoredTimer): Promise<void> {
+    if (stored.rechecks >= MAX_PENDING_RECHECKS) {
+      logger.warn('timer.cancelled', { id: stored.id, count: stored.rechecks });
+      return;
+    }
+    this.generation += 1;
+    await this.ctx.storage.put(STATE_KEY, { ...stored, rechecks: stored.rechecks + 1 });
+    await this.ctx.storage.setAlarm(Date.now() + stored.afterMs);
   }
 
   private async clear(): Promise<void> {
@@ -111,10 +142,11 @@ export class FallbackTimer extends DurableObjectBase<MessagingEnv> {
   }
 
   /**
-   * Alarm handler: if the chain is still `sent`, advance it from the stored input. Storage is
-   * cleared only once the advance has settled without re-arming the object; an advance that
-   * throws propagates with the storage intact, so the platform's alarm retry finds the state it
-   * needs rather than an empty object.
+   * Alarm handler: if the chain is still `sent`, advance it from the stored input; if it is
+   * still `pending`, re-check later. Storage is cleared only once the advance has settled
+   * without re-arming or re-scheduling the object; an advance that throws propagates with the
+   * storage intact, so the platform's alarm retry finds the state it needs rather than an empty
+   * object.
    */
   async alarm(): Promise<void> {
     const stored = await this.ctx.storage.get<StoredTimer>(STATE_KEY);
