@@ -30,6 +30,7 @@ export type LogEvent =
   | 'send.start'
   | 'send.attempt'
   | 'send.retry'
+  | 'send.channel-skipped'
   | 'webhook.applied'
   | 'webhook.received'
   | 'fallback.advance'

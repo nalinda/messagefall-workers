@@ -86,20 +86,22 @@ export class TemplateValidationError extends Error {
   }
 }
 
-function hasWhatsAppChannel(wa: TemplateDef['whatsapp']): boolean {
-  if (!wa) return false;
+function hasWhatsAppChannel(wa: unknown): boolean {
+  if (!wa || typeof wa !== 'object') return false;
   if ('template' in wa && typeof wa.template === 'string' && wa.template.length > 0) {
     return true;
   }
   return 'text' in wa && typeof wa.text === 'function';
 }
 
-function hasSmsChannel(sms: TemplateDef['sms']): boolean {
+function hasSmsChannel(sms: unknown): boolean {
   return typeof sms === 'function';
 }
 
-function hasEmailChannel(email: TemplateDef['email']): boolean {
-  return Boolean(email) && typeof email?.subject === 'function' && typeof email.text === 'function';
+function hasEmailChannel(email: unknown): boolean {
+  if (!email || typeof email !== 'object') return false;
+  const e = email as Record<string, unknown>;
+  return typeof e.subject === 'function' && typeof e.text === 'function';
 }
 
 /**
@@ -108,7 +110,8 @@ function hasEmailChannel(email: TemplateDef['email']): boolean {
  * @param def - The template definition.
  * @returns Array of channel names defined on the template.
  */
-export function definedChannels(def: TemplateDef<unknown>): Channel[] {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function definedChannels<In = any>(def: TemplateDef<In>): Channel[] {
   const channels: Channel[] = [];
   if (hasWhatsAppChannel(def.whatsapp)) {
     channels.push('whatsapp');
@@ -303,7 +306,7 @@ function renderEmail<In>(
   return {
     subject,
     text,
-    ...(html && { html }),
+    ...(html !== undefined && { html }),
   };
 }
 

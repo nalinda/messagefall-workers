@@ -228,6 +228,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
         const { id } = await messaging.send({
           template: 'orderUpdate',
           to: TO,
+          email: 'ann@example.com',
           locale: 'en',
           input: INPUT,
         });
@@ -256,7 +257,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
         expect(emailCall.subject).toBe('Order A-100 shipped');
         expect(emailCall.text).toBe('Hi Ann, your order A-100 is on its way.');
         expect(emailCall).toMatchObject({
-          to: TO,
+          to: 'ann@example.com',
           messageId: id,
           template: 'orderUpdate',
           kind: 'notification',
@@ -313,6 +314,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
         const { id } = await messaging.send({
           template: 'orderUpdate',
           to: TO,
+          email: 'ann@example.com',
           locale: 'en',
           input: INPUT,
         });
@@ -573,6 +575,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
         const { id } = await messaging.send({
           template: 'orderUpdate',
           to: TO,
+          email: 'ann@example.com',
           locale: 'en',
           input: INPUT,
         });
@@ -635,6 +638,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       const { id } = await messaging.send({
         template: 'emailFirst',
         to: TO,
+        email: 'ann@example.com',
         locale: 'en',
         input: INPUT,
       });
@@ -982,7 +986,13 @@ describe('Issue #3: createMessaging send pipeline', () => {
           delivery: { fallback: ['sms'], always: ['email'] },
         });
 
-        const pending = messaging.send({ template: 'orderUpdate', to: TO, locale: 'en', input: INPUT });
+        const pending = messaging.send({
+          template: 'orderUpdate',
+          to: TO,
+          email: 'ann@example.com',
+          locale: 'en',
+          input: INPUT,
+        });
 
         // The chain is exhausted and sealed while email is still held open.
         await waitFor(() => email.calls.length === 1);
@@ -1060,7 +1070,13 @@ describe('Issue #3: createMessaging send pipeline', () => {
         },
       });
 
-      const pending = messaging.send({ template: 'orderUpdate', to: TO, locale: 'en', input: INPUT });
+      const pending = messaging.send({
+        template: 'orderUpdate',
+        to: TO,
+        email: 'ann@example.com',
+        locale: 'en',
+        input: INPUT,
+      });
 
       const store = kvStatusStore(env.MESSAGES_KV!);
       // While whatsapp is still held open, the email attempt is already on the record and indexed.
@@ -1296,6 +1312,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       const pending = messaging.send({
         template: 'orderUpdate',
         to: TO,
+        email: 'ann@example.com',
         locale: 'en',
         input: INPUT,
       });
@@ -1367,6 +1384,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       const { id } = await messaging.send({
         template: 'orderUpdate',
         to: TO,
+        email: 'ann@example.com',
         locale: 'en',
         input: INPUT,
       });

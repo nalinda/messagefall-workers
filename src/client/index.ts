@@ -34,6 +34,7 @@ export interface MessagingClientOptions {
  */
 export interface ClientSendOptions<TInput = unknown> {
   to: string;
+  email?: string;
   locale?: string;
   input: TInput;
   delivery?: DeliveryOverride;

@@ -49,6 +49,7 @@ export interface MessagingOptions<T extends Templates<any> = Templates<any>> {
 export interface SendArgs<T, K extends keyof T> {
   template: K;
   to: string;
+  email?: string;
   locale: string;
   input: InputOf<T, K>;
   delivery?: DeliveryOverride;
@@ -309,6 +310,7 @@ export function createMessaging<T extends Templates<any>>(
           templateName,
           template,
           to: args.to,
+          email: args.email,
           locale: args.locale,
           input: args.input,
           delivery: args.delivery,

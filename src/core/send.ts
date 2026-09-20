@@ -101,6 +101,7 @@ export interface SendRequest {
   templateName: string;
   template: TemplateDef<unknown>;
   to: string;
+  email?: string;
   locale: string;
   input: unknown;
   delivery?: DeliveryOverride;
@@ -175,7 +176,7 @@ async function attemptChannel(
       req.locale
     );
     const meta: OutboundMeta = {
-      to: req.to,
+      to: channel === 'email' ? (req.email ?? req.to) : req.to,
       messageId: id,
       template: req.templateName,
       kind: req.template.kind,
@@ -545,14 +546,37 @@ export async function runSend(
     validatedInput: validateInput(req.template, req.input),
   };
 
-  const policy = resolveDelivery({
+  const initialPolicy = resolveDelivery({
     defaults: deps.defaults,
     template: req.template.delivery,
     send: req.delivery,
     defined: definedChannels(req.template),
     templateName: req.templateName,
   });
+
+  const hasEmail = typeof req.email === 'string' && req.email.trim().length > 0;
+  const hasEmailInPolicy =
+    initialPolicy.fallback.includes('email') || initialPolicy.always.includes('email');
+  const shouldSkipEmail = hasEmailInPolicy && !hasEmail;
+
+  const policy: DeliveryPolicy = shouldSkipEmail
+    ? {
+        fallback: initialPolicy.fallback.filter((ch) => ch !== 'email'),
+        always: initialPolicy.always.filter((ch) => ch !== 'email'),
+      }
+    : initialPolicy;
+
   const id = newMessageId();
+
+  if (shouldSkipEmail) {
+    defaultLogger.info('send.channel-skipped', {
+      id,
+      channel: 'email',
+      template: req.templateName,
+      kind: req.template.kind,
+    });
+  }
+
   const now = new Date().toISOString();
   await deps.store.create({
     id,

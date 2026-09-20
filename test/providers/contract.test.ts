@@ -159,7 +159,13 @@ describe('Provider contract type-level specification', () => {
       providers: providersFactory,
       delivery: { fallback: ['whatsapp'], always: ['email'] },
     });
-    const { id } = await messaging.send({ template: 'hello', to: '+14155550123', locale: 'en', input: undefined });
+    const { id } = await messaging.send({
+      template: 'hello',
+      to: '+14155550123',
+      email: 'dev@example.com',
+      locale: 'en',
+      input: undefined,
+    });
     expect(waSpy).toHaveBeenCalledTimes(1);
     expect(emailSpy).toHaveBeenCalledTimes(1);
     const record = await messaging.status(id);

@@ -230,6 +230,8 @@ await messages.send('loginCode', { to, locale, input, delivery: { always: [] } }
 
 A channel that appears in both `fallback` and `always` is sent once, as part of `always`. A template that defines none of the resolved channels is a send-time error with a clear message.
 
+Send calls carry `to` (the E.164 phone number) and an optional `email` field (`{ to, email?, ... }`) so a template can reach an inbox. When the resolved policy includes `email` and no `email` address is provided, the email channel is dropped from the policy with a logged `send.channel-skipped` event rather than failing the send, and phone channels proceed normally.
+
 Fallback never re-renders with a different input. The same input renders each channel's version of the same template.
 
 ## Templates
@@ -349,6 +351,7 @@ const messages = createMessagingClient<typeof templates>({ binding: env.MESSAGES
 
 await messages.send('matchFound', {
   to: '+94771234567',
+  email: 'user@example.com', // optional: required if resolved policy includes email, otherwise email is skipped
   locale: 'en',
   input: { title: 'Bicycle, Kandy', url: 'https://example.com/m/123' },
   delivery: 'all', // optional per-send override
