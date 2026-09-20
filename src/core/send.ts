@@ -21,6 +21,7 @@ import {
   type TemplateDef,
   validateInput,
 } from '../templates.js';
+import { createLogger, scrubError } from './logger.js';
 import { type DeliveryOverride, type DeliveryPolicy, resolveDelivery } from './policy.js';
 import {
   type Attempt,
@@ -30,6 +31,8 @@ import {
   type StatusStore,
 } from './status.js';
 import { ulid } from './ulid.js';
+
+const defaultLogger = createLogger();
 
 /**
  * `Attempt.provider` value recorded when a resolved channel has no provider configured.
@@ -181,18 +184,36 @@ async function attemptChannel(
     // See #28 — OutboundMeta.template / RenderedWhatsApp.template collision; rendered wins.
     payload = { ...meta, ...rendered } as AnyRendered & OutboundMeta;
   } catch (error) {
-    return { ...base, status: 'failed', error: errorMessage(error), at: new Date().toISOString() };
+    return {
+      ...base,
+      status: 'failed',
+      error: scrubError(errorMessage(error), [req.validatedInput, req.input]),
+      at: new Date().toISOString(),
+    };
   }
 
   let result = await callProvider(provider, payload);
   if (!result.ok && result.retryable) {
+    defaultLogger.warn('send.retry', {
+      id,
+      channel,
+      provider: provider.name,
+      errorCode: (result as { errorCode?: string }).errorCode,
+    });
     result = await callProvider(provider, payload);
   }
 
   const at = new Date().toISOString();
   return result.ok
     ? { ...base, status: 'sent', ...(result.providerId && { providerId: result.providerId }), at }
-    : { ...base, status: 'failed', error: result.error, at };
+    : {
+        ...base,
+        status: 'failed',
+        error: result.error
+          ? scrubError(result.error, [payload, req.validatedInput, req.input])
+          : undefined,
+        at,
+      };
 }
 
 /**
@@ -455,10 +476,8 @@ async function deliverGuarded(
 ): Promise<void> {
   try {
     await deliver(deps, req, id, policy);
-  } catch (error) {
-    console.error(
-      `[messagefall] could not persist delivery status id=${id}; attempts may have been sent, do not assume nothing happened: ${errorMessage(error)}`
-    );
+  } catch {
+    defaultLogger.error('send.attempt', { id });
   }
 }
 
@@ -474,7 +493,7 @@ async function indexAttempt(deps: SendDeps, id: string, attempt: Attempt): Promi
   try {
     await deps.store.indexProviderId(attempt.providerId, { id, channel, provider });
   } catch {
-    console.warn(`[messagefall] indexProviderId failed id=${id} channel=${channel}`);
+    defaultLogger.warn('send.attempt', { id, channel, provider });
   }
 }
 
@@ -493,7 +512,11 @@ export async function notifyStatus(
   try {
     await onStatus?.(event);
   } catch {
-    console.warn(`[messagefall] onStatus failed id=${event.id} channel=${event.channel}`);
+    defaultLogger.warn('send.attempt', {
+      id: event.id,
+      channel: event.channel,
+      provider: event.provider,
+    });
   }
 }
 

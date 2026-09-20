@@ -19,6 +19,7 @@ import type {
   SendResult,
   TemplateDef,
 } from '../types.js';
+import { scrubError } from './logger.js';
 import type { MessagingOptions } from './messaging.js';
 import { NO_PROVIDER, notifyStatus, type ProviderSet, type StatusCallbackEvent } from './send.js';
 import {
@@ -333,7 +334,14 @@ async function performChannelAttempt(
         ...(result.providerId && { providerId: result.providerId }),
         at,
       }
-    : { ...base, status: 'failed', error: result.error, at };
+    : {
+        ...base,
+        status: 'failed',
+        error: result.error
+          ? scrubError(result.error, [sendPayload, validatedInput, payload.input])
+          : undefined,
+        at,
+      };
 }
 
 async function finalizeExhaustion(

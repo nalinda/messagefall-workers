@@ -121,7 +121,7 @@ describe('createMessaging.handleWebhook observer failures', () => {
       expect(seen).toEqual(['sent', 'delivered', 'read']);
       const record = await messaging.status(id);
       expect(record!.chain.attempts[0].status).toBe('read');
-      expect(captured.logs.some((line) => line.includes(`onStatus failed id=${id}`))).toBe(true);
+      expect(captured.logs.some((line) => line.includes(id))).toBe(true);
     } finally {
       captured.restore();
     }

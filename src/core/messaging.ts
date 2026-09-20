@@ -273,6 +273,7 @@ export function createMessaging<T extends Templates<any>>(
   const webhook = createWebhookHandler({
     providers: providers as Record<string, Provider>,
     store,
+    templates: options.templates,
     env,
     // The webhook module reports raw StatusEvents plus the ref it already resolved; forward them
     // in this module's onStatus shape so callers see one event type from sends and webhooks.

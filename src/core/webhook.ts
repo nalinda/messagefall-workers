@@ -8,6 +8,7 @@
 import type { ExecutionContext, KVNamespace } from '@cloudflare/workers-types';
 
 import type { Channel, Provider, StatusEvent } from '../providers/types.js';
+import { createLogger, extractTemplateSensitiveStrings, scrubError } from './logger.js';
 import {
   type Attempt,
   deriveOverallStatus,
@@ -16,6 +17,8 @@ import {
   type ProviderRef,
   type StatusStore,
 } from './status.js';
+
+const defaultLogger = createLogger();
 
 /**
  * Event emitted when a delivery status update is applied to an attempt.
@@ -55,6 +58,7 @@ export interface WebhookDispatchOptions {
     | ((env: unknown) => Record<string, Provider>);
   kv?: KVNamespace;
   store?: StatusStore;
+  templates?: unknown;
   /**
    * Called with each parsed status event. When the event was matched to a message (a store is
    * configured and the providerId is indexed) the resolved `ProviderRef` is passed as well.
@@ -195,6 +199,34 @@ function applyStatusUpdate(
   return { updatedRecord, isChain };
 }
 
+async function resolveWebhookSensitive(
+  options: WebhookDispatchOptions,
+  refId: string,
+  existingRecord: MessageRecord | null,
+  error?: string
+): Promise<unknown[]> {
+  const sensitive: unknown[] = [];
+  const kv = options.kv ?? (options.env?.MESSAGES_KV as KVNamespace | undefined);
+  if (kv) {
+    try {
+      const rawInput = await kv.get(`in:${refId}`);
+      if (rawInput) {
+        sensitive.push(JSON.parse(rawInput));
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  if (error && existingRecord && options.templates) {
+    sensitive.push(
+      ...extractTemplateSensitiveStrings(options.templates, existingRecord.template, error)
+    );
+  }
+
+  return sensitive;
+}
+
 /**
  * Handles a single status event against the store and callbacks.
  */
@@ -217,10 +249,17 @@ async function handleSingleEvent(
       )
     : false;
 
-  await store.update(ref.id, (record) => applyStatusUpdate(record, event, ref).updatedRecord);
+  const sensitive = await resolveWebhookSensitive(options, ref.id, existingRecord, event.error);
+  const scrubbedEvent: StatusEvent =
+    event.error === undefined ? event : { ...event, error: scrubError(event.error, sensitive) };
+
+  await store.update(
+    ref.id,
+    (record) => applyStatusUpdate(record, scrubbedEvent, ref).updatedRecord
+  );
 
   if (options.onStatus) {
-    await options.onStatus(event, ref);
+    await options.onStatus(scrubbedEvent, ref);
   }
 
   if (isChain && options.onStatusApplied) {
@@ -229,7 +268,7 @@ async function handleSingleEvent(
       channel: ref.channel,
       provider: ref.provider,
       part: 'chain',
-      event,
+      event: scrubbedEvent,
     });
   }
 
@@ -248,23 +287,21 @@ async function processAllEvents(
   let unknownCount = 0;
 
   for (const event of events) {
-    if (!store) {
-      if (options.onStatus) {
-        await options.onStatus(event);
+    if (store) {
+      const result = await handleSingleEvent(event, store, options);
+      if (!result.wasHandled) {
+        unknownCount++;
       }
-      continue;
-    }
-
-    const result = await handleSingleEvent(event, store, options);
-    if (!result.wasHandled) {
-      unknownCount++;
+    } else if (options.onStatus) {
+      await options.onStatus(event);
     }
   }
 
   if (unknownCount > 0) {
-    console.warn(
-      `[webhook] Skipped ${unknownCount} unknown provider IDs for provider "${providerName}"`
-    );
+    defaultLogger.warn('webhook.received', {
+      count: unknownCount,
+      provider: providerName,
+    });
   }
 }
 
