@@ -260,7 +260,8 @@ describe('Issue #3: createMessaging send pipeline', () => {
         });
 
         expect(typeof id).toBe('string');
-        expect(id.length).toBeGreaterThan(0);
+        // msg_ + ULID (26 Crockford base32 chars), as MessageRecord.id documents.
+        expect(id).toMatch(/^msg_[0-9A-HJKMNP-TV-Z]{26}$/);
 
         // Exactly one call to each of whatsapp and email; sms untouched.
         expect(waSpy).toHaveBeenCalledTimes(1);
@@ -381,6 +382,101 @@ describe('Issue #3: createMessaging send pipeline', () => {
       const record = await messaging.status(id);
       expect(record!.template).toBe('loginCodeWa');
       expect(record!.chain.attempts[0]).toMatchObject({ channel: 'whatsapp', status: 'sent' });
+    });
+  });
+
+  describe('chain status while channels remain', () => {
+    it('reads pending, not failed, after the first channel fails and before the next has settled', async () => {
+      const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'dead-wa', [
+        { ok: false, error: 'number not on whatsapp' },
+      ]);
+      const sms = gatedProvider<RenderedSms>('sms', 'slow-sms', 'sms-pid');
+
+      const messaging = createMessaging(newEnv(), {
+        templates,
+        providers: () => ({ whatsapp: wa, sms: sms.provider }),
+        delivery: { fallback: ['whatsapp', 'sms'], always: [] },
+      });
+
+      const pending = messaging.send({ template: 'orderUpdate', to: TO, locale: 'en', input: INPUT });
+
+      // whatsapp has failed and been recorded; sms is still held open.
+      await waitFor(() => sms.calls.length === 1);
+      const id = sms.calls[0].messageId;
+      const midway = await messaging.status(id);
+      expect(midway!.chain.attempts).toHaveLength(1);
+      expect(midway!.chain.attempts[0]).toMatchObject({ channel: 'whatsapp', status: 'failed' });
+      expect(midway!.chain.status).toBe('pending');
+      expect(midway!.status).toBe('pending');
+
+      sms.release();
+      await pending;
+      const final = await messaging.status(id);
+      expect(final!.chain.attempts).toHaveLength(2);
+      expect(final!.chain.status).toBe('sent');
+      expect(final!.status).toBe('sent');
+    });
+
+    it('reads failed only once every fallback channel has been attempted', async () => {
+      const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'dead-wa', [
+        { ok: false, error: 'no' },
+      ]);
+      const sms = recordingProvider<RenderedSms>('sms', 'dead-sms', [{ ok: false, error: 'no' }]);
+
+      const messaging = createMessaging(newEnv(), {
+        templates,
+        providers: () => ({ whatsapp: wa, sms }),
+        delivery: { fallback: ['whatsapp', 'sms'], always: [] },
+      });
+
+      const { id } = await messaging.send({
+        template: 'orderUpdate',
+        to: TO,
+        locale: 'en',
+        input: INPUT,
+      });
+      const record = await messaging.status(id);
+      expect(record!.chain.attempts).toHaveLength(2);
+      expect(record!.chain.status).toBe('failed');
+      expect(record!.status).toBe('failed');
+    });
+  });
+
+  describe('a record write failure does not stop the chain', () => {
+    it('still attempts the next fallback channel when persisting the first attempt fails twice', async () => {
+      // put #1 creates the record; puts #2 and #3 (first attempt + retry) fail; later puts succeed.
+      const env = flakyEnv((put) => put === 2 || put === 3);
+      const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'dead-wa', [
+        { ok: false, error: 'number not on whatsapp' },
+      ]);
+      const sms = recordingProvider<RenderedSms>('sms', 'rec-sms', [
+        { ok: true, providerId: 'sms-after-write-failure' },
+      ]);
+      const captured = captureErrors();
+
+      try {
+        const messaging = createMessaging(env, {
+          templates,
+          providers: () => ({ whatsapp: wa, sms }),
+          delivery: { fallback: ['whatsapp', 'sms'], always: [] },
+        });
+
+        const { id } = await messaging.send({
+          template: 'orderUpdate',
+          to: TO,
+          locale: 'en',
+          input: INPUT,
+        });
+
+        expect(wa.calls).toHaveLength(1);
+        expect(sms.calls).toHaveLength(1);
+        const record = await messaging.status(id);
+        expect(record!.chain.attempts.map((a) => a.channel)).toEqual(['sms']);
+        expect(record!.chain.attempts[0]).toMatchObject({ providerId: 'sms-after-write-failure' });
+        expect(captured.errors.some((line) => line.includes(id))).toBe(true);
+      } finally {
+        captured.restore();
+      }
     });
   });
 

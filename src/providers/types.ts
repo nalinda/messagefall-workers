@@ -52,8 +52,7 @@ export interface OutboundMeta {
    */
   messageId: string;
   /**
-   * Template identifier used to render the message. May be a WhatsApp template config object
-   * at runtime; see #28.
+   * Template identifier used to render the message. See #28 — may be a WhatsApp template config.
    */
   template: string;
   /**

@@ -107,6 +107,11 @@ function validateProviderSet(set: ProviderSet): void {
     if (missing.length > 0) {
       problems.push(`Provider "${slot}" is missing required field(s): ${missing.join(', ')}`);
     }
+    if (p.channel && p.channel !== slot) {
+      problems.push(
+        `Provider "${slot}" declares channel "${p.channel}" but is registered under the "${slot}" slot`
+      );
+    }
     if (p.name && seen.has(p.name)) {
       problems.push(`Duplicate provider name "${p.name}" configured across multiple providers`);
     }
@@ -118,6 +123,11 @@ function validateProviderSet(set: ProviderSet): void {
     throw new ProviderConfigError(problems);
   }
 }
+/**
+ * Deliberately keyed on the KV namespace (then TTL), not on `env`: `options.kv` may differ from
+ * `env.MESSAGES_KV`, and two envs sharing a namespace should share the store. Reuse this cache;
+ * do not add an `env`-keyed one.
+ */
 const storeCache = new WeakMap<KVNamespace, Map<number, StatusStore>>();
 
 /**

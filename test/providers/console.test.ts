@@ -642,6 +642,24 @@ describe('Startup provider validation', () => {
     }).toThrow(/missing required/i);
   });
 
+  it('rejects a provider whose channel does not match the slot it is registered under', () => {
+    expect(() => {
+      createMessaging(newEnv(), {
+        templates,
+        providers: () => ({
+          sms: {
+            name: 'mislabelled',
+            channel: 'whatsapp' as 'sms',
+            send: async () => {
+              await Promise.resolve();
+              return { ok: true };
+            },
+          },
+        }),
+      });
+    }).toThrow(/"sms".*"whatsapp".*"sms"/);
+  });
+
   it('lists every validation problem at once in a bulleted error message', () => {
     let thrownError: Error | null = null;
     try {

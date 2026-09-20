@@ -28,6 +28,12 @@ import {
   type MessageRecord,
   type StatusStore,
 } from './status.js';
+import { ulid } from './ulid.js';
+
+/**
+ * `Attempt.provider` value recorded when a resolved channel has no provider configured.
+ */
+export const NO_PROVIDER = 'none';
 
 /**
  * E.164 phone number: a `+`, a non-zero leading digit and up to 14 more digits.
@@ -104,7 +110,7 @@ export interface ValidatedSendRequest extends SendRequest {
 }
 
 function newMessageId(): string {
-  return `msg_${crypto.randomUUID().replaceAll('-', '')}`;
+  return `msg_${ulid()}`;
 }
 
 function errorMessage(error: unknown): string {
@@ -149,7 +155,7 @@ async function attemptChannel(
   if (!provider) {
     return {
       channel,
-      provider: 'none',
+      provider: NO_PROVIDER,
       status: 'failed',
       error: `No provider configured for channel "${channel}"`,
       at: new Date().toISOString(),
@@ -171,8 +177,7 @@ async function attemptChannel(
       kind: req.template.kind,
       locale: req.locale,
     };
-    // `meta` first so a rendered WhatsApp `template` config wins over the catalogue name.
-    // Providers must handle `message.template` as string | object; tracked in #28.
+    // See #28 — OutboundMeta.template / RenderedWhatsApp.template collision; rendered wins.
     payload = { ...meta, ...rendered } as AnyRendered & OutboundMeta;
   } catch (error) {
     return { ...base, status: 'failed', error: errorMessage(error), at: new Date().toISOString() };
@@ -217,22 +222,40 @@ export async function runChain(
   record: RecordAttempt
 ): Promise<Attempt[]> {
   const attempts: Attempt[] = [];
+  let persistError: Error | undefined;
   for (const channel of fallback) {
     const attempt = await attemptChannel(req, id, providers, channel);
     attempts.push(attempt);
-    await record(attempt, 'chain');
+    try {
+      await record(attempt, 'chain');
+    } catch (error) {
+      // Persisting and advancing are independent: keep walking the chain, surface the
+      // first write failure once the chain has been exhausted or accepted.
+      persistError ??= error instanceof Error ? error : new Error(errorMessage(error));
+    }
     if (attempt.status !== 'failed') {
       break;
     }
   }
+  if (persistError !== undefined) {
+    throw persistError;
+  }
   return attempts;
 }
 
+/**
+ * Chain status from the attempts recorded so far. A `failed` tail is only terminal once every
+ * configured fallback channel has been attempted; until then the chain is still `pending`.
+ */
 function chainStatus(attempts: Attempt[], fallback: Channel[]): MessageRecord['chain']['status'] {
   if (attempts.length === 0 || fallback.length === 0) {
     return 'pending';
   }
-  return attempts.at(-1)!.status;
+  const last = attempts.at(-1)!.status;
+  if (last === 'failed' && attempts.length < fallback.length) {
+    return 'pending';
+  }
+  return last;
 }
 
 /**
