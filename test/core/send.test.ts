@@ -29,7 +29,9 @@ import type {
   SendResult,
 } from '../../src/providers/types.js';
 import { defineTemplates, TemplateValidationError } from '../../src/templates.js';
+import type { MessagingEnv } from '../../src/types.js';
 import {
+  captureConsole,
   memoryKV,
   newEnv,
   type ProviderSet,
@@ -113,20 +115,21 @@ function consoleSet(): ProviderSet {
 }
 
 /**
- * Silences console.log for the duration of a test; returns the captured lines and a restore fn.
+ * KV double whose `put` fails on the calls whose 1-based index `shouldFail` selects.
  */
-function silenceConsole(): { logs: string[]; restore: () => void } {
-  const logs: string[] = [];
-  const originalLog = console.log;
-  console.log = (...args: unknown[]): void => {
-    logs.push(args.map(String).join(' '));
-  };
-  return {
-    logs,
-    restore: () => {
-      console.log = originalLog;
-    },
-  };
+function flakyEnv(shouldFail: (put: number) => boolean): MessagingEnv {
+  const env = newEnv();
+  const kv = env.MESSAGES_KV as ReturnType<typeof memoryKV>;
+  const originalPut = kv.put.bind(kv);
+  let puts = 0;
+  kv.put = ((key: string, value: string) => {
+    puts += 1;
+    if (shouldFail(puts)) {
+      return Promise.reject(new Error('kv unavailable'));
+    }
+    return originalPut(key, value);
+  }) as typeof kv.put;
+  return env;
 }
 
 /**
@@ -205,38 +208,6 @@ function threeProviders(): {
   return { wa, sms, email, set: { whatsapp: wa, sms, email } };
 }
 
-/**
- * KV double whose `put` fails on the calls whose 1-based index `shouldFail` selects.
- */
-function flakyEnv(shouldFail: (put: number) => boolean) {
-  const env = newEnv();
-  const kv = env.MESSAGES_KV as ReturnType<typeof memoryKV>;
-  const originalPut = kv.put.bind(kv);
-  let puts = 0;
-  kv.put = ((key: string, value: string) => {
-    puts += 1;
-    if (shouldFail(puts)) {
-      return Promise.reject(new Error('kv unavailable'));
-    }
-    return originalPut(key, value);
-  }) as typeof kv.put;
-  return env;
-}
-
-function captureErrors(): { errors: string[]; restore: () => void } {
-  const errors: string[] = [];
-  const originalError = console.error;
-  console.error = (...args: unknown[]): void => {
-    errors.push(args.map(String).join(' '));
-  };
-  return {
-    errors,
-    restore: () => {
-      console.error = originalError;
-    },
-  };
-}
-
 describe('Issue #3: createMessaging send pipeline', () => {
   describe('chain and always attempts with console providers', () => {
     it('sends one chain attempt on whatsapp and one always attempt on email, none on sms', async () => {
@@ -244,7 +215,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       const waSpy = spyOn(set.whatsapp!, 'send');
       const smsSpy = spyOn(set.sms!, 'send');
       const emailSpy = spyOn(set.email!, 'send');
-      const silenced = silenceConsole();
+      const silenced = captureConsole(['log']);
 
       try {
         const messaging = createMessaging(newEnv(), {
@@ -325,7 +296,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
 
     it('calls onStatus once per attempt with id, channel, provider and status', async () => {
       const set = consoleSet();
-      const silenced = silenceConsole();
+      const silenced = captureConsole(['log']);
       const events: StatusCallbackEvent[] = [];
 
       try {
@@ -453,7 +424,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       const sms = recordingProvider<RenderedSms>('sms', 'rec-sms', [
         { ok: true, providerId: 'sms-after-write-failure' },
       ]);
-      const captured = captureErrors();
+      const captured = captureConsole(['error']);
 
       try {
         const messaging = createMessaging(env, {
@@ -474,7 +445,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
         const record = await messaging.status(id);
         expect(record!.chain.attempts.map((a) => a.channel)).toEqual(['sms']);
         expect(record!.chain.attempts[0]).toMatchObject({ providerId: 'sms-after-write-failure' });
-        expect(captured.errors.some((line) => line.includes(id))).toBe(true);
+        expect(captured.logs.some((line) => line.includes(id))).toBe(true);
       } finally {
         captured.restore();
       }
@@ -589,7 +560,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       const set = consoleSet();
       const waSpy = spyOn(set.whatsapp!, 'send');
       const emailSpy = spyOn(set.email!, 'send');
-      const silenced = silenceConsole();
+      const silenced = captureConsole(['log']);
 
       try {
         const messaging = createMessaging(newEnv(), {
@@ -848,7 +819,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       const sms = recordingProvider<RenderedSms>('sms', 'rec-sms', [
         { ok: true, providerId: 'sms-after-retry' },
       ]);
-      const captured = captureErrors();
+      const captured = captureConsole(['error']);
 
       try {
         const messaging = createMessaging(env, {
@@ -874,7 +845,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
           channel: 'sms',
           provider: 'rec-sms',
         });
-        expect(captured.errors).toHaveLength(0);
+        expect(captured.logs).toHaveLength(0);
       } finally {
         captured.restore();
       }
@@ -898,7 +869,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
         kv.dump().delete(`msg:${message.messageId}`);
         return originalSend(message);
       };
-      const captured = captureErrors();
+      const captured = captureConsole(['error']);
 
       try {
         const messaging = createMessaging(env, {
@@ -916,18 +887,17 @@ describe('Issue #3: createMessaging send pipeline', () => {
         // Exactly one record read for the update: a missing record is not retried.
         expect(vanishing.calls).toHaveLength(1);
         expect(recordReads).toBe(1);
-        expect(captured.errors.some((line) => line.includes(id))).toBe(true);
+        expect(captured.logs.some((line) => line.includes(id))).toBe(true);
       } finally {
         captured.restore();
       }
     });
 
-    it('never marks the record failed when the update fails twice: status is unknown, not "nothing sent"', async () => {
-      // put #2 (the attempt update) and put #3 (its retry) fail; anything after would succeed,
-      // so a "mark failed" write here would be visible — and wrong.
+    it('never marks the record failed when the attempt write fails twice; the seal reports the real outcome', async () => {
+      // put #2 (the attempt update) and put #3 (its retry) fail; put #4 is the status seal.
       const env = flakyEnv((put) => put === 2 || put === 3);
       const sms = recordingProvider<RenderedSms>('sms', 'rec-sms');
-      const captured = captureErrors();
+      const captured = captureConsole(['error']);
 
       try {
         const messaging = createMessaging(env, {
@@ -946,11 +916,50 @@ describe('Issue #3: createMessaging send pipeline', () => {
         expect(sms.calls).toHaveLength(1);
         const record = await messaging.status(id);
         expect(record).not.toBeNull();
+        // The attempt itself was lost, but the message went out: never "failed".
+        expect(record!.chain.attempts).toHaveLength(0);
         expect(record!.status).not.toBe('failed');
         expect(record!.chain.status).not.toBe('failed');
-        expect(record!.status).toBe('pending');
-        expect(captured.errors.some((line) => line.includes(id))).toBe(true);
-        expect(captured.errors.some((line) => line.includes('hello'))).toBe(false);
+        expect(record!.status).toBe('sent');
+        expect(captured.logs.some((line) => line.includes(id))).toBe(true);
+        expect(captured.logs.some((line) => line.includes('hello'))).toBe(false);
+      } finally {
+        captured.restore();
+      }
+    });
+
+    it('reports the chain exhausted, not pending forever, when the last channel write is lost', async () => {
+      // put #1 create, #2 whatsapp attempt (lands), #3 + #4 sms attempt and retry (lost),
+      // #5 the seal. Both channels fail, so the chain is exhausted.
+      const env = flakyEnv((put) => put === 3 || put === 4);
+      const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'dead-wa', [
+        { ok: false, error: 'no' },
+      ]);
+      const sms = recordingProvider<RenderedSms>('sms', 'dead-sms', [{ ok: false, error: 'no' }]);
+      const captured = captureConsole(['error']);
+
+      try {
+        const messaging = createMessaging(env, {
+          templates,
+          providers: () => ({ whatsapp: wa, sms }),
+          delivery: { fallback: ['whatsapp', 'sms'], always: [] },
+        });
+
+        const { id } = await messaging.send({
+          template: 'orderUpdate',
+          to: TO,
+          locale: 'en',
+          input: INPUT,
+        });
+
+        expect(wa.calls).toHaveLength(1);
+        expect(sms.calls).toHaveLength(1);
+        const record = await messaging.status(id);
+        // Only the whatsapp attempt is on the record, yet the chain is known to be exhausted.
+        expect(record!.chain.attempts.map((a) => a.channel)).toEqual(['whatsapp']);
+        expect(record!.chain.status).toBe('failed');
+        expect(record!.status).toBe('failed');
+        expect(captured.logs.some((line) => line.includes(id))).toBe(true);
       } finally {
         captured.restore();
       }

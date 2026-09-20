@@ -17,7 +17,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'bun:test';
 
 import { createMessaging } from '../../src/index.js';
-import { newEnv, pingTemplates } from '../helpers/messaging.js';
+import { captureConsole, newEnv, pingTemplates } from '../helpers/messaging.js';
 import type {
   Channel,
   DeliveryStatus,
@@ -66,38 +66,6 @@ async function loadConsoleProvider(): Promise<
   } catch {
     return undefined;
   }
-}
-
-/**
- * Helper to intercept console outputs during send execution.
- */
-function captureConsole(): { logs: string[]; restore: () => void } {
-  const logs: string[] = [];
-  const originalLog = console.log;
-  const originalInfo = console.info;
-  const originalWarn = console.warn;
-  const originalError = console.error;
-
-  const intercept = (...args: unknown[]): void => {
-    logs.push(
-      args.map((a) => (typeof a === 'object' && a !== null ? JSON.stringify(a) : String(a))).join(' ')
-    );
-  };
-
-  console.log = intercept;
-  console.info = intercept;
-  console.warn = intercept;
-  console.error = intercept;
-
-  return {
-    logs,
-    restore: () => {
-      console.log = originalLog;
-      console.info = originalInfo;
-      console.warn = originalWarn;
-      console.error = originalError;
-    },
-  };
 }
 
 describe('Provider types and JSDoc documentation', () => {

@@ -40,6 +40,44 @@ export const pingTemplates = defineTemplates({
 });
 
 /**
+ * Console method names `captureConsole` can intercept.
+ */
+export type ConsoleMethod = 'log' | 'info' | 'warn' | 'error';
+
+/**
+ * Intercepts the given console methods (default: all four) for the duration of a test,
+ * collecting each call as one line. Objects are JSON-stringified so content assertions can see
+ * into them. Call `restore()` in a `finally`.
+ *
+ * @param methods - Console methods to capture.
+ * @returns The captured lines and a restore function.
+ */
+export function captureConsole(
+  methods: ConsoleMethod[] = ['log', 'info', 'warn', 'error']
+): { logs: string[]; restore: () => void } {
+  const logs: string[] = [];
+  const target = console as unknown as Record<ConsoleMethod, (...args: unknown[]) => void>;
+  const originals = new Map<ConsoleMethod, (...args: unknown[]) => void>();
+  const intercept = (...args: unknown[]): void => {
+    logs.push(
+      args.map((a) => (typeof a === 'object' && a !== null ? JSON.stringify(a) : String(a))).join(' ')
+    );
+  };
+  for (const method of methods) {
+    originals.set(method, Reflect.get(target, method));
+    Reflect.set(target, method, intercept);
+  }
+  return {
+    logs,
+    restore: () => {
+      for (const [method, original] of originals) {
+        Reflect.set(target, method, original);
+      }
+    },
+  };
+}
+
+/**
  * A recorded provider call: the full payload the core handed to `send`.
  */
 export type RecordedCall<R> = R & OutboundMeta;

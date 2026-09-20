@@ -59,13 +59,27 @@ export interface Messaging<T> {
 }
 
 /**
- * Thrown for a configuration fault (no KV namespace for the status store) and for a send that
- * names a template the catalogue does not define.
+ * Thrown by createMessaging for a deployment/configuration fault (no KV namespace for the
+ * status store).
  */
 export class MessagingConfigError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'MessagingConfigError';
+  }
+}
+
+/**
+ * Rejected by `send` when the template name is not in the catalogue: a per-call input fault,
+ * distinct from configuration errors so callers can map it to a 4xx.
+ */
+export class UnknownTemplateError extends Error {
+  readonly templateName: string;
+
+  constructor(templateName: string) {
+    super(`Unknown template "${templateName}"`);
+    this.name = 'UnknownTemplateError';
+    this.templateName = templateName;
   }
 }
 
@@ -192,7 +206,7 @@ export function createMessaging<T extends Templates<any>>(
       const templateName = String(args.template);
       const template = templates.get(templateName);
       if (!template) {
-        return Promise.reject(new MessagingConfigError(`Unknown template "${templateName}"`));
+        return Promise.reject(new UnknownTemplateError(templateName));
       }
       return runSend(
         {

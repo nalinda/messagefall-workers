@@ -196,10 +196,32 @@ async function attemptChannel(
 }
 
 /**
- * Persists one attempt as soon as it settles. Called by `runChain` for chain attempts and by
- * `deliver` for always attempts.
+ * How far the chain walk has actually got, independent of which attempts landed on the record.
+ * `attempted` counts channels tried; `last` is the outcome of the most recent one.
  */
-export type RecordAttempt = (attempt: Attempt, part: 'chain' | 'always') => Promise<void>;
+export interface ChainProgress {
+  attempted: number;
+  last: Attempt['status'];
+}
+
+/**
+ * Persists one attempt as soon as it settles. Called by `runChain` for chain attempts (with the
+ * walk's progress) and by `deliver` for always attempts.
+ */
+export type RecordAttempt = (
+  attempt: Attempt,
+  part: 'chain' | 'always',
+  progress?: ChainProgress
+) => Promise<void>;
+
+/**
+ * Recorder for one send: `record` persists attempts; `sealChain` re-derives the chain status
+ * from `progress` alone, for when a chain attempt's own write was lost.
+ */
+export interface AttemptRecorder {
+  record: RecordAttempt;
+  sealChain(progress: ChainProgress): Promise<void>;
+}
 
 /**
  * Walks `fallback` in order, one attempt per channel, until a channel accepts the message,
@@ -209,26 +231,32 @@ export type RecordAttempt = (attempt: Attempt, part: 'chain' | 'always') => Prom
  * This is THE chain-advance logic; do not write a second one. It only sees failures the
  * provider reports synchronously. The asynchronous path (#7: a `failed` delivery status from a
  * webhook; #8: the fallback timer firing) must reuse it by calling `runChain` again with the
- * remaining channels, `policy.fallback.slice(record.chain.attempts.length)`, and a `record`
- * callback built with `attemptRecorder` (which appends the attempt, recomputes `chainStatus`
- * and `deriveOverallStatus`, and calls `observe`). The rendered payload is rebuilt from the
- * stored template/input via `validateInput` + `renderValidated`, the same helpers
- * `attemptChannel` uses.
+ * remaining channels, `policy.fallback.slice(record.chain.attempts.length)`, and a recorder
+ * built with `attemptRecorder` (which appends the attempt, recomputes `chainStatus` and
+ * `deriveOverallStatus`, and calls `observe`). The rendered payload is rebuilt from the stored
+ * template/input via `validateInput` + `renderValidated`, the same helpers `attemptChannel`
+ * uses.
+ *
+ * `fallback` here is the slice being walked; `offset` is how many chain channels were already
+ * attempted before it (0 for a fresh send), so progress counts against the whole policy.
  */
 export async function runChain(
   req: ValidatedSendRequest,
   id: string,
   providers: ProviderSet,
   fallback: Channel[],
-  record: RecordAttempt
+  recorder: AttemptRecorder,
+  offset = 0
 ): Promise<Attempt[]> {
   const attempts: Attempt[] = [];
   let persistError: Error | undefined;
+  let progress: ChainProgress | undefined;
   for (const channel of fallback) {
     const attempt = await attemptChannel(req, id, providers, channel);
     attempts.push(attempt);
+    progress = { attempted: offset + attempts.length, last: attempt.status };
     try {
-      await record(attempt, 'chain');
+      await recorder.record(attempt, 'chain', progress);
     } catch (error) {
       // Persisting and advancing are independent: keep walking the chain, surface the
       // first write failure once the chain has been exhausted or accepted.
@@ -239,21 +267,40 @@ export async function runChain(
     }
   }
   if (persistError !== undefined) {
+    // A lost write must not leave the chain looking unfinished: re-derive its status from how
+    // far the walk actually got. Best effort; the original error is what the caller sees. A
+    // missing record cannot be sealed.
+    if (progress && !(persistError instanceof MessageRecordNotFoundError)) {
+      try {
+        await recorder.sealChain(progress);
+      } catch {
+        // the persist error below already covers this
+      }
+    }
     throw persistError;
   }
   return attempts;
 }
 
 /**
- * Chain status from the attempts recorded so far. A `failed` tail is only terminal once every
- * configured fallback channel has been attempted; until then the chain is still `pending`.
+ * Chain status from the attempts on the record plus, when known, the walk's actual progress
+ * (attempts whose write was lost still count as attempted). A `failed` tail is terminal only
+ * once every configured fallback channel has been attempted; until then the chain is `pending`.
  */
-function chainStatus(attempts: Attempt[], fallback: Channel[]): MessageRecord['chain']['status'] {
-  if (attempts.length === 0 || fallback.length === 0) {
+function chainStatus(
+  attempts: Attempt[],
+  fallback: Channel[],
+  progress?: ChainProgress
+): MessageRecord['chain']['status'] {
+  if (fallback.length === 0) {
     return 'pending';
   }
-  const last = attempts.at(-1)!.status;
-  if (last === 'failed' && attempts.length < fallback.length) {
+  const attempted = Math.max(attempts.length, progress?.attempted ?? 0);
+  const last = progress?.last ?? attempts.at(-1)?.status;
+  if (last === undefined) {
+    return 'pending';
+  }
+  if (last === 'failed' && attempted < fallback.length) {
     return 'pending';
   }
   return last;
@@ -279,37 +326,25 @@ async function updateWithRetry(
 }
 
 /**
- * Builds the `RecordAttempt` callback for one send: appends the attempt to the right part of
- * the record, re-derives chain/overall status, then indexes the providerId and notifies
- * `onStatus`. Updates are queued so chain and always attempts settling in the same tick never
- * overwrite each other's write to the same record.
+ * Builds the recorder for one send. `record` appends the attempt to the right part of the
+ * record, re-derives chain/overall status, then indexes the providerId and notifies `onStatus`;
+ * `sealChain` only re-derives the status. Updates are queued so chain and always attempts
+ * settling in the same tick never overwrite each other's write to the same record. Mutators
+ * always return fresh objects, so a retried update is idempotent.
  *
  * @param deps - Store and callbacks.
  * @param id - Message id.
  * @param policy - Resolved policy (chain status derivation depends on it).
  * @returns The recorder to hand to `runChain` / always attempts.
  */
-export function attemptRecorder(deps: SendDeps, id: string, policy: DeliveryPolicy): RecordAttempt {
+export function attemptRecorder(
+  deps: SendDeps,
+  id: string,
+  policy: DeliveryPolicy
+): AttemptRecorder {
   let queue: Promise<void> = Promise.resolve();
-  return (attempt, part) => {
-    const run = async (): Promise<void> => {
-      await updateWithRetry(deps, id, (record) => {
-        const chain =
-          part === 'chain'
-            ? { ...record.chain, attempts: [...record.chain.attempts, attempt] }
-            : record.chain;
-        chain.status = chainStatus(chain.attempts, policy.fallback);
-        const always = part === 'always' ? [...record.always, attempt] : record.always;
-        return {
-          ...record,
-          chain,
-          always,
-          status: deriveOverallStatus(policy, chain, always),
-          updatedAt: new Date().toISOString(),
-        };
-      });
-      await observe(deps, id, attempt);
-    };
+
+  const enqueue = (run: () => Promise<void>): Promise<void> => {
     // Chain the work regardless of an earlier failure so later attempts are still persisted;
     // each caller awaits (and handles) its own returned promise.
     const previous = queue;
@@ -324,6 +359,46 @@ export function attemptRecorder(deps: SendDeps, id: string, policy: DeliveryPoli
     queue = next;
     return next;
   };
+
+  const rederive = (
+    record: MessageRecord,
+    chainAttempts: Attempt[],
+    always: Attempt[],
+    progress?: ChainProgress
+  ): MessageRecord => {
+    const chain = {
+      attempts: chainAttempts,
+      status: chainStatus(chainAttempts, policy.fallback, progress),
+    };
+    return {
+      ...record,
+      chain,
+      always,
+      status: deriveOverallStatus(policy, chain, always),
+      updatedAt: new Date().toISOString(),
+    };
+  };
+
+  return {
+    record: (attempt, part, progress) =>
+      enqueue(async () => {
+        await updateWithRetry(deps, id, (record) =>
+          rederive(
+            record,
+            part === 'chain' ? [...record.chain.attempts, attempt] : [...record.chain.attempts],
+            part === 'always' ? [...record.always, attempt] : [...record.always],
+            progress
+          )
+        );
+        await observe(deps, id, attempt);
+      }),
+    sealChain: (progress) =>
+      enqueue(() =>
+        updateWithRetry(deps, id, (record) =>
+          rederive(record, [...record.chain.attempts], [...record.always], progress)
+        )
+      ),
+  };
 }
 
 async function deliver(
@@ -332,14 +407,14 @@ async function deliver(
   id: string,
   policy: DeliveryPolicy
 ): Promise<void> {
-  const record = attemptRecorder(deps, id, policy);
+  const recorder = attemptRecorder(deps, id, policy);
   const chainTask =
     policy.fallback.length > 0
-      ? runChain(req, id, deps.providers, policy.fallback, record)
+      ? runChain(req, id, deps.providers, policy.fallback, recorder)
       : Promise.resolve<Attempt[]>([]);
   const alwaysTasks = policy.always.map(async (channel) => {
     const attempt = await attemptChannel(req, id, deps.providers, channel);
-    await record(attempt, 'always');
+    await recorder.record(attempt, 'always');
   });
 
   // Every attempt is persisted and observed the moment it settles; this only waits for all of
