@@ -26,6 +26,7 @@ import {
   type Attempt,
   deriveOverallStatus,
   type MessageRecord,
+  MessageRecordNotFoundError,
   type StatusStore,
 } from './status.js';
 import { ulid } from './ulid.js';
@@ -259,8 +260,8 @@ function chainStatus(attempts: Attempt[], fallback: Channel[]): MessageRecord['c
 }
 
 /**
- * One `store.update`, retried once. KV is last-writer-wins, so a transient failure is retried
- * before the caller gives up; the second failure propagates.
+ * One `store.update`, retried once for transient failures. A missing record is not transient,
+ * so `MessageRecordNotFoundError` propagates without the extra KV round-trip.
  */
 async function updateWithRetry(
   deps: SendDeps,
@@ -269,7 +270,10 @@ async function updateWithRetry(
 ): Promise<void> {
   try {
     await deps.store.update(id, fn);
-  } catch {
+  } catch (error) {
+    if (error instanceof MessageRecordNotFoundError) {
+      throw error;
+    }
     await deps.store.update(id, fn);
   }
 }

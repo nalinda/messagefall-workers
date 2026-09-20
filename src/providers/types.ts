@@ -52,8 +52,16 @@ export interface OutboundMeta {
    */
   messageId: string;
   /**
-   * Template identifier used to render the message, or — see #28 — the rendered WhatsApp
-   * template config when the payload carries one.
+   * What the message was rendered from.
+   *
+   * - For a free-text render (SMS, email, WhatsApp `text`) this is the catalogue template
+   *   name, a `string`.
+   * - For a WhatsApp Meta-template render it is the rendered template config
+   *   (`{ name, language, params }`) instead, because the rendered payload and this meta share
+   *   the `template` key and the provider cannot send without the config. In that case the
+   *   catalogue name is not present anywhere in the payload; it remains on the `MessageRecord`.
+   *
+   * Interim shape; the contract-level fix is tracked in #28.
    */
   template: string | RenderedWhatsApp['template'];
   /**

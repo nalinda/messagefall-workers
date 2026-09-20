@@ -183,7 +183,7 @@ export interface StatusStore {
    * @param id - Internal message identifier.
    * @param fn - Transformation function applied to existing record.
    * @returns The updated MessageRecord.
-   * @throws Error if record does not exist.
+   * @throws {MessageRecordNotFoundError} If the record does not exist.
    */
   update(id: string, fn: (r: MessageRecord) => MessageRecord): Promise<MessageRecord>;
 
@@ -202,6 +202,20 @@ export interface StatusStore {
    * @returns The reference if found, or null.
    */
   lookupProviderId(providerId: string): Promise<ProviderRef | null>;
+}
+
+/**
+ * Thrown by `StatusStore.update` when no record exists for the id. Not transient: callers
+ * should not retry it.
+ */
+export class MessageRecordNotFoundError extends Error {
+  readonly id: string;
+
+  constructor(id: string) {
+    super(`MessageRecord not found: ${id}`);
+    this.name = 'MessageRecordNotFoundError';
+    this.id = id;
+  }
 }
 
 /**
@@ -297,7 +311,7 @@ export function kvStatusStore(kv: KVNamespace, opts?: StatusStoreOptions): Statu
     async update(id: string, fn: (r: MessageRecord) => MessageRecord): Promise<MessageRecord> {
       const existing = await getRecord(id);
       if (!existing) {
-        throw new Error(`MessageRecord not found: ${id}`);
+        throw new MessageRecordNotFoundError(id);
       }
       const updated = fn(existing);
       await kv.put(`msg:${id}`, JSON.stringify(updated), {

@@ -193,17 +193,17 @@ async function rejection(promise: Promise<unknown>): Promise<unknown> {
 /**
  * Three recording providers, one per channel, plus the set to hand to createMessaging.
  */
-  function threeProviders(): {
-    wa: RecordingProvider<RenderedWhatsApp>;
-    sms: RecordingProvider<RenderedSms>;
-    email: RecordingProvider<RenderedEmail>;
-    set: ProviderSet;
-  } {
-    const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'rec-wa');
-    const sms = recordingProvider<RenderedSms>('sms', 'rec-sms');
-    const email = recordingProvider<RenderedEmail>('email', 'rec-email');
-    return { wa, sms, email, set: { whatsapp: wa, sms, email } };
-  }
+function threeProviders(): {
+  wa: RecordingProvider<RenderedWhatsApp>;
+  sms: RecordingProvider<RenderedSms>;
+  email: RecordingProvider<RenderedEmail>;
+  set: ProviderSet;
+} {
+  const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'rec-wa');
+  const sms = recordingProvider<RenderedSms>('sms', 'rec-sms');
+  const email = recordingProvider<RenderedEmail>('email', 'rec-email');
+  return { wa, sms, email, set: { whatsapp: wa, sms, email } };
+}
 
 /**
  * KV double whose `put` fails on the calls whose 1-based index `shouldFail` selects.
@@ -875,6 +875,48 @@ describe('Issue #3: createMessaging send pipeline', () => {
           provider: 'rec-sms',
         });
         expect(captured.errors).toHaveLength(0);
+      } finally {
+        captured.restore();
+      }
+    });
+
+    it('does not retry an update when the record no longer exists (not a transient failure)', async () => {
+      const env = newEnv();
+      const kv = env.MESSAGES_KV as ReturnType<typeof memoryKV>;
+      const originalGet = kv.get.bind(kv);
+      let recordReads = 0;
+      kv.get = ((key: string) => {
+        if (key.startsWith('msg:')) {
+          recordReads += 1;
+        }
+        return originalGet(key);
+      }) as typeof kv.get;
+      // The record vanishes (e.g. evicted) while the provider is being called, before the update.
+      const vanishing = recordingProvider<RenderedSms>('sms', 'rec-sms');
+      const originalSend = vanishing.send.bind(vanishing);
+      vanishing.send = (message) => {
+        kv.dump().delete(`msg:${message.messageId}`);
+        return originalSend(message);
+      };
+      const captured = captureErrors();
+
+      try {
+        const messaging = createMessaging(env, {
+          templates,
+          providers: () => ({ sms: vanishing }),
+          delivery: { fallback: ['sms'], always: [] },
+        });
+        const { id } = await messaging.send({
+          template: 'smsOnly',
+          to: TO,
+          locale: 'en',
+          input: { body: 'hello' },
+        });
+
+        // Exactly one record read for the update: a missing record is not retried.
+        expect(vanishing.calls).toHaveLength(1);
+        expect(recordReads).toBe(1);
+        expect(captured.errors.some((line) => line.includes(id))).toBe(true);
       } finally {
         captured.restore();
       }
