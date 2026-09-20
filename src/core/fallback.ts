@@ -21,7 +21,13 @@ import type { MessagingEnv } from '../env.js';
 import { type TemplateDef, validateInput } from '../templates.js';
 import type { MessagingOptions } from './messaging.js';
 import { type ProviderSource, toProviderSet } from './provider-set.js';
-import { asRenderInput, readRenderInput, releaseChain, type RenderInput } from './render-input.js';
+import {
+  asRenderInput,
+  pickRenderInput,
+  readRenderInput,
+  releaseChain,
+  type RenderInput,
+} from './render-input.js';
 import {
   attemptRecorder,
   notifyStatus,
@@ -105,18 +111,10 @@ async function rearmTimer(
 }
 
 /**
- * Fills the recipient fields a payload lacks from another one, leaving what it has untouched.
+ * Fills the fields a payload lacks from another one; what the payload defines wins.
  */
 function withRecipient(payload: RenderInput, from: RenderInput | undefined): RenderInput {
-  if (!from) {
-    return payload;
-  }
-  return {
-    ...payload,
-    ...(payload.to === undefined && from.to !== undefined && { to: from.to }),
-    ...(payload.email === undefined && from.email !== undefined && { email: from.email }),
-    ...(payload.locale === undefined && from.locale !== undefined && { locale: from.locale }),
-  };
+  return from ? { ...pickRenderInput(from), ...pickRenderInput(payload) } : payload;
 }
 
 function extractFromTimer(

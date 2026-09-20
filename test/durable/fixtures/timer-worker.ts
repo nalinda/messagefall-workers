@@ -6,15 +6,14 @@
  * arm, cancel, fire and inspect the object from outside, and a subclass with two inspection
  * RPC methods. Providers record what they send into `CALLS_KV`, keyed by message id.
  *
- * Built at test time with `Bun.build`; the virtual `messagefall-under-test/*` specifiers are
- * resolved by the test's plugin.
+ * Built at test time with `Bun.build`.
  */
 
 import type { KVNamespace } from '@cloudflare/workers-types';
-import { FallbackTimer as PackageFallbackTimer } from 'messagefall-under-test/fallback-timer';
-import { armTimer, cancelTimer } from 'messagefall-under-test/timer';
 
 import { createMessagingApp } from '../../../src/app/hono.js';
+import { armTimer, cancelTimer } from '../../../src/core/timer.js';
+import { FallbackTimer as PackageFallbackTimer } from '../../../src/durable/fallback-timer.js';
 import type { MessagingEnv } from '../../../src/env.js';
 import type {
   OutboundMeta,

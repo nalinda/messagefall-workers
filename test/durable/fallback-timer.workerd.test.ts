@@ -1,5 +1,5 @@
 /**
- * Failing tests for the FallbackTimer Durable Object under miniflare (GitHub Issue #8).
+ * Tests for the FallbackTimer Durable Object under miniflare (GitHub Issue #8).
  *
  * The fixture Worker (`fixtures/timer-worker.ts`) is bundled with `Bun.build` and run in
  * workerd with a SQLite-backed `FALLBACK_TIMER` binding and two KV namespaces. The clock
@@ -24,57 +24,24 @@ import { convertV4MiniflareOptions, Miniflare } from 'miniflare';
 
 import type { MessageRecord } from '../../src/core/status.js';
 
-const rootDir = path.resolve(import.meta.dir, '../..');
 const OTP_TIMEOUT = 30_000;
 const NOTIFICATION_TIMEOUT = 500;
 const TOLERANCE = 5000;
 const TO = '+94771234567';
 const CODE = '482913';
 
-const STUB_TIMER_MODULE = `
-import { DurableObject } from 'cloudflare:workers';
-export class FallbackTimer extends DurableObject {
-  async arm() {}
-  async cancel() {}
-  async alarm() {}
-}
-export async function armTimer() {}
-export async function cancelTimer() {}
-`;
-
 /**
- * Resolves the fixture's virtual specifiers to the real modules when they exist, otherwise to
- * inert stubs (RED phase) so the Worker builds and the specs fail on their assertions.
+ * Bun.build plugin: under `bun test`, Bun.build does not map relative `.js` specifiers onto
+ * `.ts` sources the way the CLI does; do it here so the fixture and the package sources bundle.
  */
-function underTestPlugin(): Bun.BunPlugin {
-  const candidates: Record<string, string[]> = {
-    'messagefall-under-test/fallback-timer': [
-      'src/durable/fallback-timer.ts',
-      'src/core/timer.ts',
-    ],
-    'messagefall-under-test/timer': ['src/core/timer.ts', 'src/durable/fallback-timer.ts'],
-  };
+function tsSourcesPlugin(): Bun.BunPlugin {
   return {
-    name: 'messagefall-under-test',
+    name: 'ts-sources',
     setup(build) {
-      // Under `bun test`, Bun.build does not map relative `.js` specifiers onto `.ts` sources
-      // the way the CLI does; do it here.
       build.onResolve({ filter: /^\.\.?\/.*\.js$/ }, (args) => {
         const ts = path.resolve(path.dirname(args.importer), args.path.replace(/\.js$/, '.ts'));
         return fs.existsSync(ts) ? { path: ts } : undefined;
       });
-      build.onResolve({ filter: /^messagefall-under-test\// }, (args) => {
-        const existing = (candidates[args.path] ?? [])
-          .map((relative) => path.join(rootDir, relative))
-          .find((file) => fs.existsSync(file));
-        return existing
-          ? { path: existing }
-          : { path: `${args.path}.ts`, namespace: 'messagefall-stub' };
-      });
-      build.onLoad({ filter: /.*/, namespace: 'messagefall-stub' }, () => ({
-        contents: STUB_TIMER_MODULE,
-        loader: 'ts',
-      }));
     },
   };
 }
@@ -85,7 +52,7 @@ async function buildWorker(): Promise<string> {
     target: 'browser',
     format: 'esm',
     external: ['cloudflare:*'],
-    plugins: [underTestPlugin()],
+    plugins: [tsSourcesPlugin()],
   });
   if (!result.success) {
     throw new Error(result.logs.map((log) => log.message).join('\n'));

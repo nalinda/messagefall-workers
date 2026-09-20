@@ -4,10 +4,8 @@
  * Provides:
  * - a fake Durable Object runtime (state + storage + namespace) driven by a mocked clock, so
  *   the arm → timeout → alarm → cleanup lifecycle can be exercised in-process against a local
- *   status store, with no Worker or wrangler involved;
- * - a loader for the timer API (`FallbackTimer`, `armTimer`, `cancelTimer`) that falls back to
- *   inert stubs while the module is not implemented, so the tests fail on their assertions and
- *   not on a missing import;
+ *   status store, with no Worker or wrangler involved (`FallbackTimer` resolves its base class
+ *   to a stand-in outside workerd, so the real class is instantiated directly);
  * - recording providers and a template catalogue shared by the timer specs.
  *
  * @module
@@ -15,8 +13,10 @@
 
 import type { DurableObjectNamespace } from '@cloudflare/workers-types';
 import { Database, type SQLQueryBindings } from 'bun:sqlite';
-import { mock, setSystemTime } from 'bun:test';
+import { setSystemTime } from 'bun:test';
 
+import type { ArmTimerArgs } from '../../src/core/timer.js';
+import type { FallbackTimer } from '../../src/durable/fallback-timer.js';
 import type { MessagingEnv } from '../../src/env.js';
 import type {
   OutboundMeta,
@@ -29,136 +29,14 @@ import type {
 import { defineTemplates } from '../../src/templates.js';
 
 /**
- * Arguments accepted by `FallbackTimer#arm` and `armTimer` (the issue's literal interface).
- * The recipient is not part of it: `advanceChain` reads it from the `in:<id>` KV entry that
- * `send` writes (#7).
- */
-export interface ArmArgs {
-  id: string;
-  afterMs: number;
-  input: unknown;
-  locale: string;
-}
-
-/**
- * The public surface of a FallbackTimer instance (RPC methods).
+ * The public surface of a FallbackTimer instance (RPC methods). `ArmTimerArgs` is the issue's
+ * literal interface plus the optional `to` / `email` of a render input; the specs arm with the
+ * literal shape and rely on the `in:<id>` KV entry `send` writes (#7) for the recipient.
  */
 export interface FallbackTimerInstance {
-  arm(args: ArmArgs): Promise<void>;
+  arm(args: ArmTimerArgs): Promise<void>;
   cancel(id: string): Promise<void>;
   alarm(): Promise<void>;
-}
-
-/**
- * Constructor shape of the Durable Object class.
- */
-export type FallbackTimerCtor = new (ctx: FakeDurableObjectState, env: unknown) => FallbackTimerInstance;
-
-/**
- * The timer API under test.
- */
-export interface TimerApi {
-  FallbackTimer: FallbackTimerCtor;
-  armTimer: (ns: DurableObjectNamespace | undefined, args: ArmArgs) => Promise<void>;
-  cancelTimer: (ns: DurableObjectNamespace | undefined, id: string) => Promise<void>;
-}
-
-/**
- * Minimal `cloudflare:workers` shim so the class can be loaded under bun. Registered once,
- * before the timer module is imported.
- */
-class FakeDurableObjectBase {
-  protected readonly ctx: unknown;
-  protected readonly env: unknown;
-
-  constructor(ctx: unknown, env: unknown) {
-    this.ctx = ctx;
-    this.env = env;
-  }
-}
-
-const shim = { registered: false };
-
-function registerCloudflareShim(): void {
-  if (shim.registered) {
-    return;
-  }
-  shim.registered = true;
-  void mock.module('cloudflare:workers', () => ({ DurableObject: FakeDurableObjectBase }));
-}
-
-/**
- * The inert timer used while the module is not implemented (RED phase): every operation is a
- * no-op, so assertions on storage, alarms and attempts fail for the right reason.
- */
-function inertTimerApi(): TimerApi {
-  class InertFallbackTimer extends FakeDurableObjectBase implements FallbackTimerInstance {
-    arm(_args: ArmArgs): Promise<void> {
-      return Promise.resolve();
-    }
-
-    cancel(_id: string): Promise<void> {
-      return Promise.resolve();
-    }
-
-    alarm(): Promise<void> {
-      return Promise.resolve();
-    }
-  }
-  return {
-    FallbackTimer: InertFallbackTimer,
-    armTimer: () => Promise.resolve(),
-    cancelTimer: () => Promise.resolve(),
-  };
-}
-
-/**
- * True only for "the module at `specifier` itself does not exist". Any other import-time error
- * (a broken dependency, a throw at module evaluation) is a real failure and must surface.
- */
-function isModuleMissing(error: unknown, specifier: string): boolean {
-  if (typeof error !== 'object' || error === null) {
-    return false;
-  }
-  const { code, message } = error as { code?: unknown; message?: unknown };
-  if (typeof message !== 'string' || !message.includes(specifier)) {
-    return false;
-  }
-  return code === 'ERR_MODULE_NOT_FOUND' || message.startsWith('Cannot find module');
-}
-
-/**
- * Loads the timer API from `src/durable/fallback-timer.js` (class) and `src/core/timer.js`
- * (helpers), each falling back to the other and finally to the inert stubs. Only a missing
- * module falls back; every other import error is rethrown.
- *
- * @returns The timer API to test against.
- */
-export async function loadTimerApi(): Promise<TimerApi> {
-  registerCloudflareShim();
-  const inert = inertTimerApi();
-  const candidates = ['../../src/durable/fallback-timer.js', '../../src/core/timer.js'];
-  const loaded: Partial<TimerApi> = {};
-  for (const specifier of candidates) {
-    try {
-      const mod = (await import(specifier)) as Partial<TimerApi>;
-      loaded.FallbackTimer ??= mod.FallbackTimer;
-      loaded.armTimer ??= mod.armTimer;
-      loaded.cancelTimer ??= mod.cancelTimer;
-    } catch (error) {
-      if (!isModuleMissing(error, specifier)) {
-        throw error;
-      }
-      // not implemented yet (RED phase)
-    }
-  }
-  const armTimer = loaded.armTimer ?? inert.armTimer;
-  const cancelTimer = loaded.cancelTimer ?? inert.cancelTimer;
-  return {
-    FallbackTimer: loaded.FallbackTimer ?? inert.FallbackTimer,
-    armTimer: (ns, args) => armTimer(ns, args),
-    cancelTimer: (ns, id) => cancelTimer(ns, id),
-  };
 }
 
 /**
@@ -425,14 +303,14 @@ function createStorage(schedule: Scheduled[], name: string): FakeStorage {
  * Creates a fake Durable Object runtime for `FallbackTimer`: a namespace that instantiates
  * the class per `idFromName`, and a mocked clock whose `advance` fires due alarms.
  *
- * @param FallbackTimer - The class to instantiate.
+ * @param Timer - The class to instantiate.
  * @param env - The env handed to each object (the same object the Worker sees).
  * @param startAt - The mocked "now" at creation.
  * @returns The namespace and the clock.
  */
 export function createFakeDurableRuntime(
-  FallbackTimer: FallbackTimerCtor,
-  env: () => unknown,
+  Timer: typeof FallbackTimer,
+  env: () => MessagingEnv,
   startAt: number
 ): { ns: FakeNamespace; clock: FakeClock } {
   let now = startAt;
@@ -456,7 +334,10 @@ export function createFakeDurableRuntime(
         waitUntil: () => {},
         blockConcurrencyWhile: (callback) => callback(),
       };
-      object = { name, state, instance: new FallbackTimer(state, env()) };
+      // The fake state covers what the object uses (storage, alarms, id); the cast (to the global
+      // DurableObjectState the class is declared against) is the boundary between the two.
+      const instance = new Timer(state as unknown as DurableObjectState, env());
+      object = { name, state, instance };
       objects.set(name, object);
     }
     return object;

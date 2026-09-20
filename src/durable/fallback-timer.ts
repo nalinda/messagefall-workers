@@ -9,14 +9,15 @@
  * `createMessagingApp` / `createMessaging`. An isolate woken only by an alarm runs nothing but
  * module evaluation before the handler, so that call must happen at module top level of the
  * Worker module that exports this class — not lazily inside a request handler. When no options
- * are registered the alarm throws (the platform retries it) and keeps its storage.
+ * are registered the alarm logs `timer.unconfigured`, throws (the platform retries it) and keeps
+ * its storage.
  *
  * @module
  */
 
 import { createLogger } from '../core/logger.js';
 import { advanceChainFor, MessagingConfigError, statusStoreFor } from '../core/messaging.js';
-import type { RenderInput } from '../core/render-input.js';
+import { pickRenderInput, type RenderInput } from '../core/render-input.js';
 import type { FallbackTimerClient } from '../core/status.js';
 import { armArgs, type ArmTimerArgs, registeredMessagingOptions } from '../core/timer.js';
 import type { MessagingEnv } from '../env.js';
@@ -27,33 +28,12 @@ const STATE_KEY = 'timer';
 const logger = createLogger();
 
 /**
- * What one armed timer keeps in its storage.
+ * What one armed timer keeps in its storage: the render input plus the message id.
  */
-interface StoredTimer {
-  id: string;
-  input: unknown;
-  locale: string;
-  to?: string;
-  email?: string;
-}
+type StoredTimer = RenderInput & { id: string };
 
 function toStored(args: ArmTimerArgs): StoredTimer {
-  return {
-    id: args.id,
-    input: args.input,
-    locale: args.locale,
-    ...(args.to !== undefined && { to: args.to }),
-    ...(args.email !== undefined && { email: args.email }),
-  };
-}
-
-function toRenderInput(stored: StoredTimer): RenderInput {
-  return {
-    input: stored.input,
-    locale: stored.locale,
-    ...(stored.to !== undefined && { to: stored.to }),
-    ...(stored.email !== undefined && { email: stored.email }),
-  };
+  return { ...pickRenderInput(args), id: args.id };
 }
 
 /**
@@ -70,7 +50,7 @@ export class FallbackTimer extends DurableObjectBase<MessagingEnv> {
   private async advance(stored: StoredTimer): Promise<void> {
     const options = registeredMessagingOptions();
     if (!options) {
-      logger.warn('timer.off', { id: stored.id });
+      logger.warn('timer.unconfigured', { id: stored.id });
       throw new MessagingConfigError(
         'FallbackTimer found no messaging options in this isolate: call createMessagingApp ' +
           '(or createMessaging) at module top level of the Worker that exports the class'
@@ -84,7 +64,7 @@ export class FallbackTimer extends DurableObjectBase<MessagingEnv> {
     await advanceChainFor(this.env, options, {
       id: stored.id,
       reason: 'timeout',
-      input: toRenderInput(stored),
+      input: pickRenderInput(stored),
       timer: this.self(),
     });
   }

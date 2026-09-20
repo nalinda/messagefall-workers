@@ -13,19 +13,23 @@
 
 import type { DurableObjectNamespace } from '@cloudflare/workers-types';
 
+import type { MessagingEnv } from '../env.js';
 import type { Templates } from '../templates.js';
+import { createLogger } from './logger.js';
 import type { MessagingOptions } from './messaging.js';
-import type { RenderInput } from './render-input.js';
+import { pickRenderInput, type RenderInput } from './render-input.js';
 import type { FallbackTimerClient } from './status.js';
 
+const logger = createLogger();
+
 /**
- * Arguments to `FallbackTimer#arm` / {@link armTimer}.
- *
- * `to` and `email` are optional extras beyond the issue's interface: the alarm fills whatever is
- * missing from the `in:<id>` KV entry the send wrote, but carrying the recipient in the object
- * keeps a long chain advancing after that entry's TTL has expired.
+ * Arguments to `FallbackTimer#arm` / {@link armTimer}: the {@link RenderInput} to re-render
+ * from, plus the message id and the delay. `locale` is required here (the issue's interface);
+ * `to` and `email` are the render input's optional extras — the alarm fills whatever is missing
+ * from the `in:<id>` KV entry the send wrote, but carrying the recipient in the object keeps a
+ * long chain advancing after that entry's TTL has expired.
  */
-export interface ArmTimerArgs {
+export interface ArmTimerArgs extends RenderInput {
   /**
    * Internal message identifier; also the object's name (`idFromName`).
    */
@@ -35,21 +39,9 @@ export interface ArmTimerArgs {
    */
   afterMs: number;
   /**
-   * Raw template input, as the caller passed it to `send`.
-   */
-  input: unknown;
-  /**
    * Locale the message is rendered in.
    */
   locale: string;
-  /**
-   * Recipient phone number in E.164 form, when known.
-   */
-  to?: string;
-  /**
-   * Recipient email address, when the send had one.
-   */
-  email?: string;
 }
 
 /**
@@ -169,13 +161,46 @@ export function namespaceTimerClient(ns: DurableObjectNamespace): FallbackTimerC
  */
 export function armArgs(id: string, afterMs: number, payload?: RenderInput): ArmTimerArgs {
   return {
+    ...pickRenderInput(payload ?? { input: undefined }),
     id,
     afterMs,
-    input: payload?.input,
     locale: payload?.locale ?? 'en',
-    ...(payload?.to !== undefined && { to: payload.to }),
-    ...(payload?.email !== undefined && { email: payload.email }),
   };
+}
+
+/**
+ * Envs for which the "timed fallback is off" line has been written in this isolate.
+ */
+const timerOffAnnounced = new WeakSet<object>();
+
+/**
+ * Writes the one startup line saying timed fallback is off — `timer.off` — when neither the
+ * `timer` option nor `env.FALLBACK_TIMER` is present, once per env in this isolate. Chain
+ * fallback then runs on explicit failure statuses only. `createMessaging` calls this on every
+ * construction; `createMessagingApp` writes the line itself once per app and then calls
+ * {@link markTimerOffAnnounced} so the routes' `createMessaging` calls do not repeat it.
+ *
+ * @param env - Worker bindings.
+ * @param timer - The `timer` option, if any.
+ */
+export function announceTimerOff(env: MessagingEnv, timer: unknown): void {
+  // Same "is there a timer at all" test as `resolveTimer`, inlined to keep this module free of
+  // a value import from `./status.js` (which imports the adapter from here).
+  const raw = timer ?? env.FALLBACK_TIMER;
+  if ((raw && typeof raw === 'object') || timerOffAnnounced.has(env)) {
+    return;
+  }
+  timerOffAnnounced.add(env);
+  logger.info('timer.off');
+}
+
+/**
+ * Records that the "timed fallback is off" line has already been written for `env`.
+ *
+ * @param env - Worker bindings.
+ */
+export function markTimerOffAnnounced(env: MessagingEnv): void {
+  timerOffAnnounced.add(env);
 }
 
 const registry: { options: MessagingOptions | undefined } = { options: undefined };

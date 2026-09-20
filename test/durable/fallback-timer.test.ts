@@ -1,5 +1,5 @@
 /**
- * Failing tests for the FallbackTimer Durable Object (GitHub Issue #8).
+ * Tests for the FallbackTimer Durable Object (GitHub Issue #8).
  *
  * In-process specification against a local status store and a mocked clock: no Worker,
  * no wrangler. A fake Durable Object runtime instantiates the class per `idFromName`, the
@@ -25,6 +25,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { createMessagingApp } from '../../src/app/hono.js';
 import { createMessaging, type Messaging, type MessagingOptions } from '../../src/core/messaging.js';
 import { kvStatusStore, type MessageRecord, type StatusStore } from '../../src/core/status.js';
+import { armTimer, cancelTimer } from '../../src/core/timer.js';
+import { FallbackTimer } from '../../src/durable/fallback-timer.js';
 import type { MessagingEnv } from '../../src/env.js';
 import type { DeliveryStatus } from '../../src/providers/types.js';
 import { captureConsole, memoryKV } from '../helpers/messaging.js';
@@ -32,8 +34,6 @@ import {
   createFakeDurableRuntime,
   type FakeClock,
   type FakeNamespace,
-  loadTimerApi,
-  type TimerApi,
   timerEnv,
   type TimerProviders,
   timerProviders,
@@ -139,7 +139,6 @@ function statusRequest(providerId: string, status: DeliveryStatus): Request {
 }
 
 describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
-  let api: TimerApi;
   let providers: TimerProviders;
   let env: MessagingEnv;
   let kv: MessagingEnv['MESSAGES_KV'];
@@ -158,11 +157,10 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
     messaging = createMessaging(env, options);
   }
 
-  beforeEach(async () => {
-    api = await loadTimerApi();
+  beforeEach(() => {
     providers = timerProviders();
     kv = memoryKV();
-    const runtime = createFakeDurableRuntime(api.FallbackTimer, () => env, T0);
+    const runtime = createFakeDurableRuntime(FallbackTimer, () => env, T0);
     ns = runtime.ns;
     clock = runtime.clock;
     env = timerEnv(kv, ns.namespace);
@@ -180,7 +178,7 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
       await seedSent(store, kv, sentRecord(id));
       await store.indexProviderId('wa_1', { id, channel: 'whatsapp', provider: 'wa' });
 
-      await api.armTimer(env.FALLBACK_TIMER, {
+      await armTimer(env.FALLBACK_TIMER, {
         id,
         afterMs: OTP_TIMEOUT,
         input: { code: CODE },
@@ -225,7 +223,7 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
         },
         status: 'delivered',
       }));
-      await api.cancelTimer(env.FALLBACK_TIMER, id);
+      await cancelTimer(env.FALLBACK_TIMER, id);
       expect(ns.storageOf(id).size).toBe(0);
       expect(await ns.alarmOf(id)).toBeNull();
 
@@ -242,7 +240,7 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
       await seedSent(store, kv, sentRecord(id));
       providers.sms.failNext('gateway down');
 
-      await api.armTimer(env.FALLBACK_TIMER, {
+      await armTimer(env.FALLBACK_TIMER, {
         id,
         afterMs: OTP_TIMEOUT,
         input: { code: CODE },
@@ -270,7 +268,7 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
         status: 'delivered',
       });
 
-      await api.armTimer(env.FALLBACK_TIMER, {
+      await armTimer(env.FALLBACK_TIMER, {
         id,
         afterMs: OTP_TIMEOUT,
         input: { code: CODE },
@@ -292,9 +290,9 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
       await seedSent(store, kv, sentRecord(id));
       const args = { id, afterMs: OTP_TIMEOUT, input: { code: CODE }, locale: 'en' };
 
-      await api.armTimer(env.FALLBACK_TIMER, args);
+      await armTimer(env.FALLBACK_TIMER, args);
       await clock.advance(10_000);
-      await api.armTimer(env.FALLBACK_TIMER, args);
+      await armTimer(env.FALLBACK_TIMER, args);
 
       expect(ns.objects.size).toBe(1);
       expect(ns.idFromNameCalls.every((name) => name === id)).toBe(true);
@@ -547,14 +545,14 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
       const errors = captureConsole(['error']);
       let ids: string[] = [];
       try {
-        const armed = api.armTimer(undefined, {
+        const armed = armTimer(undefined, {
           id: 'msg_none',
           afterMs: OTP_TIMEOUT,
           input: { code: CODE },
           locale: 'en',
         });
         expect(await armed).toBeUndefined();
-        const cancelled = api.cancelTimer(undefined, 'msg_none');
+        const cancelled = cancelTimer(undefined, 'msg_none');
         expect(await cancelled).toBeUndefined();
 
         for (const to of [TO, '+94770000002']) {

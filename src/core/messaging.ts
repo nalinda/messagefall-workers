@@ -28,7 +28,7 @@ import {
   resolveTimer,
   type StatusStore,
 } from './status.js';
-import { registerMessagingOptions } from './timer.js';
+import { announceTimerOff, registerMessagingOptions } from './timer.js';
 import { createWebhookHandler } from './webhook.js';
 
 export { ProviderConfigError } from './provider-set.js';
@@ -262,6 +262,7 @@ export function createMessaging<T extends Templates<any>>(
 ): Messaging<T> {
   const kv = requireKv(env, options);
   registerMessagingOptions(options);
+  announceTimerOff(env, options.timer);
   const defaults: DeliveryPolicy = {
     fallback: options.delivery?.fallback ?? DEFAULT_POLICY.fallback,
     always: options.delivery?.always ?? DEFAULT_POLICY.always,

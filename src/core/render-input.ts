@@ -82,6 +82,24 @@ export async function readRenderInput(
 }
 
 /**
+ * The {@link RenderInput} fields of `source`, and nothing else: `input` always, `to` / `email` /
+ * `locale` only when defined. The one place the shape is copied, so the timer's stored state,
+ * its arm arguments and the fallback path's merges all build on it instead of restating it.
+ *
+ * @param source - Anything carrying the render input fields (an arm argument, a stored timer,
+ * a KV payload).
+ * @returns A fresh render input without undefined keys.
+ */
+export function pickRenderInput(source: RenderInput): RenderInput {
+  return {
+    input: source.input,
+    ...(source.to !== undefined && { to: source.to }),
+    ...(source.email !== undefined && { email: source.email }),
+    ...(source.locale !== undefined && { locale: source.locale }),
+  };
+}
+
+/**
  * Coerces an opaque value into a {@link RenderInput}: an envelope is taken as-is, anything else
  * is treated as the bare template input.
  *
