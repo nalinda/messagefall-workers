@@ -38,11 +38,7 @@ import {
   resolveTimer,
   type StatusStore,
 } from './status.js';
-
-/**
- * Default fallback timeout used when the caller configures none.
- */
-const DEFAULT_FALLBACK_TIMEOUT_MS = 10_000;
+import { chainTimeoutMs } from './timer.js';
 
 /**
  * Arguments for advancing the delivery fallback chain.
@@ -67,6 +63,10 @@ export interface AdvanceChainArgs {
     templates?: MessagingOptions['templates'] | Map<string, TemplateDef<unknown>>;
     providers?: ProviderSource<MessagingEnv>;
     onStatus?: (event: StatusCallbackEvent) => void | Promise<void>;
+    /**
+     * Re-arm timeout override. When absent the record's kind selects it from
+     * `options.delivery.timeout`, defaulting to 30s for `otp` and 300s for `notification`.
+     */
     fallbackTimeoutMs?: number;
     kv?: KVNamespace;
     timer?: FallbackTimerClient;
@@ -86,18 +86,37 @@ export interface AdvanceChainArgs {
  */
 export type AdvanceChainFn = (args: AdvanceChainArgs) => Promise<void>;
 
-function rearmTimer(
+/**
+ * Re-arms the fallback timer after a non-terminal attempt. Best effort: the attempt is already
+ * recorded, so a timer that cannot be reached must not fail the advance.
+ */
+async function rearmTimer(
   env: MessagingEnv,
   optionsTimer: FallbackTimerClient | undefined,
   id: string,
   timeoutMs: number,
   inputPayload?: RenderInput
-): void {
+): Promise<void> {
   try {
-    resolveTimer(env, optionsTimer)?.setState?.(id, timeoutMs, inputPayload);
+    await resolveTimer(env, optionsTimer)?.setState?.(id, timeoutMs, inputPayload);
   } catch {
     // Best-effort rearming
   }
+}
+
+/**
+ * Fills the recipient fields a payload lacks from another one, leaving what it has untouched.
+ */
+function withRecipient(payload: RenderInput, from: RenderInput | undefined): RenderInput {
+  if (!from) {
+    return payload;
+  }
+  return {
+    ...payload,
+    ...(payload.to === undefined && from.to !== undefined && { to: from.to }),
+    ...(payload.email === undefined && from.email !== undefined && { email: from.email }),
+    ...(payload.locale === undefined && from.locale !== undefined && { locale: from.locale }),
+  };
 }
 
 function extractFromTimer(
@@ -119,7 +138,12 @@ async function resolveInputPayload(
   kv: KVNamespace | undefined
 ): Promise<RenderInput> {
   if (args.input !== undefined && args.input !== null) {
-    return asRenderInput(args.input);
+    // The timer stores input and locale but not necessarily the recipient (#8): the `in:<id>`
+    // entry the send wrote fills in whatever the pass-through lacks.
+    const given = asRenderInput(args.input);
+    return given.to === undefined
+      ? withRecipient(given, await readRenderInput(kv, args.id))
+      : given;
   }
 
   const fromTimer = extractFromTimer(resolveTimer(args.env, args.options.timer), args.id);
@@ -296,11 +320,12 @@ export async function advanceChain(args: AdvanceChainArgs): Promise<void> {
     return;
   }
 
-  rearmTimer(
+  await rearmTimer(
     args.env,
     args.options.timer,
     args.id,
-    args.options.fallbackTimeoutMs ?? DEFAULT_FALLBACK_TIMEOUT_MS,
+    args.options.fallbackTimeoutMs ??
+      chainTimeoutMs(initialRecord.kind, args.options.delivery?.timeout),
     payload
   );
 }

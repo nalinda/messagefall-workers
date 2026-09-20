@@ -115,7 +115,7 @@ export async function releaseChain(
   id: string
 ): Promise<void> {
   try {
-    timer?.cancel?.(id);
+    await timer?.cancel?.(id);
   } catch {
     // Best-effort cancellation
   }

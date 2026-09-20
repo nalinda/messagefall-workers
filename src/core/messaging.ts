@@ -22,11 +22,13 @@ import {
 } from './send.js';
 import {
   DEFAULT_STATUS_TTL,
+  type FallbackTimerClient,
   kvStatusStore,
   type MessageRecord,
   resolveTimer,
   type StatusStore,
 } from './status.js';
+import { registerMessagingOptions } from './timer.js';
 import { createWebhookHandler } from './webhook.js';
 
 export { ProviderConfigError } from './provider-set.js';
@@ -136,30 +138,76 @@ function memoStore(kv: KVNamespace, ttlSeconds: number): StatusStore {
   return store;
 }
 
+/**
+ * What the asynchronous fallback path needs to advance one chain, beyond the messaging options
+ * themselves: which message, why, and (from the timer) the input it stored.
+ */
+export interface AdvanceChainRequest {
+  /**
+   * Internal message identifier.
+   */
+  id: string;
+  /**
+   * `failed` from a delivery status, `timeout` from the fallback timer's alarm.
+   */
+  reason: 'failed' | 'timeout';
+  /**
+   * Render input pass-through (the timer's stored state); the `in:<id>` KV entry fills in the
+   * recipient when it is absent here.
+   */
+  input?: unknown;
+  /**
+   * Timer override for this advance. The Durable Object passes itself so a re-arm from inside
+   * its own alarm is a direct storage write rather than a request to its own stub.
+   */
+  timer?: FallbackTimerClient;
+}
+
+/**
+ * Advances a message's fallback chain with the core rebuilt from `options` for `env`: providers,
+ * status store and timer resolved exactly as `createMessaging` resolves them. This is the entry
+ * the `delivered` / `failed` webhook bridge and the `FallbackTimer` Durable Object share, so the
+ * asynchronous path and the request path cannot drift apart.
+ *
+ * @param env - Worker bindings.
+ * @param options - The messaging options the Worker was configured with.
+ * @param request - Which chain to advance and why.
+ * @throws {MessagingConfigError} If no KV namespace is available.
+ */
+export async function advanceChainFor<T extends Templates<Record<string, TemplateDef<unknown>>>>(
+  env: MessagingEnv,
+  options: MessagingOptions<T>,
+  request: AdvanceChainRequest
+): Promise<void> {
+  const kv = requireKv(env, options);
+  const providers = memoProviders(env, options.providers);
+  const store = memoStore(kv, options.statusTtl ?? DEFAULT_STATUS_TTL);
+  await advanceChain({
+    id: request.id,
+    reason: request.reason,
+    env,
+    options: {
+      templates: options.templates,
+      providers,
+      onStatus: options.onStatus,
+      delivery: options.delivery,
+      kv,
+      timer: request.timer ?? resolveTimer(env, options.timer),
+    },
+    store,
+    ...(request.input !== undefined && { input: request.input }),
+  });
+}
+
 async function handleChainStatusApplied<T extends Templates<Record<string, TemplateDef<unknown>>>>(
   id: string,
   event: StatusEvent,
   env: MessagingEnv,
   options: MessagingOptions<T>,
-  providers: ProviderSet,
-  store: StatusStore,
   kv: KVNamespace
 ): Promise<void> {
   if (event.status === 'failed') {
-    await advanceChain({
-      id,
-      reason: 'failed',
-      env,
-      options: {
-        templates: options.templates,
-        providers,
-        onStatus: options.onStatus,
-        fallbackTimeoutMs: options.delivery?.timeout?.notification,
-        kv,
-        timer: resolveTimer(env, options.timer),
-      },
-      store,
-    });
+    await advanceChainFor(env, options, { id, reason: 'failed' });
     return;
   }
 
@@ -167,6 +215,14 @@ async function handleChainStatusApplied<T extends Templates<Record<string, Templ
     // The chain is terminal: nothing is left to fall back to, so drop the timer and the input.
     await releaseChain(resolveTimer(env, options.timer), kv, id);
   }
+}
+
+function requireKv(env: MessagingEnv, options: { kv?: KVNamespace }): KVNamespace {
+  const kv = options.kv ?? (env as Partial<MessagingEnv>).MESSAGES_KV;
+  if (!kv) {
+    throw new MessagingConfigError('createMessaging needs options.kv or env.MESSAGES_KV');
+  }
+  return kv;
 }
 
 /**
@@ -186,10 +242,8 @@ export function createMessaging<T extends Templates<any>>(
   env: MessagingEnv,
   options: MessagingOptions<T>
 ): Messaging<T> {
-  const kv = options.kv ?? (env as Partial<MessagingEnv>).MESSAGES_KV;
-  if (!kv) {
-    throw new MessagingConfigError('createMessaging needs options.kv or env.MESSAGES_KV');
-  }
+  const kv = requireKv(env, options);
+  registerMessagingOptions(options);
   const defaults: DeliveryPolicy = {
     fallback: options.delivery?.fallback ?? DEFAULT_POLICY.fallback,
     always: options.delivery?.always ?? DEFAULT_POLICY.always,
@@ -213,9 +267,7 @@ export function createMessaging<T extends Templates<any>>(
             : undefined
       : undefined,
     onStatusApplied: ({ id, part, event }) =>
-      part === 'chain'
-        ? handleChainStatusApplied(id, event, env, options, providers, store, kv)
-        : undefined,
+      part === 'chain' ? handleChainStatusApplied(id, event, env, options, kv) : undefined,
   });
 
   return {

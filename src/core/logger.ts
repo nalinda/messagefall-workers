@@ -42,7 +42,8 @@ export type LogEvent =
   | 'webhook.received'
   | 'fallback.advance'
   | 'timer.armed'
-  | 'timer.cancelled';
+  | 'timer.cancelled'
+  | 'timer.off';
 
 /**
  * Supported log levels.

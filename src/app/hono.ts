@@ -6,6 +6,7 @@
 
 import { Hono } from 'hono';
 
+import { createLogger } from '../core/logger.js';
 import {
   createMessaging,
   type MessagingOptions,
@@ -14,7 +15,11 @@ import {
 } from '../core/messaging.js';
 import { PolicyError } from '../core/policy.js';
 import { RecipientError, type SendContext } from '../core/send.js';
+import { resolveTimer } from '../core/status.js';
+import { registerMessagingOptions } from '../core/timer.js';
 import { type MessagingEnv, validateEnv } from '../env.js';
+
+const logger = createLogger();
 import { TemplateValidationError } from '../templates.js';
 
 function getExecutionContext(c: { executionCtx: unknown }): SendContext | undefined {
@@ -81,6 +86,9 @@ export function createMessagingApp<E extends MessagingEnv = MessagingEnv>(
 ): Hono<{ Bindings: E }> {
   const app = new Hono<{ Bindings: E }>();
   const prefix = normalizeBasePath(options.basePath);
+  // The FallbackTimer Durable Object rebuilds the core from these options when its alarm fires,
+  // which is why it must be exported from the Worker module that makes this call.
+  registerMessagingOptions(options);
 
   let isValidated = false;
 
@@ -88,6 +96,11 @@ export function createMessagingApp<E extends MessagingEnv = MessagingEnv>(
   app.use('*', async (c, next) => {
     if (!isValidated) {
       validateEnv(c.env, options);
+      if (!resolveTimer(c.env, options.timer)) {
+        // Without the FALLBACK_TIMER binding chain fallback is driven by explicit failure
+        // statuses only; said once per app so a missing binding is visible in the logs.
+        logger.info('timer.off');
+      }
       isValidated = true;
     }
     await next();

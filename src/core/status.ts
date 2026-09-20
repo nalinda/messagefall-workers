@@ -9,6 +9,7 @@ import type { KVNamespace } from '@cloudflare/workers-types';
 import type { Channel, DeliveryStatus } from '../providers/types.js';
 import type { DeliveryPolicy } from './policy.js';
 import type { RenderInput } from './render-input.js';
+import { isDurableObjectNamespace, namespaceTimerClient } from './timer.js';
 
 /**
  * The fallback timer as the delivery pipeline uses it.
@@ -27,13 +28,14 @@ export interface FallbackTimerClient {
   getState?(messageId: string): { input?: unknown } | null;
   /**
    * Arms (or re-arms) the timer for a message, optionally carrying the render input the
-   * fallback path will need when it fires.
+   * fallback path will need when it fires. A Durable Object round-trip returns a promise; a
+   * test double may be synchronous. Callers await either.
    */
-  setState?(messageId: string, timeoutMs: number, input?: RenderInput): void;
+  setState?(messageId: string, timeoutMs: number, input?: RenderInput): void | Promise<void>;
   /**
    * Disarms the timer for a message; called once the chain reaches a terminal state.
    */
-  cancel?(messageId: string): void;
+  cancel?(messageId: string): void | Promise<void>;
 }
 
 /**
@@ -41,6 +43,7 @@ export interface FallbackTimerClient {
  * `FALLBACK_TIMER` binding on the env. Both are typed loosely on purpose — a deployment passes
  * a `DurableObjectNamespace`, a test passes a double — so the one runtime check lives here and
  * callers get a {@link FallbackTimerClient} back without casting at their own boundary. A
+ * namespace is adapted to the client (`arm` / `cancel` RPC on the per-message object); a
  * non-object (or absent) binding yields `undefined`, which every timer path treats as "no
  * timer configured".
  *
@@ -53,6 +56,9 @@ export function resolveTimer(
   override?: unknown
 ): FallbackTimerClient | undefined {
   const raw = override ?? env?.FALLBACK_TIMER;
+  if (isDurableObjectNamespace(raw)) {
+    return namespaceTimerClient(raw);
+  }
   return raw && typeof raw === 'object' ? raw : undefined;
 }
 

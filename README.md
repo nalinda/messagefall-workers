@@ -207,7 +207,9 @@ The chain runs like this:
 5. If the alarm fires and the chain's current attempt is still `sent`, the next channel is tried.
 6. When no chain channels remain, the chain is marked `failed` with the last error. `always` channels do not affect the chain's outcome.
 
-Without the Durable Object binding, steps 3 and 5 do not happen: chain fallback is driven only by explicit failure statuses. That is enough for notifications. For one-time codes you want the timer, because "no status yet" after thirty seconds is the common failure mode, not an explicit rejection.
+Without the Durable Object binding, steps 3 and 5 do not happen: chain fallback is driven only by explicit failure statuses, and the app logs one `timer.off` line on its first request so the missing binding is visible. That is enough for notifications. For one-time codes you want the timer, because "no status yet" after thirty seconds is the common failure mode, not an explicit rejection.
+
+The timer is one Durable Object per message, named by the message id. Its alarm re-creates the messaging core from the options passed to `createMessagingApp` (or `createMessaging`) in the same isolate, so `FallbackTimer` must be exported from the same Worker module that makes that call, as the quick start does. A chain with only one channel, or a `'all'` policy, never arms it: there is nothing a timeout could move on to.
 
 ### Overriding the policy
 

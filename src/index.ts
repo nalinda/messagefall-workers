@@ -14,6 +14,7 @@ export * from './core/messaging.js';
 export * from './core/policy.js';
 export * from './core/redact.js';
 export * from './core/status.js';
+export * from './core/timer.js';
 export * from './core/webhook.js';
 export * from './env.js';
 export * from './providers/index.js';
