@@ -20,9 +20,7 @@ import type {
 export type AnyRendered = RenderedSms | RenderedWhatsApp | RenderedEmail | Record<string, unknown>;
 
 /**
- * Label for the `template` field of an outbound message: the catalogue name for free-text
- * renders, or the Meta template name when the rendered WhatsApp config occupies the key.
- * Never includes rendered params.
+ * Loggable name for `message.template`, which may be a string or a WhatsApp config (#28).
  */
 function templateLabel(template: unknown): string {
   if (typeof template === 'string') {

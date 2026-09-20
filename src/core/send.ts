@@ -171,13 +171,8 @@ async function attemptChannel(
       kind: req.template.kind,
       locale: req.locale,
     };
-    // KNOWN TYPE COLLISION, inherited from #18's Provider contract (`R & OutboundMeta`):
-    // OutboundMeta.template is the catalogue name (string) while RenderedWhatsApp.template is
-    // the Meta config object ({ name, language, params }). The rendered payload intentionally
-    // wins, because a WhatsApp provider cannot send without the config, so `meta` is spread
-    // first. Any provider that reads `message.template` must handle BOTH a string and that
-    // object (see consoleProvider's templateLabel). The catalogue name is always available on
-    // the MessageRecord. Fixing the contract itself is out of #3's scope.
+    // `meta` first so a rendered WhatsApp `template` config wins over the catalogue name.
+    // Providers must handle `message.template` as string | object; tracked in #28.
     payload = { ...meta, ...rendered } as AnyRendered & OutboundMeta;
   } catch (error) {
     return { ...base, status: 'failed', error: errorMessage(error), at: new Date().toISOString() };
@@ -195,28 +190,37 @@ async function attemptChannel(
 }
 
 /**
- * Walks `fallback` in order, one attempt per channel, until a channel accepts the message.
- * Returns every attempt made (all but the last are `failed`).
+ * Persists one attempt as soon as it settles. Called by `runChain` for chain attempts and by
+ * `deliver` for always attempts.
+ */
+export type RecordAttempt = (attempt: Attempt, part: 'chain' | 'always') => Promise<void>;
+
+/**
+ * Walks `fallback` in order, one attempt per channel, until a channel accepts the message,
+ * persisting each attempt through `record` as it settles. Returns every attempt made (all but
+ * the last are `failed`).
  *
  * This is THE chain-advance logic; do not write a second one. It only sees failures the
  * provider reports synchronously. The asynchronous path (#7: a `failed` delivery status from a
  * webhook; #8: the fallback timer firing) must reuse it by calling `runChain` again with the
- * remaining channels, `policy.fallback.slice(record.chain.attempts.length)`, then appending the
- * returned attempts, recomputing `chainStatus(...)` and `deriveOverallStatus(...)` on the
- * record, and calling `observe` for each new attempt — exactly as `deliver` does below. The
- * rendered payload is rebuilt from the stored template/input via `validateInput` +
- * `renderValidated`, the same helpers `attemptChannel` uses.
+ * remaining channels, `policy.fallback.slice(record.chain.attempts.length)`, and a `record`
+ * callback built with `attemptRecorder` (which appends the attempt, recomputes `chainStatus`
+ * and `deriveOverallStatus`, and calls `observe`). The rendered payload is rebuilt from the
+ * stored template/input via `validateInput` + `renderValidated`, the same helpers
+ * `attemptChannel` uses.
  */
 export async function runChain(
   req: ValidatedSendRequest,
   id: string,
   providers: ProviderSet,
-  fallback: Channel[]
+  fallback: Channel[],
+  record: RecordAttempt
 ): Promise<Attempt[]> {
   const attempts: Attempt[] = [];
   for (const channel of fallback) {
     const attempt = await attemptChannel(req, id, providers, channel);
     attempts.push(attempt);
+    await record(attempt, 'chain');
     if (attempt.status !== 'failed') {
       break;
     }
@@ -231,68 +235,101 @@ function chainStatus(attempts: Attempt[], fallback: Channel[]): MessageRecord['c
   return attempts.at(-1)!.status;
 }
 
+/**
+ * One `store.update`, retried once. KV is last-writer-wins, so a transient failure is retried
+ * before the caller gives up; the second failure propagates.
+ */
+async function updateWithRetry(
+  deps: SendDeps,
+  id: string,
+  fn: (record: MessageRecord) => MessageRecord
+): Promise<void> {
+  try {
+    await deps.store.update(id, fn);
+  } catch {
+    await deps.store.update(id, fn);
+  }
+}
+
+/**
+ * Builds the `RecordAttempt` callback for one send: appends the attempt to the right part of
+ * the record, re-derives chain/overall status, then indexes the providerId and notifies
+ * `onStatus`. Updates are queued so chain and always attempts settling in the same tick never
+ * overwrite each other's write to the same record.
+ *
+ * @param deps - Store and callbacks.
+ * @param id - Message id.
+ * @param policy - Resolved policy (chain status derivation depends on it).
+ * @returns The recorder to hand to `runChain` / always attempts.
+ */
+export function attemptRecorder(deps: SendDeps, id: string, policy: DeliveryPolicy): RecordAttempt {
+  let queue: Promise<void> = Promise.resolve();
+  return (attempt, part) => {
+    const run = async (): Promise<void> => {
+      await updateWithRetry(deps, id, (record) => {
+        const chain =
+          part === 'chain'
+            ? { ...record.chain, attempts: [...record.chain.attempts, attempt] }
+            : record.chain;
+        chain.status = chainStatus(chain.attempts, policy.fallback);
+        const always = part === 'always' ? [...record.always, attempt] : record.always;
+        return {
+          ...record,
+          chain,
+          always,
+          status: deriveOverallStatus(policy, chain, always),
+          updatedAt: new Date().toISOString(),
+        };
+      });
+      await observe(deps, id, attempt);
+    };
+    // Chain the work regardless of an earlier failure so later attempts are still persisted;
+    // each caller awaits (and handles) its own returned promise.
+    const previous = queue;
+    const next = (async (): Promise<void> => {
+      try {
+        await previous;
+      } catch {
+        // surfaced to the earlier caller already
+      }
+      await run();
+    })();
+    queue = next;
+    return next;
+  };
+}
+
 async function deliver(
   deps: SendDeps,
   req: ValidatedSendRequest,
   id: string,
   policy: DeliveryPolicy
 ): Promise<void> {
+  const record = attemptRecorder(deps, id, policy);
   const chainTask =
-    policy.fallback.length > 0 ? runChain(req, id, deps.providers, policy.fallback) : null;
-  const alwaysTasks = policy.always.map((channel) =>
-    attemptChannel(req, id, deps.providers, channel)
-  );
-
-  // attemptChannel/runChain settle every failure into an Attempt themselves, so allSettled is
-  // used only to await the chain and the always channels in parallel.
-  const [chainAttempts, ...alwaysAttempts] = await Promise.all([
-    chainTask ?? Promise.resolve<Attempt[]>([]),
-    ...alwaysTasks,
-  ]);
-
-  await deps.store.update(id, (record) => {
-    const chain = {
-      status: chainStatus(chainAttempts, policy.fallback),
-      attempts: [...record.chain.attempts, ...chainAttempts],
-    };
-    const always = [...record.always, ...alwaysAttempts];
-    return {
-      ...record,
-      chain,
-      always,
-      status: deriveOverallStatus(policy, chain, always),
-      updatedAt: new Date().toISOString(),
-    };
+    policy.fallback.length > 0
+      ? runChain(req, id, deps.providers, policy.fallback, record)
+      : Promise.resolve<Attempt[]>([]);
+  const alwaysTasks = policy.always.map(async (channel) => {
+    const attempt = await attemptChannel(req, id, deps.providers, channel);
+    await record(attempt, 'always');
   });
 
-  for (const attempt of [...chainAttempts, ...alwaysAttempts]) {
-    await observe(deps, id, attempt);
+  // Every attempt is persisted and observed the moment it settles; this only waits for all of
+  // them, then surfaces the first persistence failure (provider failures never reject).
+  const results = await Promise.allSettled([chainTask, ...alwaysTasks]);
+  const rejected = results.find((r) => r.status === 'rejected');
+  if (rejected) {
+    throw rejected.reason;
   }
 }
 
 /**
- * Marks a record failed after delivery blew up part-way (providers were already called). Best
- * effort: a second store failure is logged and swallowed. The chain status is only touched when
- * the policy has a chain, matching `chainStatus`'s rule for always-only policies.
- */
-async function markFailed(deps: SendDeps, id: string, policy: DeliveryPolicy): Promise<void> {
-  try {
-    await deps.store.update(id, (record) => ({
-      ...record,
-      chain: policy.fallback.length > 0 ? { ...record.chain, status: 'failed' } : record.chain,
-      status: 'failed',
-      updatedAt: new Date().toISOString(),
-    }));
-  } catch {
-    console.error(`[messagefall] could not mark record failed id=${id}`);
-  }
-}
-
-/**
- * Runs `deliver` and contains its failure: providers have been called by the time anything in
- * `deliver` can throw (the store update), so the error is logged without message content and
- * the record is marked failed rather than left `pending` forever. Never rejects, which makes it
- * safe for both the inline and the `ctx.waitUntil` path.
+ * Runs `deliver` and contains its failure. Providers have been called by the time anything in
+ * `deliver` can throw (a record update that failed twice), so the error is logged without
+ * message content and the record is left as persisted so far: it is NOT marked failed, because
+ * a message may already have gone out and a caller must not read the record as "nothing was
+ * sent". Never rejects, which makes it safe for both the inline and the `ctx.waitUntil` path.
  */
 async function deliverGuarded(
   deps: SendDeps,
@@ -303,8 +340,9 @@ async function deliverGuarded(
   try {
     await deliver(deps, req, id, policy);
   } catch (error) {
-    console.error(`[messagefall] delivery failed id=${id}: ${errorMessage(error)}`);
-    await markFailed(deps, id, policy);
+    console.error(
+      `[messagefall] could not persist delivery status id=${id}; attempts may have been sent, do not assume nothing happened: ${errorMessage(error)}`
+    );
   }
 }
 

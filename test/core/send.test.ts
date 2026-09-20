@@ -15,7 +15,7 @@
 import { describe, expect, it, spyOn } from 'bun:test';
 import { z } from 'zod';
 
-import { createMessaging } from '../../src/core/messaging.js';
+import { createMessaging, RecipientError } from '../../src/core/messaging.js';
 import { PolicyError } from '../../src/core/policy.js';
 import { kvStatusStore } from '../../src/core/status.js';
 import { consoleProvider } from '../../src/providers/console/index.js';
@@ -203,6 +203,38 @@ async function rejection(promise: Promise<unknown>): Promise<unknown> {
     const email = recordingProvider<RenderedEmail>('email', 'rec-email');
     return { wa, sms, email, set: { whatsapp: wa, sms, email } };
   }
+
+/**
+ * KV double whose `put` fails on the calls whose 1-based index `shouldFail` selects.
+ */
+function flakyEnv(shouldFail: (put: number) => boolean) {
+  const env = newEnv();
+  const kv = env.MESSAGES_KV as ReturnType<typeof memoryKV>;
+  const originalPut = kv.put.bind(kv);
+  let puts = 0;
+  kv.put = ((key: string, value: string) => {
+    puts += 1;
+    if (shouldFail(puts)) {
+      return Promise.reject(new Error('kv unavailable'));
+    }
+    return originalPut(key, value);
+  }) as typeof kv.put;
+  return env;
+}
+
+function captureErrors(): { errors: string[]; restore: () => void } {
+  const errors: string[] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]): void => {
+    errors.push(args.map(String).join(' '));
+  };
+  return {
+    errors,
+    restore: () => {
+      console.error = originalError;
+    },
+  };
+}
 
 describe('Issue #3: createMessaging send pipeline', () => {
   describe('chain and always attempts with console providers', () => {
@@ -579,9 +611,8 @@ describe('Issue #3: createMessaging send pipeline', () => {
         const error = await rejection(
           messaging.send({ template: 'orderUpdate', to, locale: 'en', input: INPUT })
         );
-        expect(error).toBeInstanceOf(Error);
-        // A typed error: its own name, distinguishable from a template input failure.
-        expect((error as Error).name).not.toBe('Error');
+        expect(error).toBeInstanceOf(RecipientError);
+        expect((error as Error).name).toBe('RecipientError');
         expect(error).not.toBeInstanceOf(TemplateValidationError);
       }
 
@@ -667,26 +698,51 @@ describe('Issue #3: createMessaging send pipeline', () => {
     });
   });
 
-  describe('delivery failure after providers were called', () => {
-    it('marks the record failed instead of leaving it pending when the status update throws', async () => {
-      const env = newEnv();
-      const kv = env.MESSAGES_KV as ReturnType<typeof memoryKV>;
+  describe('record persistence failures after providers were called', () => {
+    it('retries a failed record update once and records the attempt when the retry succeeds', async () => {
+      // put #1 creates the record; put #2 (the attempt update) fails; put #3 is the retry.
+      const env = flakyEnv((put) => put === 2);
+      const sms = recordingProvider<RenderedSms>('sms', 'rec-sms', [
+        { ok: true, providerId: 'sms-after-retry' },
+      ]);
+      const captured = captureErrors();
+
+      try {
+        const messaging = createMessaging(env, {
+          templates,
+          providers: () => ({ sms }),
+          delivery: { fallback: ['sms'], always: [] },
+        });
+
+        const { id } = await messaging.send({
+          template: 'smsOnly',
+          to: TO,
+          locale: 'en',
+          input: { body: 'hello' },
+        });
+
+        expect(sms.calls).toHaveLength(1);
+        const record = await messaging.status(id);
+        expect(record!.status).toBe('sent');
+        expect(record!.chain.attempts).toHaveLength(1);
+        expect(record!.chain.attempts[0]).toMatchObject({ providerId: 'sms-after-retry' });
+        expect(await kvStatusStore(env.MESSAGES_KV!).lookupProviderId('sms-after-retry')).toEqual({
+          id,
+          channel: 'sms',
+          provider: 'rec-sms',
+        });
+        expect(captured.errors).toHaveLength(0);
+      } finally {
+        captured.restore();
+      }
+    });
+
+    it('never marks the record failed when the update fails twice: status is unknown, not "nothing sent"', async () => {
+      // put #2 (the attempt update) and put #3 (its retry) fail; anything after would succeed,
+      // so a "mark failed" write here would be visible — and wrong.
+      const env = flakyEnv((put) => put === 2 || put === 3);
       const sms = recordingProvider<RenderedSms>('sms', 'rec-sms');
-      const originalPut = kv.put.bind(kv);
-      let puts = 0;
-      // The first put creates the record; the second (the attempt update) blows up.
-      kv.put = ((key: string, value: string) => {
-        puts += 1;
-        if (puts === 2) {
-          return Promise.reject(new Error('kv unavailable'));
-        }
-        return originalPut(key, value);
-      }) as typeof kv.put;
-      const errors: string[] = [];
-      const originalError = console.error;
-      console.error = (...args: unknown[]): void => {
-        errors.push(args.map(String).join(' '));
-      };
+      const captured = captureErrors();
 
       try {
         const messaging = createMessaging(env, {
@@ -705,13 +761,56 @@ describe('Issue #3: createMessaging send pipeline', () => {
         expect(sms.calls).toHaveLength(1);
         const record = await messaging.status(id);
         expect(record).not.toBeNull();
-        expect(record!.status).toBe('failed');
-        expect(record!.chain.status).toBe('failed');
-        expect(errors.some((line) => line.includes(id))).toBe(true);
-        expect(errors.some((line) => line.includes('hello'))).toBe(false);
+        expect(record!.status).not.toBe('failed');
+        expect(record!.chain.status).not.toBe('failed');
+        expect(record!.status).toBe('pending');
+        expect(captured.errors.some((line) => line.includes(id))).toBe(true);
+        expect(captured.errors.some((line) => line.includes('hello'))).toBe(false);
       } finally {
-        console.error = originalError;
+        captured.restore();
       }
+    });
+  });
+
+  describe('attempts are persisted as each provider settles', () => {
+    it('indexes a fast always provider before a slow chain provider has returned', async () => {
+      const env = newEnv();
+      const wa = gatedProvider<RenderedWhatsApp>('whatsapp', 'slow-wa', 'wa-slow-pid');
+      const email = recordingProvider<RenderedEmail>('email', 'fast-email', [
+        { ok: true, providerId: 'email-fast-pid' },
+      ]);
+      const events: StatusCallbackEvent[] = [];
+
+      const messaging = createMessaging(env, {
+        templates,
+        providers: () => ({ whatsapp: wa.provider, email }),
+        delivery: { fallback: ['whatsapp'], always: ['email'] },
+        onStatus: (event) => {
+          events.push(event);
+        },
+      });
+
+      const pending = messaging.send({ template: 'orderUpdate', to: TO, locale: 'en', input: INPUT });
+
+      const store = kvStatusStore(env.MESSAGES_KV!);
+      // While whatsapp is still held open, the email attempt is already on the record and indexed.
+      await waitFor(() => events.length === 1);
+      expect(wa.calls).toHaveLength(1);
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ channel: 'email', provider: 'fast-email', status: 'sent' });
+      expect(await store.lookupProviderId('email-fast-pid')).toMatchObject({ channel: 'email' });
+      const midway = await store.get(events[0].id);
+      expect(midway!.always).toHaveLength(1);
+      expect(midway!.chain.attempts).toHaveLength(0);
+      expect(await store.lookupProviderId('wa-slow-pid')).toBeNull();
+
+      wa.release();
+      const { id } = await pending;
+      const record = await messaging.status(id);
+      expect(record!.chain.attempts).toHaveLength(1);
+      expect(record!.always).toHaveLength(1);
+      expect(record!.status).toBe('sent');
+      expect(await store.lookupProviderId('wa-slow-pid')).toMatchObject({ channel: 'whatsapp' });
     });
   });
 

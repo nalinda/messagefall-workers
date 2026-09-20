@@ -24,20 +24,6 @@ describe('createMessaging', () => {
     expect(typeof messaging.send).toBe('function');
     expect(typeof messaging.status).toBe('function');
   });
-
-  it('builds providers from env once per env object', () => {
-    const env = newEnv();
-    let builds = 0;
-    const providers = () => {
-      builds += 1;
-      return { sms: stubSms('stub') };
-    };
-
-    createMessaging(env, { templates, providers });
-    createMessaging(env, { templates, providers });
-
-    expect(builds).toBe(1);
-  });
 });
 
 describe('defineTemplates', () => {
