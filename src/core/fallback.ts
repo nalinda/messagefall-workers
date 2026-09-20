@@ -30,7 +30,13 @@ import {
   type StatusCallbackEvent,
   type ValidatedSendRequest,
 } from './send.js';
-import type { Attempt, FallbackTimerClient, MessageRecord, StatusStore } from './status.js';
+import {
+  type Attempt,
+  type FallbackTimerClient,
+  type MessageRecord,
+  resolveTimer,
+  type StatusStore,
+} from './status.js';
 
 /**
  * Default fallback timeout used when the caller configures none.
@@ -56,7 +62,7 @@ export interface AdvanceChainArgs<Env = MessagingEnv> {
   /**
    * Messaging options containing templates, providers, onStatus, etc.
    */
-  options: Omit<Partial<MessagingOptions>, 'templates' | 'providers' | 'onStatus'> & {
+  options: Omit<Partial<MessagingOptions>, 'templates' | 'providers' | 'onStatus' | 'timer'> & {
     templates?: Record<string, TemplateDef<unknown>> | Map<string, TemplateDef<unknown>>;
     providers?:
       | Record<string, Provider>
@@ -67,7 +73,7 @@ export interface AdvanceChainArgs<Env = MessagingEnv> {
     onStatus?: (event: StatusCallbackEvent) => void | Promise<void>;
     fallbackTimeoutMs?: number;
     kv?: KVNamespace;
-    timer?: unknown;
+    timer?: FallbackTimerClient;
   };
   /**
    * Status store for reading and updating delivery status records.
@@ -84,20 +90,15 @@ export interface AdvanceChainArgs<Env = MessagingEnv> {
  */
 export type AdvanceChainFn = (args: AdvanceChainArgs) => Promise<void>;
 
-function asTimer(env: MessagingEnv, optionsTimer: unknown): FallbackTimerClient | undefined {
-  const raw = optionsTimer ?? env.FALLBACK_TIMER;
-  return raw && typeof raw === 'object' ? raw : undefined;
-}
-
 function rearmTimer(
   env: MessagingEnv,
-  optionsTimer: unknown,
+  optionsTimer: FallbackTimerClient | undefined,
   id: string,
   timeoutMs: number,
   inputPayload?: RenderInput
 ): void {
   try {
-    asTimer(env, optionsTimer)?.setState?.(id, timeoutMs, inputPayload);
+    resolveTimer(env, optionsTimer)?.setState?.(id, timeoutMs, inputPayload);
   } catch {
     // Best-effort rearming
   }
@@ -186,7 +187,7 @@ async function resolveInputPayload(
     return asRenderInput(args.input);
   }
 
-  const fromTimer = extractFromTimer(asTimer(args.env, args.options.timer), args.id);
+  const fromTimer = extractFromTimer(resolveTimer(args.env, args.options.timer), args.id);
   if (fromTimer) {
     return fromTimer;
   }
@@ -274,7 +275,7 @@ async function finalizeExhaustion(
  * way every other path here resolves it.
  */
 async function release(args: AdvanceChainArgs, kv: KVNamespace | undefined): Promise<void> {
-  await releaseChain(asTimer(args.env, args.options.timer), kv, args.id);
+  await releaseChain(resolveTimer(args.env, args.options.timer), kv, args.id);
 }
 
 /**

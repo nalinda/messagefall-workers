@@ -37,6 +37,26 @@ export interface FallbackTimerClient {
 }
 
 /**
+ * Resolves the fallback timer a call should use: an explicit override wins, otherwise the
+ * `FALLBACK_TIMER` binding on the env. Both are typed loosely on purpose — a deployment passes
+ * a `DurableObjectNamespace`, a test passes a double — so the one runtime check lives here and
+ * callers get a {@link FallbackTimerClient} back without casting at their own boundary. A
+ * non-object (or absent) binding yields `undefined`, which every timer path treats as "no
+ * timer configured".
+ *
+ * @param env - Worker bindings, possibly carrying `FALLBACK_TIMER`.
+ * @param override - A timer supplied by the caller, taking precedence over the binding.
+ * @returns The timer to use, or undefined when there is none.
+ */
+export function resolveTimer(
+  env: { FALLBACK_TIMER?: unknown } | undefined,
+  override?: unknown
+): FallbackTimerClient | undefined {
+  const raw = override ?? env?.FALLBACK_TIMER;
+  return raw && typeof raw === 'object' ? raw : undefined;
+}
+
+/**
  * Single delivery attempt on a channel.
  */
 export interface Attempt {

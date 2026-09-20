@@ -22,9 +22,9 @@ import {
 } from './send.js';
 import {
   DEFAULT_STATUS_TTL,
-  type FallbackTimerClient,
   kvStatusStore,
   type MessageRecord,
+  resolveTimer,
   type StatusStore,
 } from './status.js';
 import { createWebhookHandler } from './webhook.js';
@@ -156,7 +156,7 @@ async function handleChainStatusApplied<T extends Templates<Record<string, Templ
         onStatus: options.onStatus,
         fallbackTimeoutMs: options.delivery?.timeout?.notification,
         kv,
-        timer: options.timer,
+        timer: resolveTimer(env, options.timer),
       },
       store,
     });
@@ -165,11 +165,7 @@ async function handleChainStatusApplied<T extends Templates<Record<string, Templ
 
   if (event.status === 'delivered' || event.status === 'read') {
     // The chain is terminal: nothing is left to fall back to, so drop the timer and the input.
-    await releaseChain(
-      (options.timer ?? env.FALLBACK_TIMER) as FallbackTimerClient | undefined,
-      kv,
-      id
-    );
+    await releaseChain(resolveTimer(env, options.timer), kv, id);
   }
 }
 
@@ -236,7 +232,7 @@ export function createMessaging<T extends Templates<any>>(
           defaults,
           onStatus: options.onStatus,
           kv,
-          timer: (options.timer ?? env.FALLBACK_TIMER) as FallbackTimerClient | undefined,
+          timer: resolveTimer(env, options.timer),
           timeout: options.delivery?.timeout,
         },
         {
