@@ -8,10 +8,11 @@ import type {
   Channel,
   DeliveryPolicy,
   DeliveryStatus,
-  MessageStatus,
   MessageStatusEntry,
   MessagingState,
+  OutboundMeta,
   Provider,
+  SendResult,
   TemplateDefinition,
 } from '../../src/types.js';
 
@@ -64,7 +65,7 @@ export function createTestTemplate(kind: 'otp' | 'text'): TemplateDefinition {
 export function createMessage(
   templateId: string,
   input: Record<string, string>,
-  policy?: DeliveryPolicy,
+  policy?: DeliveryPolicy
 ): {
   template: TemplateDefinition;
   policy: DeliveryPolicy;
@@ -115,7 +116,7 @@ export function createMockKV(): KVNamespace {
  */
 export function getMessageStatus(
   id: string,
-  store: Map<string, MessageStatusEntry[]>,
+  store: Map<string, MessageStatusEntry[]>
 ): MessageStatusEntry {
   const entries = store.get(id) ?? [];
   const latest = entries.at(-1);
@@ -132,7 +133,7 @@ export function updateMessageStatus(
   store: Map<string, MessageStatusEntry[]>,
   id: string,
   status: DeliveryStatus,
-  timestamp: Date,
+  timestamp: Date
 ): void {
   if (!store.has(id)) {
     store.set(id, []);
@@ -150,7 +151,7 @@ export type TestProvider = { readonly id: string; readonly channel: Channel };
 
 export function createTestProvider(
   id: string,
-  channel: Channel,
+  channel: Channel
 ): TestProvider {
   return {
     id,
@@ -163,17 +164,14 @@ export function createTestProvider(
  */
 export class BasicProvider implements Provider {
   readonly id = 'test-basic';
+  readonly name = 'test-basic';
   readonly channel: Channel = 'whatsapp';
 
-  send(_options: unknown): Promise<{ messageId: string; status: Promise<MessageStatus> }> {
+  send(_options: OutboundMeta): Promise<SendResult> {
     const messageId = `test-${Date.now()}`;
     return Promise.resolve({
-      messageId,
-      status: Promise.resolve({
-        id: messageId,
-        status: 'sent',
-        timestamp: new Date(),
-      }),
+      ok: true,
+      providerId: messageId,
     });
   }
 }

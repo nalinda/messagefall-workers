@@ -6,21 +6,25 @@
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 
-/**
- * Supported message delivery channels.
- */
-export type Channel = 'whatsapp' | 'sms' | 'email';
+import type { DeliveryOverride, DeliveryPolicy } from './core/policy.js';
+import type { Channel, DeliveryStatus, Provider } from './providers/types.js';
+
+export type {
+  Channel,
+  DeliveryStatus,
+  OutboundMeta,
+  Provider,
+  RenderedEmail,
+  RenderedSms,
+  RenderedWhatsApp,
+  SendResult,
+  StatusEvent,
+} from './providers/types.js';
 
 /**
  * Array of all supported channels.
  */
 export const CHANNELS = ['whatsapp', 'sms', 'email'] as const;
-
-/**
- * Message delivery status.
- */
-export type DeliveryStatus =
-  'sent' | 'delivered' | 'read' | 'failed' | 'undelivered' | 'undecipherable' | 'unknown';
 
 /**
  * Template kind: 'otp' for one-time codes, 'notification' for general alerts.
@@ -73,8 +77,6 @@ export interface TemplateRendering {
   html?: (input: unknown, locale?: string) => string;
 }
 
-import type { DeliveryOverride, DeliveryPolicy } from './core/policy.js';
-
 export type { DeliveryOverride, DeliveryPolicy, ResolveDeliveryArgs } from './core/policy.js';
 export { DEFAULT_POLICY, PolicyError, resolveDelivery } from './core/policy.js';
 
@@ -119,16 +121,6 @@ export interface MessageStatus {
 }
 
 /**
- * Status event from webhooks.
- */
-export interface StatusEvent {
-  providerId: string;
-  status: DeliveryStatus;
-  error?: string;
-  at?: Date | string;
-}
-
-/**
  * Message state stored in KV.
  */
 export interface MessageState {
@@ -160,29 +152,6 @@ export interface MessagingEnv {
 }
 
 /**
- * Provider interface.
- */
-export interface Provider {
-  readonly id?: string;
-  readonly name?: string;
-  readonly channel: Channel;
-  send(options: unknown): Promise<{
-    ok?: boolean;
-    messageId?: string;
-    providerId?: string;
-    status?: Promise<MessageStatus>;
-    error?: string;
-    retryable?: boolean;
-  }>;
-  status?(messageId: string): Promise<MessageStatus>;
-  webhook?: {
-    verify?(request: Request): Promise<Response | null>;
-    parse(request: Request): Promise<StatusEvent[]>;
-  };
-  statusHandler?(request: Request): Promise<Response> | Response;
-}
-
-/**
  * Messaging configuration options.
  */
 export interface MessagingConfig<Env = MessagingEnv> {
@@ -195,6 +164,7 @@ export interface MessagingConfig<Env = MessagingEnv> {
   templates?: TemplateCatalog;
   providers?:
     | ((env: Env) => Record<string, Provider>)
+    | Provider[]
     | {
         id: string;
         config: Record<string, unknown>;
@@ -206,6 +176,7 @@ export interface MessagingConfig<Env = MessagingEnv> {
   statusTtl?: number;
   onStatus?: (event: unknown) => void | Promise<void>;
   basePath?: string;
+  env?: Env;
 }
 
 /**

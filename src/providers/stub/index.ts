@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { Channel, Provider, ProviderStatus } from '../types.js';
+import type { Channel, OutboundMeta, Provider, SendResult, StatusEvent } from '../types.js';
 
 /**
  * Stub provider implementation.
@@ -14,28 +14,19 @@ export class StubProvider implements Provider {
   readonly name = 'stub';
   readonly channel: Channel = 'whatsapp';
 
-  send(_options: unknown): Promise<{
-    ok: boolean;
-    messageId: string;
-    status: Promise<ProviderStatus>;
-  }> {
+  send(_options: OutboundMeta): Promise<SendResult> {
     const messageId = `stub-${Date.now()}`;
     return Promise.resolve({
       ok: true,
-      messageId,
-      status: Promise.resolve({
-        status: 'sent',
-        timestamp: new Date(),
-        details: { provider: this.id },
-      }),
+      providerId: messageId,
     });
   }
 
-  status(_messageId: string): Promise<ProviderStatus> {
+  status(_messageId: string): Promise<StatusEvent> {
     return Promise.resolve({
+      providerId: this.id,
       status: 'sent',
-      timestamp: new Date(),
-      details: { provider: this.id },
+      at: new Date().toISOString(),
     });
   }
 
