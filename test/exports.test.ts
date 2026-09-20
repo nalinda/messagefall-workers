@@ -42,9 +42,11 @@ function distFile(relative: string): string {
   return path.join(rootDir, relative);
 }
 
-// `from './x.js'` (static import/export) and `import('./x.js')` (dynamic).
+// `from './x.js'` (static import/export), `import('./x.js')` (dynamic) and
+// `import './x.js'` (bare side-effect import).
 const STATIC_SPECIFIER = /\bfrom\s*['"]([^'"]+)['"]/g;
 const DYNAMIC_SPECIFIER = /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+const BARE_SPECIFIER = /\bimport\s+['"]([^'"]+)['"]/g;
 
 /**
  * Absolute paths of the relative modules `file` imports.
@@ -54,6 +56,7 @@ function relativeImportsOf(file: string): string[] {
   const specifiers = [
     ...source.matchAll(STATIC_SPECIFIER),
     ...source.matchAll(DYNAMIC_SPECIFIER),
+    ...source.matchAll(BARE_SPECIFIER),
   ].map((match) => match[1]);
   return specifiers
     .filter((specifier) => specifier.startsWith('.'))

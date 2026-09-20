@@ -4,6 +4,7 @@
  * @module
  */
 
+import { formatHttpError, isRetryableStatus } from '../shared.js';
 import type { OutboundMeta, RenderedWhatsApp, SendResult } from '../types.js';
 
 /**
@@ -103,10 +104,6 @@ function isGraphError(value: unknown): value is { error: GraphError } {
   return typeof message === 'string' && typeof code === 'number';
 }
 
-function isHttpRetryable(status: number): boolean {
-  return status === 429 || (status >= 500 && status < 600);
-}
-
 /**
  * Map a non-OK Cloud API response to a failed `SendResult`.
  *
@@ -120,15 +117,14 @@ export function mapErrorResponse(status: number, body: unknown, rawText: string)
     return {
       ok: false,
       error: `Graph error ${code}: ${message}`,
-      retryable: isHttpRetryable(status) || RETRYABLE_GRAPH_CODES.has(code),
+      retryable: isRetryableStatus(status) || RETRYABLE_GRAPH_CODES.has(code),
     };
   }
 
-  const snippet = rawText.slice(0, 200);
   return {
     ok: false,
-    error: snippet.length > 0 ? `HTTP ${status}: ${snippet}` : `HTTP ${status}`,
-    retryable: isHttpRetryable(status),
+    error: formatHttpError(status, rawText),
+    retryable: isRetryableStatus(status),
   };
 }
 

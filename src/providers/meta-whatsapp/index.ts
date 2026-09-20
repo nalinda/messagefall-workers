@@ -45,6 +45,12 @@ export interface MetaWhatsAppConfig {
 /**
  * Creates a Meta WhatsApp Cloud API provider.
  *
+ * `webhook.parse` verifies `X-Hub-Signature-256` and maps each status in the
+ * payload to a `StatusEvent`. When a status's `timestamp` is missing or
+ * unparseable the event is still emitted, with `at` set to the webhook's
+ * receipt time rather than dropped; a late-redelivered event may therefore
+ * carry a later `at` than statuses that actually followed it.
+ *
  * @param config - Provider configuration.
  * @returns A Provider instance for WhatsApp delivery.
  */

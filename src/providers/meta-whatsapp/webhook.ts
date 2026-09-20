@@ -20,8 +20,9 @@ const encoder = new TextEncoder();
 /**
  * Answer the Meta subscription handshake.
  *
- * Returns `200` with `hub.challenge` when `hub.mode=subscribe` and
- * `hub.verify_token` matches, `403` for any other GET, and `null` for
+ * Returns `200` with `hub.challenge` when `hub.mode=subscribe`,
+ * `hub.verify_token` matches and `hub.challenge` is present; `403` for any
+ * other GET (including a matching token with no challenge); and `null` for
  * non-GET requests so that `parse` handles them.
  */
 export function verifyHandshake(request: Request, verifyToken: string): Response | null {
@@ -32,8 +33,13 @@ export function verifyHandshake(request: Request, verifyToken: string): Response
   const token = url.searchParams.get('hub.verify_token');
   const challenge = url.searchParams.get('hub.challenge');
 
-  if (mode === 'subscribe' && token !== null && isEqualConstantTimeText(token, verifyToken)) {
-    return new Response(challenge ?? '', {
+  if (
+    mode === 'subscribe' &&
+    token !== null &&
+    challenge !== null &&
+    isEqualConstantTimeText(token, verifyToken)
+  ) {
+    return new Response(challenge, {
       status: 200,
       headers: { 'content-type': 'text/plain' },
     });
