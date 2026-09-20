@@ -330,7 +330,15 @@ describe('Issue #3: createMessaging send pipeline', () => {
         delivery: { fallback: ['whatsapp', 'sms'], always: ['email'] },
       });
 
-      const invalidNumbers = ['0771234567', '+0123456789', '14155550123', '+1 415 555 0123', ''];
+      const invalidNumbers = [
+        '0771234567',
+        '+0123456789',
+        '14155550123',
+        '+1 415 555 0123',
+        '',
+        '+1234567890123456', // 16 digits after '+': exceeds the E.164 15-digit ceiling
+        '+1415555abc', // non-digit after a valid prefix
+      ];
       for (const to of invalidNumbers) {
         const error = await rejection(
           messaging.send({ template: 'orderUpdate', to, locale: 'en', input: INPUT })
