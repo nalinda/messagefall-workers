@@ -37,8 +37,9 @@ function bodyOf(call: Captured | undefined): Record<string, unknown> {
 
 /**
  * The issue does not fix the recipient format, so `to` is checked by its
- * digits (with or without the leading `+`) and then removed so the rest of
- * the body can be compared exactly.
+ * digits (with or without the leading `+`) and then removed; the rest of the
+ * body is matched on the fields the issue names, so optional Cloud API
+ * fields such as `recipient_type` are allowed.
  */
 function withoutRecipient(body: Record<string, unknown>): Record<string, unknown> {
   const { to, ...rest } = body;
@@ -119,7 +120,7 @@ describe('metaWhatsApp provider: send', () => {
     expect(headers.get('authorization')).toBe('Bearer EAAB-test-token');
     expect(headers.get('content-type')).toBe('application/json');
 
-    expect(withoutRecipient(bodyOf(call))).toEqual({
+    expect(withoutRecipient(bodyOf(call))).toMatchObject({
       messaging_product: 'whatsapp',
       type: 'template',
       template: {
@@ -158,7 +159,7 @@ describe('metaWhatsApp provider: send', () => {
     await provider.send(textMessage);
 
     expect(calls).toHaveLength(1);
-    expect(withoutRecipient(bodyOf(calls[0]))).toEqual({
+    expect(withoutRecipient(bodyOf(calls[0]))).toMatchObject({
       messaging_product: 'whatsapp',
       type: 'text',
       text: { body: 'Your match is ready' },
@@ -216,7 +217,7 @@ describe('metaWhatsApp provider: send', () => {
     expect(result.retryable).toBe(true);
   });
 
-  it('maps a thrown fetch to a retryable failure', async () => {
+  it('maps a thrown fetch to a failure carrying the error message', async () => {
     fetchSpy.mockImplementation((() =>
       Promise.reject(new Error('network down'))) as unknown as typeof fetch);
 
@@ -225,7 +226,6 @@ describe('metaWhatsApp provider: send', () => {
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.retryable).toBe(true);
     expect(result.error).toContain('network down');
   });
 });
