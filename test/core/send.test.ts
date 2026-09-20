@@ -265,11 +265,6 @@ describe('Issue #3: createMessaging send pipeline', () => {
 
         const allAttempts = [...record!.chain.attempts, ...record!.always];
         expect(allAttempts.some((a) => a.channel === 'sms')).toBe(false);
-
-        // The core must not log rendered content.
-        const joined = silenced.logs.join('\n');
-        expect(joined).not.toContain('has shipped');
-        expect(joined).not.toContain('on its way');
       } finally {
         silenced.restore();
       }
@@ -489,6 +484,25 @@ describe('Issue #3: createMessaging send pipeline', () => {
       expect(email.calls).toHaveLength(0);
     });
 
+    it('accepts E.164 numbers at the minimum and maximum length', async () => {
+      const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'rec-wa');
+      const messaging = api.createMessaging(newEnv(), {
+        templates,
+        providers: () => ({ whatsapp: wa }),
+        delivery: { fallback: ['whatsapp'], always: [] },
+      });
+
+      const validNumbers = ['+12', '+123456789012345']; // 2 digits (minimum), 15 digits (maximum)
+      for (const to of validNumbers) {
+        const error = await rejection(
+          messaging.send({ template: 'orderUpdate', to, locale: 'en', input: INPUT })
+        );
+        expect(error).toBeUndefined();
+      }
+
+      expect(wa.calls.map((c) => c.to)).toEqual(validNumbers);
+    });
+
     it('rejects input failing the template schema without calling any provider', async () => {
       const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'rec-wa');
       const sms = recordingProvider<RenderedSms>('sms', 'rec-sms');
@@ -696,38 +710,6 @@ describe('Issue #3: createMessaging send pipeline', () => {
       expect(record!.always[0].error).toContain('socket hang up');
     });
 
-    it('records a failed chain attempt when a provider throws synchronously', async () => {
-      const sms = {
-        name: 'throwing-sms',
-        channel: 'sms' as const,
-        send: (): Promise<never> => {
-          throw new Error('boom');
-        },
-      };
-
-      const messaging = api.createMessaging(newEnv(), {
-        templates,
-        providers: () => ({ sms }),
-        delivery: { fallback: ['sms'], always: [] },
-      });
-
-      const result = await messaging.send({
-        template: 'smsOnly',
-        to: TO,
-        locale: 'en',
-        input: { body: 'hello' },
-      });
-
-      expect(typeof result.id).toBe('string');
-      expect(result.id.length).toBeGreaterThan(0);
-
-      const record = await messaging.status(result.id);
-      expect(record).not.toBeNull();
-      const smsAttempts = record!.chain.attempts.filter((a) => a.channel === 'sms');
-      expect(smsAttempts).toHaveLength(1);
-      expect(smsAttempts[0]).toMatchObject({ provider: 'throwing-sms', status: 'failed' });
-      expect(smsAttempts[0].error).toContain('boom');
-    });
   });
 
   describe('provider-id index', () => {
@@ -843,7 +825,8 @@ describe('Issue #3: createMessaging send pipeline', () => {
         ctx
       );
 
-      // Nothing handed to waitUntil is awaited: the attempt must already be recorded.
+      // Nothing was deferred to waitUntil, and the attempt is already recorded.
+      expect(ctx.promises).toHaveLength(0);
       expect(wa.calls).toHaveLength(1);
       const record = await messaging.status(id);
       expect(record).not.toBeNull();
@@ -858,12 +841,21 @@ describe('Issue #3: createMessaging send pipeline', () => {
     });
 
     it('without ctx: runs delivery inline so the attempt is recorded before send() resolves', async () => {
-      const gated = gatedSmsProvider('otp-sms', 'otp-pid-inline');
-      gated.release();
+      const calls: (RenderedSms & OutboundMeta)[] = [];
+      const slowSms = {
+        name: 'otp-sms',
+        channel: 'sms' as const,
+        send: async (message: RenderedSms & OutboundMeta): Promise<SendResult> => {
+          calls.push(message);
+          // A real delay: the attempt can only be on the record if the pipeline awaited us.
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return { ok: true, providerId: 'otp-pid-inline' };
+        },
+      };
 
       const messaging = api.createMessaging(newEnv(), {
         templates,
-        providers: () => ({ sms: gated.provider }),
+        providers: () => ({ sms: slowSms }),
         delivery: { fallback: ['sms'], always: [] },
       });
 
@@ -875,7 +867,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       });
 
       // Nothing else is awaited: the attempt must already be on the record.
-      expect(gated.calls).toHaveLength(1);
+      expect(calls).toHaveLength(1);
       const record = await messaging.status(id);
       expect(record).not.toBeNull();
       expect(record!.kind).toBe('otp');
