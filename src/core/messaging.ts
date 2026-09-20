@@ -9,6 +9,7 @@ import type { DurableObjectNamespace, KVNamespace } from '@cloudflare/workers-ty
 import type { Provider, StatusEvent } from '../providers/types.js';
 import type { InputOf, TemplateDef, Templates } from '../templates.js';
 import { CHANNELS, type MessagingEnv } from '../types.js';
+import { advanceChain } from './fallback.js';
 import { DEFAULT_POLICY, type DeliveryOverride, type DeliveryPolicy } from './policy.js';
 import {
   notifyStatus,
@@ -198,6 +199,49 @@ function memoStore(kv: KVNamespace, ttlSeconds: number): StatusStore {
   return store;
 }
 
+async function handleChainStatusApplied<T extends Templates<Record<string, TemplateDef<unknown>>>>(
+  id: string,
+  event: StatusEvent,
+  env: MessagingEnv,
+  options: MessagingOptions<T>,
+  providers: ProviderSet,
+  store: StatusStore,
+  kv: KVNamespace
+): Promise<void> {
+  if (event.status === 'failed') {
+    await advanceChain({
+      id,
+      reason: 'failed',
+      env,
+      options: {
+        templates: options.templates,
+        providers,
+        onStatus: options.onStatus,
+        fallbackTimeoutMs: options.delivery?.timeout?.notification,
+        kv,
+        timer: options.timer,
+      },
+      store,
+    });
+    return;
+  }
+
+  if (event.status === 'delivered' || event.status === 'read') {
+    const timer = (options.timer ?? env.FALLBACK_TIMER) as
+      { cancel?: (timerId: string) => void } | undefined;
+    try {
+      timer?.cancel?.(id);
+    } catch {
+      // ignore
+    }
+    try {
+      await kv.delete(`in:${id}`);
+    } catch {
+      // ignore
+    }
+  }
+}
+
 /**
  * Creates a messaging instance bound to a Worker env.
  *
@@ -240,6 +284,10 @@ export function createMessaging<T extends Templates<any>>(
             ? notifyStatus(options.onStatus, { ...ref, status: (raw as StatusEvent).status })
             : undefined
       : undefined,
+    onStatusApplied: ({ id, part, event }) =>
+      part === 'chain'
+        ? handleChainStatusApplied(id, event, env, options, providers, store, kv)
+        : undefined,
   });
 
   return {
