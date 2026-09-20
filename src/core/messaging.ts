@@ -142,6 +142,10 @@ function memoStore(kv: KVNamespace, ttlSeconds: number): StatusStore {
 /**
  * What the asynchronous fallback path needs to advance one chain, beyond the messaging options
  * themselves: which message, why, and (from the timer) the input it stored.
+ *
+ * Internal seam for the `./durable` entry (imported by relative path); deliberately not part of
+ * the root barrel's public surface, together with {@link advanceChainFor} and
+ * {@link statusStoreFor}.
  */
 export interface AdvanceChainRequest {
   /**

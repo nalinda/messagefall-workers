@@ -225,6 +225,14 @@ export function registerMessagingOptions<T extends Templates<any>>(
 }
 
 /**
+ * Forgets the registered options: models a fresh isolate (one woken by an alarm before any
+ * `createMessagingApp` ran) in a test process where the module is loaded once.
+ */
+export function resetMessagingOptions(): void {
+  registry.options = undefined;
+}
+
+/**
  * The options recorded by {@link registerMessagingOptions}, if any.
  *
  * @returns The options, or undefined when no `createMessagingApp` / `createMessaging` call has

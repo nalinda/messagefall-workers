@@ -10,7 +10,20 @@
 export * from './app/hono.js';
 export * from './core/fallback.js';
 export * from './core/logger.js';
-export * from './core/messaging.js';
+export {
+  createMessaging,
+  E164,
+  type Messaging,
+  MessagingConfigError,
+  type MessagingOptions,
+  ProviderConfigError,
+  type ProviderSet,
+  RecipientError,
+  type SendArgs,
+  type SendContext,
+  type StatusCallbackEvent,
+  UnknownTemplateError,
+} from './core/messaging.js';
 export * from './core/policy.js';
 export * from './core/redact.js';
 export * from './core/status.js';

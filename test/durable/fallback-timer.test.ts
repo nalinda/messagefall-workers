@@ -20,12 +20,18 @@
  * exported from the Worker that calls `createMessagingApp`.
  */
 
+import type { DurableObjectNamespace } from '@cloudflare/workers-types';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
 import { createMessagingApp } from '../../src/app/hono.js';
-import { createMessaging, type Messaging, type MessagingOptions } from '../../src/core/messaging.js';
+import {
+  createMessaging,
+  type Messaging,
+  MessagingConfigError,
+  type MessagingOptions,
+} from '../../src/core/messaging.js';
 import { kvStatusStore, type MessageRecord, type StatusStore } from '../../src/core/status.js';
-import { armTimer, cancelTimer } from '../../src/core/timer.js';
+import { armTimer, cancelTimer, resetMessagingOptions } from '../../src/core/timer.js';
 import { FallbackTimer, MAX_PENDING_RECHECKS } from '../../src/durable/fallback-timer.js';
 import type { MessagingEnv } from '../../src/env.js';
 import type { DeliveryStatus } from '../../src/providers/types.js';
@@ -607,6 +613,95 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
       await clock.advance(OTP_TIMEOUT * 10);
       expect(ns.calls.filter((c) => c.name === id && c.method === 'alarm')).toHaveLength(0);
       expect(providers.sms.calls).toHaveLength(1);
+    });
+  });
+
+  describe('error paths the README promises', () => {
+    it('an alarm firing with no options registered logs timer.unconfigured, throws, and keeps its storage for the retry', async () => {
+      const id = 'msg_01J9FB0000000000000000TM20';
+      await seedSent(store, kv, sentRecord(id));
+      await store.indexProviderId('wa_1', { id, channel: 'whatsapp', provider: 'wa' });
+      await armTimer(env.FALLBACK_TIMER, {
+        id,
+        afterMs: OTP_TIMEOUT,
+        input: { code: CODE },
+        locale: 'en',
+      });
+
+      // A fresh isolate: woken by the alarm before any createMessagingApp ran.
+      resetMessagingOptions();
+      const captured = captureConsole(['warn']);
+      let thrown: unknown;
+      try {
+        await clock.advance(OTP_TIMEOUT);
+      } catch (error) {
+        thrown = error;
+      } finally {
+        captured.restore();
+      }
+      expect(thrown).toBeInstanceOf(MessagingConfigError);
+      expect(captured.logs.filter((line) => line.includes('timer.unconfigured'))).toHaveLength(1);
+      for (const line of captured.logs) {
+        expect(line).not.toContain(CODE);
+      }
+      // No advance happened and the state is intact for the platform's alarm retry.
+      expect(providers.sms.calls).toHaveLength(0);
+      expect(ns.storageOf(id).size).toBeGreaterThan(0);
+
+      // Once the Worker has registered its options, the retried alarm advances from that state.
+      wire();
+      const object = ns.objects.get(id);
+      if (!object) {
+        throw new Error(`no object for ${id}`);
+      }
+      await object.instance.alarm();
+      expect(providers.sms.calls).toHaveLength(1);
+      expect(providers.sms.calls[0].to).toBe(TO);
+      const advanced = await chainOf(store, id);
+      expect(advanced.attempts.map((a) => a.channel)).toEqual(['whatsapp', 'sms']);
+    });
+
+    it('a timer that throws at arm time logs timer.arm-failed and never fails the send', async () => {
+      const armAttempts: string[] = [];
+      const broken = {
+        idFromName: (name: string) => ({ name, toString: () => `broken:${name}` }),
+        get: (ref: { name: string }) => ({
+          arm: () => {
+            armAttempts.push(ref.name);
+            return Promise.reject(new Error('durable object unavailable'));
+          },
+          cancel: () => Promise.resolve(),
+        }),
+      } as unknown as DurableObjectNamespace;
+      const brokenEnv = timerEnv(kv, broken);
+      const brokenMessaging = createMessaging(brokenEnv, optionsFor(providers));
+
+      const captured = captureConsole(['log', 'info', 'warn', 'error']);
+      let id: string;
+      try {
+        ({ id } = await brokenMessaging.send({
+          template: 'loginCode',
+          to: TO,
+          locale: 'en',
+          input: { code: CODE },
+        }));
+      } finally {
+        captured.restore();
+      }
+
+      expect(armAttempts).toEqual([id]);
+      // The send went out and was recorded as if the timer did not exist.
+      expect(providers.whatsapp.calls).toHaveLength(1);
+      const record = await chainOf(store, id);
+      expect(record.status).toBe('sent');
+      expect(record.attempts).toHaveLength(1);
+      // The failure is visible in the logs, once, without content.
+      const failures = captured.logs.filter((line) => line.includes('timer.arm-failed'));
+      expect(failures).toHaveLength(1);
+      expect(failures[0]).toContain(id);
+      for (const line of captured.logs) {
+        expect(line).not.toContain(CODE);
+      }
     });
   });
 
