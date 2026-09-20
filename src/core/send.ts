@@ -171,8 +171,13 @@ async function attemptChannel(
       kind: req.template.kind,
       locale: req.locale,
     };
-    // Spread meta first so a rendered WhatsApp `template` config ({ name, language, params })
-    // is never overwritten by OutboundMeta.template (the catalogue name).
+    // KNOWN TYPE COLLISION, inherited from #18's Provider contract (`R & OutboundMeta`):
+    // OutboundMeta.template is the catalogue name (string) while RenderedWhatsApp.template is
+    // the Meta config object ({ name, language, params }). The rendered payload intentionally
+    // wins, because a WhatsApp provider cannot send without the config, so `meta` is spread
+    // first. Any provider that reads `message.template` must handle BOTH a string and that
+    // object (see consoleProvider's templateLabel). The catalogue name is always available on
+    // the MessageRecord. Fixing the contract itself is out of #3's scope.
     payload = { ...meta, ...rendered } as AnyRendered & OutboundMeta;
   } catch (error) {
     return { ...base, status: 'failed', error: errorMessage(error), at: new Date().toISOString() };
@@ -219,10 +224,6 @@ export async function runChain(
   return attempts;
 }
 
-function settled<T>(result: PromiseSettledResult<T>, fallback: T): T {
-  return result.status === 'fulfilled' ? result.value : fallback;
-}
-
 function chainStatus(attempts: Attempt[], fallback: Channel[]): MessageRecord['chain']['status'] {
   if (attempts.length === 0 || fallback.length === 0) {
     return 'pending';
@@ -230,42 +231,24 @@ function chainStatus(attempts: Attempt[], fallback: Channel[]): MessageRecord['c
   return attempts.at(-1)!.status;
 }
 
-/**
- * Mutable progress marker so a failure after providers were called can be told apart from one
- * before any message went out.
- */
-interface DeliveryProgress {
-  dispatched: boolean;
-}
-
 async function deliver(
   deps: SendDeps,
   req: ValidatedSendRequest,
   id: string,
-  policy: DeliveryPolicy,
-  progress: DeliveryProgress
+  policy: DeliveryPolicy
 ): Promise<void> {
-  progress.dispatched = true;
   const chainTask =
     policy.fallback.length > 0 ? runChain(req, id, deps.providers, policy.fallback) : null;
   const alwaysTasks = policy.always.map((channel) =>
     attemptChannel(req, id, deps.providers, channel)
   );
 
-  const [chainResult, ...alwaysResults] = await Promise.allSettled([
+  // attemptChannel/runChain settle every failure into an Attempt themselves, so allSettled is
+  // used only to await the chain and the always channels in parallel.
+  const [chainAttempts, ...alwaysAttempts] = await Promise.all([
     chainTask ?? Promise.resolve<Attempt[]>([]),
     ...alwaysTasks,
   ]);
-  const chainAttempts = settled(chainResult, []);
-  const alwaysAttempts = alwaysResults.map((result, i) =>
-    settled<Attempt>(result, {
-      channel: policy.always.at(i)!,
-      provider: providerFor(deps.providers, policy.always.at(i)!)?.name ?? 'none',
-      status: 'failed',
-      error: 'attempt did not settle',
-      at: new Date().toISOString(),
-    })
-  );
 
   await deps.store.update(id, (record) => {
     const chain = {
@@ -289,13 +272,14 @@ async function deliver(
 
 /**
  * Marks a record failed after delivery blew up part-way (providers were already called). Best
- * effort: a second store failure is logged and swallowed.
+ * effort: a second store failure is logged and swallowed. The chain status is only touched when
+ * the policy has a chain, matching `chainStatus`'s rule for always-only policies.
  */
-async function markFailed(deps: SendDeps, id: string): Promise<void> {
+async function markFailed(deps: SendDeps, id: string, policy: DeliveryPolicy): Promise<void> {
   try {
     await deps.store.update(id, (record) => ({
       ...record,
-      chain: { ...record.chain, status: 'failed' },
+      chain: policy.fallback.length > 0 ? { ...record.chain, status: 'failed' } : record.chain,
       status: 'failed',
       updatedAt: new Date().toISOString(),
     }));
@@ -305,9 +289,10 @@ async function markFailed(deps: SendDeps, id: string): Promise<void> {
 }
 
 /**
- * Runs `deliver` and contains its failure. Before any provider was called the error is
- * rethrown (nothing went out, the caller may retry); afterwards the record is marked failed so
- * it never sits `pending` forever, and the error is logged without message content.
+ * Runs `deliver` and contains its failure: providers have been called by the time anything in
+ * `deliver` can throw (the store update), so the error is logged without message content and
+ * the record is marked failed rather than left `pending` forever. Never rejects, which makes it
+ * safe for both the inline and the `ctx.waitUntil` path.
  */
 async function deliverGuarded(
   deps: SendDeps,
@@ -315,32 +300,11 @@ async function deliverGuarded(
   id: string,
   policy: DeliveryPolicy
 ): Promise<void> {
-  const progress: DeliveryProgress = { dispatched: false };
   try {
-    await deliver(deps, req, id, policy, progress);
+    await deliver(deps, req, id, policy);
   } catch (error) {
     console.error(`[messagefall] delivery failed id=${id}: ${errorMessage(error)}`);
-    if (!progress.dispatched) {
-      throw error;
-    }
-    await markFailed(deps, id);
-  }
-}
-
-/**
- * `deliverGuarded` for the `ctx.waitUntil` path, where nothing can observe a rejection: the
- * error has already been logged, so it is swallowed here.
- */
-async function deliverDetached(
-  deps: SendDeps,
-  req: ValidatedSendRequest,
-  id: string,
-  policy: DeliveryPolicy
-): Promise<void> {
-  try {
-    await deliverGuarded(deps, req, id, policy);
-  } catch {
-    // logged by deliverGuarded
+    await markFailed(deps, id, policy);
   }
 }
 
@@ -412,7 +376,7 @@ export async function runSend(
   });
 
   if (ctx && req.template.kind === 'otp') {
-    ctx.waitUntil(deliverDetached(deps, validated, id, policy));
+    ctx.waitUntil(deliverGuarded(deps, validated, id, policy));
   } else {
     await deliverGuarded(deps, validated, id, policy);
   }

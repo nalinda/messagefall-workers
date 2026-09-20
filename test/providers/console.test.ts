@@ -16,8 +16,8 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'bun:test';
 
-import { createMessaging, defineTemplates } from '../../src/index.js';
-import { memoryKV } from '../helpers/messaging.js';
+import { createMessaging } from '../../src/index.js';
+import { newEnv, pingTemplates } from '../helpers/messaging.js';
 import type {
   Channel,
   DeliveryStatus,
@@ -597,14 +597,8 @@ describe('Provider contract shape and optional methods', () => {
   });
 });
 
-const validationTemplates = defineTemplates({ ping: { kind: 'notification', sms: () => 'ping' } });
-
-function newEnv() {
-  return { MESSAGES_KV: memoryKV() };
-}
-
 describe('Startup provider validation', () => {
-  const templates = validationTemplates;
+  const templates = pingTemplates;
 
   it('rejects duplicate provider names across configured providers with a bulleted error', () => {
     // If two providers share the same name (e.g. 'console'), startup validation must fail

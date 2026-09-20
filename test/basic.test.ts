@@ -7,22 +7,18 @@
 import { describe, expect, it } from 'bun:test';
 
 import { createMessaging, defineTemplates, type Provider, type RenderedSms } from '../src/index.js';
-import { memoryKV } from './helpers/messaging.js';
+import { newEnv, pingTemplates as templates } from './helpers/messaging.js';
 
 function stubSms(name: string): Provider<RenderedSms> {
   return { name, channel: 'sms', send: () => Promise.resolve({ ok: true }) };
 }
 
-const templates = defineTemplates({
-  ping: { kind: 'notification', sms: () => 'ping' },
-});
-
 describe('createMessaging', () => {
   it('creates a messaging instance with send and status', () => {
-    const messaging = createMessaging(
-      { MESSAGES_KV: memoryKV() },
-      { templates, providers: () => ({ sms: stubSms('stub') }) }
-    );
+    const messaging = createMessaging(newEnv(), {
+      templates,
+      providers: () => ({ sms: stubSms('stub') }),
+    });
 
     expect(messaging).toBeDefined();
     expect(typeof messaging.send).toBe('function');
@@ -30,7 +26,7 @@ describe('createMessaging', () => {
   });
 
   it('builds providers from env once per env object', () => {
-    const env = { MESSAGES_KV: memoryKV() };
+    const env = newEnv();
     let builds = 0;
     const providers = () => {
       builds += 1;

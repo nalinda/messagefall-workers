@@ -8,8 +8,8 @@
 
 import { describe, expect, it } from 'bun:test';
 
-import { createMessaging, defineTemplates } from '../../src/index.js';
-import { memoryKV } from '../helpers/messaging.js';
+import { createMessaging } from '../../src/index.js';
+import { newEnv, pingTemplates as templates } from '../helpers/messaging.js';
 import type {
   DeliveryStatus,
   OutboundMeta,
@@ -20,14 +20,6 @@ import type {
   SendResult,
   StatusEvent,
 } from './types.js';
-
-const templates = defineTemplates({
-  ping: { kind: 'notification', sms: () => 'ping' },
-});
-
-function newEnv() {
-  return { MESSAGES_KV: memoryKV() };
-}
 
 // Type-level assertion helpers
 type Extends<A, B> = A extends B ? true : false;

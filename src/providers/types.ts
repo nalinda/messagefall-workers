@@ -53,6 +53,10 @@ export interface OutboundMeta {
   messageId: string;
   /**
    * Template identifier used to render the message.
+   *
+   * Known collision (#18 contract, worked around in #3): for a WhatsApp template render the
+   * send pipeline lets `RenderedWhatsApp.template` ({ name, language, params }) occupy this key
+   * instead. A provider reading `message.template` must handle both a string and that object.
    */
   template: string;
   /**

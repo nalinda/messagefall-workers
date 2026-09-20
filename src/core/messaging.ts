@@ -52,11 +52,14 @@ export interface SendArgs<T, K extends keyof T> {
 export interface Messaging<T> {
   send<K extends keyof T>(args: SendArgs<T, K>, ctx?: SendContext): Promise<{ id: string }>;
   status(id: string): Promise<MessageRecord | null>;
+  /**
+   * Handles a provider's delivery-status webhook. Implemented in #5; until then responds 501.
+   */
+  handleWebhook(provider: string, request: Request, ctx?: SendContext): Promise<Response>;
 }
 
 /**
- * Thrown for a configuration fault (no KV namespace for the status store, or a second
- * `providers` factory for an `env` whose providers are already memoised) and for a send that
+ * Thrown for a configuration fault (no KV namespace for the status store) and for a send that
  * names a template the catalogue does not define.
  */
 export class MessagingConfigError extends Error {
@@ -68,7 +71,7 @@ export class MessagingConfigError extends Error {
 
 type ProviderFactory = (env: MessagingEnv) => ProviderSet;
 
-const providerCache = new WeakMap<MessagingEnv, { build: ProviderFactory; set: ProviderSet }>();
+const providerCache = new WeakMap<MessagingEnv, ProviderSet>();
 
 /**
  * Thrown by createMessaging when the provider set built from env is invalid.
@@ -117,19 +120,17 @@ function validateProviderSet(set: ProviderSet): void {
 }
 const storeCache = new WeakMap<KVNamespace, Map<number, StatusStore>>();
 
+/**
+ * Memoised on `env` alone: within an isolate `env` is stable across requests, so an inline
+ * factory closure created per request still hits the cache.
+ */
 function memoProviders(env: MessagingEnv, build: ProviderFactory): ProviderSet {
-  const cached = providerCache.get(env);
-  if (cached) {
-    if (cached.build !== build) {
-      throw new MessagingConfigError(
-        'createMessaging was called with a different `providers` factory for an env whose providers are already memoised; use one factory per env'
-      );
-    }
-    return cached.set;
+  let set = providerCache.get(env);
+  if (!set) {
+    set = build(env);
+    validateProviderSet(set);
+    providerCache.set(env, set);
   }
-  const set = build(env);
-  validateProviderSet(set);
-  providerCache.set(env, { build, set });
   return set;
 }
 
@@ -156,8 +157,7 @@ function memoStore(kv: KVNamespace, ttlSeconds: number): StatusStore {
  * @param env - Worker bindings; `MESSAGES_KV` is used unless `options.kv` is given.
  * @param options - Templates, provider factory, delivery defaults and callbacks.
  * @returns The messaging instance.
- * @throws {MessagingConfigError} If no KV namespace is available, or `env` already has
- * providers memoised from a different `providers` factory.
+ * @throws {MessagingConfigError} If no KV namespace is available.
  * @throws {ProviderConfigError} If the provider set is missing fields or repeats a name.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -203,5 +203,6 @@ export function createMessaging<T extends Templates<any>>(
       );
     },
     status: (id) => store.get(id),
+    handleWebhook: () => Promise.resolve(new Response('Not Implemented', { status: 501 })),
   };
 }

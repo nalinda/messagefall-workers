@@ -1,5 +1,5 @@
 /**
- * Failing tests for the createMessaging send pipeline (GitHub Issue #3).
+ * Tests for the createMessaging send pipeline (GitHub Issue #3).
  *
  * Acceptance criteria:
  * - With console providers and policy { fallback: ['whatsapp','sms'], always: ['email'] }, a
@@ -12,10 +12,10 @@
  * - Two createMessaging calls with the same env build providers once.
  */
 
-import { beforeAll, describe, expect, it, spyOn } from 'bun:test';
+import { describe, expect, it, spyOn } from 'bun:test';
 import { z } from 'zod';
 
-import { MessagingConfigError } from '../../src/core/messaging.js';
+import { createMessaging } from '../../src/core/messaging.js';
 import { PolicyError } from '../../src/core/policy.js';
 import { kvStatusStore } from '../../src/core/status.js';
 import { consoleProvider } from '../../src/providers/console/index.js';
@@ -28,11 +28,9 @@ import type {
   SendResult,
 } from '../../src/providers/types.js';
 import { defineTemplates, TemplateValidationError } from '../../src/templates.js';
-import type { MessagingEnv } from '../../src/types.js';
 import {
-  loadMessagingApi,
   memoryKV,
-  type MessagingApi,
+  newEnv,
   type ProviderSet,
   type RecordingProvider,
   recordingProvider,
@@ -111,10 +109,6 @@ function consoleSet(): ProviderSet {
     sms: consoleProvider<RenderedSms>({ channel: 'sms', name: 'console-sms' }),
     email: consoleProvider<RenderedEmail>({ channel: 'email', name: 'console-email' }),
   };
-}
-
-function newEnv(): MessagingEnv {
-  return { MESSAGES_KV: memoryKV() };
 }
 
 /**
@@ -210,16 +204,7 @@ async function rejection(promise: Promise<unknown>): Promise<unknown> {
     return { wa, sms, email, set: { whatsapp: wa, sms, email } };
   }
 
-const firstFactory = (): ProviderSet => ({ sms: recordingProvider<RenderedSms>('sms', 'one') });
-const secondFactory = (): ProviderSet => ({ sms: recordingProvider<RenderedSms>('sms', 'two') });
-
 describe('Issue #3: createMessaging send pipeline', () => {
-  let api: MessagingApi;
-
-  beforeAll(async () => {
-    api = await loadMessagingApi();
-  });
-
   describe('chain and always attempts with console providers', () => {
     it('sends one chain attempt on whatsapp and one always attempt on email, none on sms', async () => {
       const set = consoleSet();
@@ -229,7 +214,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       const silenced = silenceConsole();
 
       try {
-        const messaging = api.createMessaging(newEnv(), {
+        const messaging = createMessaging(newEnv(), {
           templates,
           providers: () => set,
           delivery: { fallback: ['whatsapp', 'sms'], always: ['email'] },
@@ -310,7 +295,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       const events: StatusCallbackEvent[] = [];
 
       try {
-        const messaging = api.createMessaging(newEnv(), {
+        const messaging = createMessaging(newEnv(), {
           templates,
           providers: () => set,
           delivery: { fallback: ['whatsapp', 'sms'], always: ['email'] },
@@ -340,7 +325,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
   describe('rendered payload and outbound meta do not collide', () => {
     it('hands a WhatsApp otp provider the full Meta template config, not the catalogue name', async () => {
       const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'rec-wa');
-      const messaging = api.createMessaging(newEnv(), {
+      const messaging = createMessaging(newEnv(), {
         templates,
         providers: () => ({ whatsapp: wa }),
         delivery: { fallback: ['whatsapp'], always: [] },
@@ -378,7 +363,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       const email = recordingProvider<RenderedEmail>('email', 'rec-email');
       const events: StatusCallbackEvent[] = [];
 
-      const messaging = api.createMessaging(newEnv(), {
+      const messaging = createMessaging(newEnv(), {
         templates,
         providers: () => ({ whatsapp: wa, sms, email }),
         delivery: { fallback: ['whatsapp', 'sms', 'email'], always: [] },
@@ -432,7 +417,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       const silenced = silenceConsole();
 
       try {
-        const messaging = api.createMessaging(newEnv(), {
+        const messaging = createMessaging(newEnv(), {
           templates,
           providers: () => set,
           delivery: { fallback: ['whatsapp', 'email'], always: ['email'] },
@@ -466,7 +451,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
   describe('delivery resolution: send override, template override, defined channels', () => {
     it('a send-level delivery override replaces the configured default for that send', async () => {
       const { wa, sms, email, set } = threeProviders();
-      const messaging = api.createMessaging(newEnv(), {
+      const messaging = createMessaging(newEnv(), {
         templates,
         providers: () => set,
         delivery: { fallback: ['whatsapp', 'sms'], always: ['email'] },
@@ -494,7 +479,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
 
     it("a template's own delivery wins over the configured default when no send override is given", async () => {
       const { wa, sms, email, set } = threeProviders();
-      const messaging = api.createMessaging(newEnv(), {
+      const messaging = createMessaging(newEnv(), {
         templates,
         providers: () => set,
         delivery: { fallback: ['whatsapp', 'sms'], always: [] },
@@ -520,7 +505,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
 
     it('sends to the channel the template defines, not blindly to fallback[0] from config', async () => {
       const { wa, sms, email, set } = threeProviders();
-      const messaging = api.createMessaging(newEnv(), {
+      const messaging = createMessaging(newEnv(), {
         templates,
         providers: () => set,
         delivery: { fallback: ['whatsapp', 'sms'], always: [] },
@@ -549,7 +534,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       const env = newEnv();
       const kv = env.MESSAGES_KV as ReturnType<typeof memoryKV>;
       const { wa, sms, email, set } = threeProviders();
-      const messaging = api.createMessaging(env, {
+      const messaging = createMessaging(env, {
         templates,
         providers: () => set,
         // smsOnly defines only sms; neither part names it.
@@ -575,7 +560,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       const sms = recordingProvider<RenderedSms>('sms', 'rec-sms');
       const email = recordingProvider<RenderedEmail>('email', 'rec-email');
 
-      const messaging = api.createMessaging(newEnv(), {
+      const messaging = createMessaging(newEnv(), {
         templates,
         providers: () => ({ whatsapp: wa, sms, email }),
         delivery: { fallback: ['whatsapp', 'sms'], always: ['email'] },
@@ -607,7 +592,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
 
     it('accepts E.164 numbers at the minimum and maximum length', async () => {
       const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'rec-wa');
-      const messaging = api.createMessaging(newEnv(), {
+      const messaging = createMessaging(newEnv(), {
         templates,
         providers: () => ({ whatsapp: wa }),
         delivery: { fallback: ['whatsapp'], always: [] },
@@ -629,7 +614,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       const sms = recordingProvider<RenderedSms>('sms', 'rec-sms');
       const email = recordingProvider<RenderedEmail>('email', 'rec-email');
 
-      const messaging = api.createMessaging(newEnv(), {
+      const messaging = createMessaging(newEnv(), {
         templates,
         providers: () => ({ whatsapp: wa, sms, email }),
         delivery: { fallback: ['whatsapp', 'sms'], always: ['email'] },
@@ -662,7 +647,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
   describe('input is validated exactly once', () => {
     it('applies a transforming schema once and renders from its output', async () => {
       const sms = recordingProvider<RenderedSms>('sms', 'rec-sms');
-      const messaging = api.createMessaging(newEnv(), {
+      const messaging = createMessaging(newEnv(), {
         templates,
         providers: () => ({ sms }),
         delivery: { fallback: ['sms'], always: [] },
@@ -704,7 +689,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       };
 
       try {
-        const messaging = api.createMessaging(env, {
+        const messaging = createMessaging(env, {
           templates,
           providers: () => ({ sms }),
           delivery: { fallback: ['sms'], always: [] },
@@ -738,7 +723,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       ]);
 
       const events: StatusCallbackEvent[] = [];
-      const messaging = api.createMessaging(newEnv(), {
+      const messaging = createMessaging(newEnv(), {
         templates,
         providers: () => ({ sms }),
         delivery: { fallback: [], always: ['sms'] },
@@ -781,7 +766,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       ]);
 
       const events: StatusCallbackEvent[] = [];
-      const messaging = api.createMessaging(newEnv(), {
+      const messaging = createMessaging(newEnv(), {
         templates,
         providers: () => ({ sms }),
         delivery: { fallback: [], always: ['sms'] },
@@ -819,7 +804,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       ]);
 
       const events: StatusCallbackEvent[] = [];
-      const messaging = api.createMessaging(newEnv(), {
+      const messaging = createMessaging(newEnv(), {
         templates,
         providers: () => ({ sms }),
         delivery: { fallback: ['sms'], always: [] },
@@ -859,7 +844,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
         { ok: false, error: 'invalid destination' },
       ]);
 
-      const messaging = api.createMessaging(newEnv(), {
+      const messaging = createMessaging(newEnv(), {
         templates,
         providers: () => ({ sms }),
         delivery: { fallback: [], always: ['sms'] },
@@ -898,7 +883,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
         },
       };
 
-      const messaging = api.createMessaging(newEnv(), {
+      const messaging = createMessaging(newEnv(), {
         templates,
         providers: () => ({ sms }),
         delivery: { fallback: [], always: ['sms'] },
@@ -933,7 +918,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       const wa = gatedProvider<RenderedWhatsApp>('whatsapp', 'gated-wa', 'wa-pid');
       const email = gatedProvider<RenderedEmail>('email', 'gated-email', 'email-pid');
 
-      const messaging = api.createMessaging(newEnv(), {
+      const messaging = createMessaging(newEnv(), {
         templates,
         providers: () => ({ whatsapp: wa.provider, email: email.provider }),
         delivery: { fallback: ['whatsapp', 'sms'], always: ['email'] },
@@ -968,7 +953,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       const optionKv = memoryKV();
       const sms = recordingProvider<RenderedSms>('sms', 'rec-sms');
 
-      const messaging = api.createMessaging(
+      const messaging = createMessaging(
         { MESSAGES_KV: envKv },
         {
           templates,
@@ -1004,7 +989,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
         { ok: true, providerId: 'email-pid-1' },
       ]);
 
-      const messaging = api.createMessaging(env, {
+      const messaging = createMessaging(env, {
         templates,
         providers: () => ({ whatsapp: wa, email }),
         delivery: { fallback: ['whatsapp', 'sms'], always: ['email'] },
@@ -1037,7 +1022,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       const gated = gatedProvider<RenderedSms>('sms', 'otp-sms', 'otp-pid');
       const ctx = testContext();
 
-      const messaging = api.createMessaging(env, {
+      const messaging = createMessaging(env, {
         templates,
         providers: () => ({ sms: gated.provider }),
         delivery: { fallback: ['sms'], always: [] },
@@ -1096,7 +1081,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
         { ok: true, providerId: 'wa-inline' },
       ]);
 
-      const messaging = api.createMessaging(newEnv(), {
+      const messaging = createMessaging(newEnv(), {
         templates,
         providers: () => ({ whatsapp: wa }),
         delivery: { fallback: ['whatsapp'], always: [] },
@@ -1134,7 +1119,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
         },
       };
 
-      const messaging = api.createMessaging(newEnv(), {
+      const messaging = createMessaging(newEnv(), {
         templates,
         providers: () => ({ sms: slowSms }),
         delivery: { fallback: ['sms'], always: [] },
@@ -1171,12 +1156,12 @@ describe('Issue #3: createMessaging send pipeline', () => {
         return { sms: recordingProvider<RenderedSms>('sms', 'rec-sms') };
       };
 
-      const a = api.createMessaging(env, {
+      const a = createMessaging(env, {
         templates,
         providers,
         delivery: { fallback: ['sms'], always: [] },
       });
-      const b = api.createMessaging(env, {
+      const b = createMessaging(env, {
         templates,
         providers,
         delivery: { fallback: ['sms'], always: [] },
@@ -1188,13 +1173,20 @@ describe('Issue #3: createMessaging send pipeline', () => {
       expect(builds).toBe(1);
     });
 
-    it('rejects a different providers factory for an env whose providers are memoised', () => {
+    it('reuses the memoised providers for the same env even when the factory closure differs', async () => {
       const env = newEnv();
+      const first = recordingProvider<RenderedSms>('sms', 'first');
+      const second = recordingProvider<RenderedSms>('sms', 'second');
 
-      api.createMessaging(env, { templates, providers: firstFactory });
-      expect(() => api.createMessaging(env, { templates, providers: secondFactory })).toThrow(
-        MessagingConfigError
-      );
+      // The README's per-request style: a new inline closure on every call, same env.
+      const a = createMessaging(env, { templates, providers: () => ({ sms: first }) });
+      const b = createMessaging(env, { templates, providers: () => ({ sms: second }) });
+
+      await a.send({ template: 'smsOnly', to: TO, locale: 'en', input: { body: 'one' } });
+      await b.send({ template: 'smsOnly', to: TO, locale: 'en', input: { body: 'two' } });
+
+      expect(first.calls.map((c) => c.text)).toEqual(['one', 'two']);
+      expect(second.calls).toHaveLength(0);
     });
 
     it('builds providers again for a different env object', async () => {
@@ -1207,12 +1199,12 @@ describe('Issue #3: createMessaging send pipeline', () => {
         return { sms };
       };
 
-      const a = api.createMessaging(newEnv(), {
+      const a = createMessaging(newEnv(), {
         templates,
         providers,
         delivery: { fallback: ['sms'], always: [] },
       });
-      const b = api.createMessaging(newEnv(), {
+      const b = createMessaging(newEnv(), {
         templates,
         providers,
         delivery: { fallback: ['sms'], always: [] },

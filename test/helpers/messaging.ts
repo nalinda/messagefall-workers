@@ -6,8 +6,9 @@
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 
-import { createMessaging } from '../../src/core/messaging.js';
 import type { Channel, OutboundMeta, Provider, SendResult } from '../../src/providers/types.js';
+import { defineTemplates } from '../../src/templates.js';
+import type { MessagingEnv } from '../../src/types.js';
 
 export type {
   Messaging,
@@ -25,19 +26,18 @@ export interface TestExecutionContext {
 }
 
 /**
- * Messaging module API as the send tests consume it: the real createMessaging, typed with an
- * open template catalogue so tests can deliberately pass invalid input.
+ * A fresh env with an in-memory MESSAGES_KV; one per test so provider memoisation never leaks.
  */
-export interface MessagingApi {
-  createMessaging: typeof createMessaging;
+export function newEnv(): MessagingEnv {
+  return { MESSAGES_KV: memoryKV() };
 }
 
 /**
- * Loads the createMessaging API from src/core/messaging.js.
+ * The smallest valid catalogue: one sms-only notification template.
  */
-export function loadMessagingApi(): Promise<MessagingApi> {
-  return Promise.resolve({ createMessaging });
-}
+export const pingTemplates = defineTemplates({
+  ping: { kind: 'notification', sms: () => 'ping' },
+});
 
 /**
  * A recorded provider call: the full payload the core handed to `send`.
