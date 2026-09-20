@@ -8,7 +8,8 @@
 import type { ExecutionContext, KVNamespace } from '@cloudflare/workers-types';
 
 import type { Channel, Provider, StatusEvent } from '../providers/types.js';
-import { createLogger, extractTemplateSensitiveStrings, scrubError } from './logger.js';
+import { createLogger } from './logger.js';
+import { extractTemplateSensitiveStrings, scrubError } from './redact.js';
 import {
   type Attempt,
   deriveOverallStatus,

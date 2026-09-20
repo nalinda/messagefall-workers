@@ -22,8 +22,9 @@ import {
   type TemplateDef,
   validateInput,
 } from '../templates.js';
-import { createLogger, scrubError } from './logger.js';
+import { createLogger } from './logger.js';
 import { type DeliveryOverride, type DeliveryPolicy, resolveDelivery } from './policy.js';
+import { scrubError } from './redact.js';
 import {
   type Attempt,
   deriveOverallStatus,

@@ -88,10 +88,12 @@ export function assertType<T>(_value: T): void {
  */
 export async function loadLoggerApi(): Promise<LoggerApi> {
   try {
-    const loggerEntry = '../../src/core/logger.js';
-    const mod = (await import(loggerEntry)) as unknown as Partial<LoggerApi>;
+    // The structured logger and the redaction engine are separate modules; the API under test
+    // is the union of the two.
+    const mod = (await import('../../src/core/logger.js')) as unknown as Partial<LoggerApi>;
+    const redact = (await import('../../src/core/redact.js')) as unknown as Partial<LoggerApi>;
     if (mod.createLogger) {
-      return mod as LoggerApi;
+      return { ...mod, ...redact } as LoggerApi;
     }
   } catch {
     // logger.js not yet implemented (RED phase)
