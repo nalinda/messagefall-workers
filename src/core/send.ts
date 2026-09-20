@@ -233,9 +233,14 @@ export interface AttemptRecorder {
  * webhook; #8: the fallback timer firing) must reuse it by calling `runChain` again with the
  * remaining channels, `policy.fallback.slice(record.chain.attempts.length)`, and a recorder
  * built with `attemptRecorder` (which appends the attempt, recomputes `chainStatus` and
- * `deriveOverallStatus`, and calls `observe`). The rendered payload is rebuilt from the stored
- * template/input via `validateInput` + `renderValidated`, the same helpers `attemptChannel`
- * uses.
+ * `deriveOverallStatus`, and calls `observe`).
+ *
+ * Caveat for that async path: `runChain` needs a `ValidatedSendRequest` (to, locale, validated
+ * input), and none of those are persisted on the `MessageRecord` — deliberately, because for an
+ * OTP send the input holds the one-time code and #10 forbids storing it. #7/#8 therefore cannot
+ * rebuild the render from the stored record as things stand; they must either persist a
+ * redacted/derived form of what a resume needs, or take a different approach. That decision is
+ * theirs, not #3's.
  *
  * `fallback` here is the slice being walked; `offset` is how many chain channels were already
  * attempted before it (0 for a fresh send), so progress counts against the whole policy.

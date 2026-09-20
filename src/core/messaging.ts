@@ -8,7 +8,7 @@ import type { DurableObjectNamespace, KVNamespace } from '@cloudflare/workers-ty
 
 import type { Provider } from '../providers/types.js';
 import type { InputOf, TemplateDef, Templates } from '../templates.js';
-import type { MessagingEnv } from '../types.js';
+import { CHANNELS, type MessagingEnv } from '../types.js';
 import { DEFAULT_POLICY, type DeliveryOverride, type DeliveryPolicy } from './policy.js';
 import { type ProviderSet, runSend, type SendContext, type StatusCallbackEvent } from './send.js';
 import {
@@ -109,6 +109,31 @@ function missingProviderFields(p: Partial<Provider>): string[] {
   return missing;
 }
 
+const KNOWN_SLOTS: ReadonlySet<string> = new Set(CHANNELS);
+
+/**
+ * Problems with one provider in isolation: unknown slot, missing fields, channel/slot mismatch.
+ */
+function slotProblems(slot: string, p: Partial<Provider>): string[] {
+  const problems: string[] = [];
+  if (!KNOWN_SLOTS.has(slot)) {
+    // Same union `providerFor` switches on; anything else could never be sent through.
+    problems.push(
+      `Provider slot "${slot}" is not a channel (expected one of ${CHANNELS.join(', ')})`
+    );
+  }
+  const missing = missingProviderFields(p);
+  if (missing.length > 0) {
+    problems.push(`Provider "${slot}" is missing required field(s): ${missing.join(', ')}`);
+  }
+  if (p.channel && p.channel !== slot) {
+    problems.push(
+      `Provider "${slot}" declares channel "${p.channel}" but is registered under the "${slot}" slot`
+    );
+  }
+  return problems;
+}
+
 function validateProviderSet(set: ProviderSet): void {
   const problems: string[] = [];
   const seen = new Set<string>();
@@ -117,15 +142,7 @@ function validateProviderSet(set: ProviderSet): void {
     if (!p) {
       continue;
     }
-    const missing = missingProviderFields(p);
-    if (missing.length > 0) {
-      problems.push(`Provider "${slot}" is missing required field(s): ${missing.join(', ')}`);
-    }
-    if (p.channel && p.channel !== slot) {
-      problems.push(
-        `Provider "${slot}" declares channel "${p.channel}" but is registered under the "${slot}" slot`
-      );
-    }
+    problems.push(...slotProblems(slot, p));
     if (p.name && seen.has(p.name)) {
       problems.push(`Duplicate provider name "${p.name}" configured across multiple providers`);
     }
@@ -137,6 +154,7 @@ function validateProviderSet(set: ProviderSet): void {
     throw new ProviderConfigError(problems);
   }
 }
+
 /**
  * Deliberately keyed on the KV namespace (then TTL), not on `env`: `options.kv` may differ from
  * `env.MESSAGES_KV`, and two envs sharing a namespace should share the store. Reuse this cache;

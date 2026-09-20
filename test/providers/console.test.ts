@@ -628,6 +628,25 @@ describe('Startup provider validation', () => {
     }).toThrow(/"sms".*"whatsapp".*"sms"/);
   });
 
+  it('rejects a provider registered under a slot that is not a channel', () => {
+    expect(() => {
+      createMessaging(newEnv(), {
+        templates,
+        providers: () =>
+          ({
+            push: {
+              name: 'push-thing',
+              channel: 'sms',
+              send: async () => {
+                await Promise.resolve();
+                return { ok: true };
+              },
+            },
+          }) as unknown as ReturnType<Parameters<typeof createMessaging>[1]['providers']>,
+      });
+    }).toThrow(/slot "push" is not a channel/);
+  });
+
   it('lists every validation problem at once in a bulleted error message', () => {
     let thrownError: Error | null = null;
     try {
