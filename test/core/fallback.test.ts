@@ -13,7 +13,7 @@
  * - Immediate send failure during fallback recurses to next channel until exhausted.
  */
 
-import type { DurableObjectNamespace, KVNamespace } from '@cloudflare/workers-types';
+import type { KVNamespace } from '@cloudflare/workers-types';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
 import { advanceChain, type AdvanceChainArgs } from '../../src/core/fallback.js';
@@ -159,8 +159,9 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       const args: AdvanceChainArgs = {
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv, FALLBACK_TIMER: mockTimer as unknown as DurableObjectNamespace },
+        env: { MESSAGES_KV: kv },
         options: {
+          timer: mockTimer,
           templates: testTemplates,
           providers: [waProvider, smsProvider],
           onStatus: (event) => {
@@ -309,8 +310,9 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv, FALLBACK_TIMER: mockTimer as unknown as DurableObjectNamespace },
+        env: { MESSAGES_KV: kv },
         options: {
+          timer: mockTimer,
           templates: testTemplates,
           providers: [waProvider, smsProvider],
           fallbackTimeoutMs: 15_000,
@@ -377,8 +379,9 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv, FALLBACK_TIMER: mockTimer as unknown as DurableObjectNamespace },
+        env: { MESSAGES_KV: kv },
         options: {
+          timer: mockTimer,
           templates: testTemplates,
           providers: [waProvider, smsProvider],
           onStatus: (event) => {
@@ -444,8 +447,9 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv, FALLBACK_TIMER: mockTimer as unknown as DurableObjectNamespace },
+        env: { MESSAGES_KV: kv },
         options: {
+          timer: mockTimer,
           templates: testTemplates,
           providers: [],
         },
