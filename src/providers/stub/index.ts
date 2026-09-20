@@ -1,116 +1,63 @@
 /**
- * Stub provider for development.
- *
- * Logs messages to console and returns 'sent' status immediately.
- * DO NOT use in production.
+ * Stub provider for development and testing.
  *
  * @module
  */
 
-import type {
-  Channel,
-  DeliveryStatus,
-  MessagingState,
-  MessageStatus,
-  Provider,
-} from '../../types';
+import type { Channel, Provider, ProviderStatus } from '../types.js';
 
 /**
- * Stub provider - for development only.
+ * Stub provider implementation.
  */
 export class StubProvider implements Provider {
   readonly id = 'stub';
-  readonly channel = 'whatsapp' as const;
-  private readonly state: any;
+  readonly name = 'stub';
+  readonly channel: Channel = 'whatsapp';
 
-  constructor(state: { kv: any; durable?: { class: any; id: string | number } }) {
-    this.state = state;
-  }
-
-  async send(options: {
-    config: Record<string, unknown>;
-    channel: Channel;
-    template: { kind: 'otp' | 'text' };
-    input: unknown;
-    policy?: any;
-  }): Promise<{
+  send(_options: unknown): Promise<{
+    ok: boolean;
     messageId: string;
-    status: Promise<MessageStatus>;
+    status: Promise<ProviderStatus>;
   }> {
-    const { template, input } = options;
     const messageId = `stub-${Date.now()}`;
-
-    if (!this.state.queue.has(messageId)) {
-      this.state.queue.set(messageId, []);
-    }
-    this.state.queue.get(messageId)!.push({
-      id: messageId,
-      kind: template.kind,
-      channel: options.channel,
-      status: 'pending' as const,
-      statusTimestamp: new Date(),
-      templateId: template.id,
-    });
-
-    setTimeout(() => {
-      this.state.queue.get(messageId)!.forEach((msg: any) => {
-        if (msg.id === messageId) {
-          msg.status = 'sent' as const;
-          msg.statusTimestamp = new Date();
-        }
-      });
-      this.storeStatus(messageId, 'sent', new Date());
-    }, 100);
-
     return Promise.resolve({
+      ok: true,
       messageId,
       status: Promise.resolve({
-        status: 'sent' as const,
+        status: 'sent',
         timestamp: new Date(),
-        details: {
-          provider: this.id,
-          fake: true,
-        },
+        details: { provider: this.id },
       }),
     });
   }
 
-  status(messageId: string): Promise<MessageStatus> {
-    this.storeStatus(messageId, 'sent', new Date());
+  status(_messageId: string): Promise<ProviderStatus> {
     return Promise.resolve({
-      status: 'sent' as const,
+      status: 'sent',
       timestamp: new Date(),
-      details: {
-        provider: this.id,
-        fake: true,
-      },
+      details: { provider: this.id },
     });
   }
 
-  statusHandler?(request: Request): Response {
-    console.log('[Stub] Webhook received');
+  statusHandler(_request: Request): Response {
     return new Response('OK', { status: 200 });
-  }
-
-  storeStatus(id: string, status: DeliveryStatus, timestamp: Date): void {
-    const entries = this.state.store.get(id) ?? [];
-    entries.push({ id, status, timestamp });
-    this.state.store.set(id, entries);
   }
 }
 
 /**
- * Factory function for the stub provider.
+ * Create a stub provider.
+ *
+ * @param _config - Optional provider configuration.
+ * @returns A StubProvider instance.
+ */
+export function stub(_config?: unknown): StubProvider {
+  return new StubProvider();
+}
+
+/**
+ * Stub provider factory.
  */
 export const stubFactory = {
   id: 'stub',
-  create: (config: { state: any }) => new StubProvider(config.state),
-};
-
-/**
- * Stub provider factory for testing.
- */
-export const testStubFactory = {
-  id: 'stub',
-  create: (config: { state: any }) => new StubProvider(config.state),
+  create: (_config?: unknown): StubProvider => new StubProvider(),
 };

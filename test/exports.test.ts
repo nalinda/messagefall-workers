@@ -9,9 +9,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { describe, expect, it } from 'bun:test';
-
-import type { CreateMessagingMagicLinkOptions, CreateMessagingPhoneOptions } from '../src/index';
+import { beforeAll, describe, expect, it } from 'bun:test';
 
 // These tests exercise what a consumer installs: the `package.json#exports`
 // map and the dist files it points at, not the TypeScript sources. dist is
@@ -25,12 +23,12 @@ interface ExportTarget {
 }
 
 interface PackageJson {
+  dependencies?: Record<string, string>;
   exports: Record<string, ExportTarget>;
   files: string[];
 }
 
 function readPackageJson(): PackageJson {
-  // eslint-disable-next-line security/detect-non-literal-fs-filename -- fixed repo path
   return JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8')) as PackageJson;
 }
 
@@ -45,6 +43,12 @@ function distFile(relative: string): string {
 }
 
 async function loadExport(subpath: string): Promise<Record<string, unknown>> {
+  if (subpath.startsWith('./providers/')) {
+    const providerName = subpath.replace('./providers/', '');
+    const target = exportTarget('./providers/*');
+    const resolvedPath = target.import.replace('*', () => providerName);
+    return (await import(distFile(resolvedPath))) as Record<string, unknown>;
+  }
   return (await import(distFile(exportTarget(subpath).import))) as Record<string, unknown>;
 }
 
@@ -59,18 +63,58 @@ beforeAll(() => {
 });
 
 describe('package.json#exports', () => {
+  it('declares no runtime dependencies', () => {
+    const pkg = readPackageJson();
+    expect(pkg.dependencies).toBeUndefined();
+  });
+
   it('publishes dist, and every export target is a file the build produces', () => {
     const pkg = readPackageJson();
     expect(pkg.files).toContain('dist');
-    const sortedKeys = Object.keys(pkg.exports).sort((a, b) => a.localeCompare(b));
+    const sortedKeys = Object.keys(pkg.exports).toSorted((a, b) => a.localeCompare(b));
     expect(sortedKeys).toEqual(['.', './client', './durable', './providers/*']);
-    for (const target of Object.values(pkg.exports)) {
-      for (const file of [target.types, target.import, target.default]) {
-        expect(file.startsWith('./dist/')).toBe(true);
-        expect(fs.existsSync(distFile(file))).toBe(true);
+
+    for (const [key, target] of Object.entries(pkg.exports)) {
+      if (key === './providers/*') {
+        const dts = target.types.replace('*', 'stub');
+        const esm = target.import.replace('*', 'stub');
+        expect(fs.existsSync(distFile(dts))).toBe(true);
+        expect(fs.existsSync(distFile(esm))).toBe(true);
+      } else {
+        for (const file of [target.types, target.import, target.default]) {
+          expect(file.startsWith('./dist/')).toBe(true);
+          expect(fs.existsSync(distFile(file))).toBe(true);
+        }
       }
       expect(target.default).toBe(target.import);
     }
+  });
+
+  it('ensures no file under src/ imports a schema library at runtime', () => {
+    const schemaLibs = ['zod', 'valibot', 'arktype', 'yup', 'joi', 'myzod', 'superstruct'];
+    function checkDir(dir: string): void {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          checkDir(fullPath);
+        } else if (entry.isFile() && entry.name.endsWith('.ts')) {
+          const content = fs.readFileSync(fullPath, 'utf8');
+          for (const lib of schemaLibs) {
+            // Check for runtime import statements like: import ... from 'zod' or require('zod')
+            // but ignore type-only imports like `import type ... from 'zod'`
+            const runtimeImportRegex = new RegExp(
+              String.raw`^\s*import\s+(?!type\s)(?:[^'"]*from\s+)?['"]${lib}(?:/.*)?['"]`,
+              'm',
+            );
+            const requireRegex = new RegExp(String.raw`require\s*\(['"]${lib}(?:/.*)?['"]\)`, 'm');
+            expect(runtimeImportRegex.test(content)).toBe(false);
+            expect(requireRegex.test(content)).toBe(false);
+          }
+        }
+      }
+    }
+    checkDir(path.join(rootDir, 'src'));
   });
 });
 
@@ -98,5 +142,42 @@ describe('Entry points export documented functions', () => {
   it('exports createMessagingClient as a function from the built ./client entry point', async () => {
     const client = await loadExport('./client');
     expect(typeof client.createMessagingClient).toBe('function');
+  });
+
+  it('exports FallbackTimer as a class from the built ./durable entry point', async () => {
+    const durable = await loadExport('./durable');
+    expect(typeof durable.FallbackTimer).toBe('function');
+  });
+
+  it('exports stub provider from the built ./providers/stub entry point', async () => {
+    const provider = await loadExport('./providers/stub');
+    expect(typeof provider.StubProvider).toBe('function');
+  });
+});
+
+describe('Node runtime package resolution', () => {
+  it('resolves messagefall-workers, ./client, ./durable, and ./providers/stub via package.json exports', () => {
+    const script = `
+      Promise.all([
+        import('messagefall-workers'),
+        import('messagefall-workers/client'),
+        import('messagefall-workers/durable'),
+        import('messagefall-workers/providers/stub'),
+      ]).then(([root, client, durable, stub]) => {
+        if (typeof root.createMessaging !== 'function') process.exit(1);
+        if (typeof client.createMessagingClient !== 'function') process.exit(2);
+        if (typeof durable.FallbackTimer !== 'function') process.exit(3);
+        if (typeof stub.StubProvider !== 'function') process.exit(4);
+        process.exit(0);
+      }).catch((err) => {
+        console.error(err);
+        process.exit(5);
+      });
+    `;
+    const result = spawnSync('node', ['--input-type=module', '-e', script], {
+      cwd: rootDir,
+      encoding: 'utf8',
+    });
+    expect(result.status).toBe(0);
   });
 });

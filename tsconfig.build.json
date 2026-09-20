@@ -4,13 +4,10 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "noEmit": false
+    "noEmit": false,
+    "outDir": "./dist",
+    "rootDir": "./src"
   },
-  "include": [
-    "src/index.ts",
-    "src/client/index.ts",
-    "src/durable/index.ts",
-    "src/providers/*/index.ts"
-  ],
+  "include": ["src/**/*.ts"],
   "exclude": ["test/**/*.ts"]
 }

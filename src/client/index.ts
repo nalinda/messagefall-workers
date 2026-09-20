@@ -1,74 +1,89 @@
 /**
  * createMessagingClient
  *
- * Create a typed client for sending messages over service binding.
+ * Create a typed client for sending messages over service bindings.
  *
  * @module
  */
 
-import type { Channel, ClientMessageStatus, ClientMessageType, MessagingClientOptions } from './types';
-
-/**
- * Client messaging client.
- */
-export class MessagingClient {
-  private readonly channel: Channel | undefined;
-  private readonly app: { fetch: (request: Request) => Response };
-
-  constructor(options: MessagingClientOptions) {
-    this.app = options.app;
-    this.channel = options.channel;
-  }
-
-  async send(templateId: string, input: unknown, channel: Channel | undefined = this.channel): Promise<ClientMessageStatus> {
-    // TODO: Implement actual send logic
-    return {
-      status: 'sent' as const,
-      timestamp: new Date().toISOString(),
-      channels: channel ? [channel] : ['whatsapp', 'sms', 'email'],
-    };
-  }
-}
+import type { Channel, TemplateCatalog } from '../types.js';
 
 /**
  * Client-side message status.
  */
 export type ClientMessageStatus =
-  | { status: 'sent'; timestamp: string; channels: Channel[] }
-  | { status: 'pending'; timestamp: string; timeoutMs: number }
+  | { status: 'sent'; timestamp: string; channels?: Channel[] }
+  | { status: 'pending'; timestamp: string; timeoutMs?: number }
   | { status: 'delivered'; timestamp: string; provider?: string }
-  | { status: 'failed'; timestamp: string; error: string };
+  | { status: 'failed'; timestamp: string; error?: string };
 
 /**
- * Client message type.
- */
-export type ClientMessageType = 'text' | 'otp';
-
-/**
- * Client messaging options.
+ * Options for creating a messaging client.
  */
 export interface MessagingClientOptions {
   /**
-   * Messaging app instance or binding.
+   * Service binding or app instance with a `fetch` method.
    */
-  app: { fetch: (request: Request) => Response };
-  /**
-   * Default channel.
-   */
+  binding?: { fetch: (request: Request) => Promise<Response> | Response };
+  app?: { fetch: (request: Request) => Promise<Response> | Response };
   channel?: Channel;
 }
 
 /**
- * Create a messaging client.
+ * Send options for a client send call.
  */
-export function createMessagingClient(options: MessagingClientOptions): MessagingClient {
-  return new MessagingClient(options);
+export interface ClientSendOptions<TInput = unknown> {
+  to: string;
+  locale?: string;
+  input: TInput;
+  delivery?: 'all' | { fallback?: Channel[]; always?: Channel[] };
 }
 
 /**
- * Send a message via the client.
+ * Typed messaging client.
  */
-export async function send(options: MessagingClientOptions & { templateId: string; input: unknown; channel?: Channel }): Promise<ClientMessageStatus> {
-  const client = createMessagingClient(options);
-  return client.send(options.templateId, options.input, options.channel);
+export class MessagingClient<TTemplates extends TemplateCatalog = TemplateCatalog> {
+  private readonly target: { fetch: (request: Request) => Promise<Response> | Response };
+
+  constructor(options: MessagingClientOptions) {
+    this.target = options.binding ??
+      options.app ?? {
+        fetch: () => Response.json({ ok: true }),
+      };
+  }
+
+  /**
+   * Send a template message.
+   */
+  async send<K extends keyof TTemplates>(
+    template: K,
+    options: ClientSendOptions<unknown>
+  ): Promise<ClientMessageStatus> {
+    const res = await this.target.fetch(
+      new Request('https://messaging.internal/send', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ template, ...options }),
+      })
+    );
+    if (!res.ok) {
+      return { status: 'failed', timestamp: new Date().toISOString(), error: `HTTP ${res.status}` };
+    }
+    return {
+      status: 'sent',
+      timestamp: new Date().toISOString(),
+    };
+  }
+}
+
+/**
+ * Create a typed client for sending messages over service binding.
+ *
+ * @param options - Client configuration options.
+ * @returns A typed MessagingClient instance.
+ */
+export function createMessagingClient<TTemplates extends TemplateCatalog = TemplateCatalog>(
+  options: MessagingClientOptions
+): MessagingClient<TTemplates> {
+  return new MessagingClient<TTemplates>(options);
 }

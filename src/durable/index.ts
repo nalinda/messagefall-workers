@@ -6,102 +6,78 @@
  * @module
  */
 
-import type { DurableObjectSlot } from '@cloudflare/workers-types';
+import type { DurableObjectState } from '@cloudflare/workers-types';
 
 /**
  * Fallback timer state.
  */
-interface FallbackTimerState {
-  /**
-   * Message ID this timer is for.
-   */
+export interface FallbackTimerState {
   messageId: string;
-  /**
-   * Timeout threshold in ms.
-   */
   timeoutMs: number;
-  /**
-   * Timestamp when timer was set.
-   */
   createdAt: Date;
-  /**
-   * Whether fallback has already been triggered.
-   */
   triggered: boolean;
 }
 
 /**
- * FallbackTimer Durable Object interface.
- */
-export interface FallbackTimer {
-  /**
-   * Get the timer state.
-   */
-  getState(messageId: string): FallbackTimerState | null;
-  /**
-   * Set the timer state.
-   */
-  setState(messageId: string, timeoutMs: number): void;
-  /**
-   * Mark timer as triggered (fallback already applied).
-   */
-  trigger(messageId: string): void;
-  /**
-   * Check if timeout has been reached.
-   */
-  isTimeout(messageId: string): boolean;
-}
-
-/**
- * FallbackTimer Durable Object spec.
+ * FallbackTimer Durable Object.
  */
 export class FallbackTimer {
-  private readonly state: Map<string, FallbackTimerState>;
-  private readonly timeoutMs: number;
+  private readonly timerMap: Map<string, FallbackTimerState> = new Map();
+  protected readonly state: DurableObjectState | undefined;
 
-  constructor(ctx: DurableObjectSlot) {
-    this.timeoutMs = ctx.env.FALLBACK_TIMEOUT_MS ?? 5000;
-    this.state = ctx.state;
+  constructor(state?: DurableObjectState, _env?: unknown) {
+    this.state = state;
   }
 
   /**
-   * Get or create a timer state for the message ID.
+   * Alarm handler invoked when a timer expires.
+   */
+  async alarm(): Promise<void> {
+    await Promise.resolve();
+  }
+
+  /**
+   * HTTP request handler.
+   */
+  fetch(_request: Request): Response {
+    return new Response('OK', { status: 200 });
+  }
+
+  /**
+   * Get the timer state for a message.
    */
   getState(messageId: string): FallbackTimerState | null {
-    return this.state.get(messageId) ?? null;
+    return this.timerMap.get(messageId) ?? null;
   }
 
   /**
-   * Set a new timer state for the message ID.
+   * Set a timer for a message.
    */
-  setState(messageId: string, timeoutMs?: number): void {
-    this.state.set(messageId, {
+  setState(messageId: string, timeoutMs: number): void {
+    this.timerMap.set(messageId, {
       messageId,
-      timeoutMs: timeoutMs ?? this.timeoutMs,
+      timeoutMs,
       createdAt: new Date(),
       triggered: false,
     });
   }
 
   /**
-   * Mark timer as triggered (fallback already applied).
+   * Mark timer as triggered.
    */
   trigger(messageId: string): void {
-    const timer = this.state.get(messageId);
-    if (timer && !timer.triggered) {
+    const timer = this.timerMap.get(messageId);
+    if (timer) {
       timer.triggered = true;
     }
   }
 
   /**
-   * Check if timeout has been reached and return true.
+   * Check if timeout has been reached.
    */
   isTimeout(messageId: string): boolean {
-    const timer = this.state.get(messageId);
+    const timer = this.timerMap.get(messageId);
     if (!timer) return false;
-
-    const now = new Date();
-    const elapsed = now.getTime() - timer.createdAt.getTime();
-    return elapsed >= this.timeoutMs;
+    return Date.now() - timer.createdAt.getTime() >= timer.timeoutMs;
   }
 }

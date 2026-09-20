@@ -6,8 +6,8 @@
 
 import { describe, expect, it } from 'bun:test';
 
-import { createMessaging, defineTemplates } from '../src';
-import { createMockKV,createTestState } from './helpers';
+import { createMessaging, defineTemplates } from '../src/index.js';
+import { createMockKV } from './helpers/index.js';
 
 describe('createMessaging', () => {
   it('creates a messaging state with stub provider', () => {
@@ -50,17 +50,25 @@ describe('createMessaging', () => {
 });
 
 describe('defineTemplates', () => {
-  it('adds templates to the registry', () => {
-    const state = createTestState();
+  it('returns the defined template catalog', () => {
+    const templates = defineTemplates({
+      otp: {
+        kind: 'otp',
+        whatsapp: {
+          template: 'otp_template',
+          language: 'en',
+          params: ({ code }: { code: string }) => [code],
+        },
+        sms: ({ code }: { code: string }) => `Your code is ${code}`,
+      },
+      notification: {
+        kind: 'notification',
+        sms: () => 'Notification message',
+      },
+    });
 
-    const templates = [
-      { id: 'otp', kind: 'otp', inputSchema: {}, renderings: [] },
-      { id: 'text', kind: 'text', inputSchema: {}, renderings: [] },
-    ];
-
-    defineTemplates(templates);
-
-    expect(state.templates.get('otp')).toBeDefined();
-    expect(state.templates.get('text')).toBeDefined();
+    expect(templates).toBeDefined();
+    expect(templates.otp.kind).toBe('otp');
+    expect(templates.notification.kind).toBe('notification');
   });
 });

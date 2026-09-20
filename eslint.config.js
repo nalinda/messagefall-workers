@@ -48,13 +48,14 @@ export default [
     },
   },
   {
-    // Test files legitimately run long — a suite covering many scenarios for
-    // one function reads better kept together than split just to satisfy a
-    // line-count ceiling.
+    // Test files legitimately run long and access test files / spawn subcommands.
     files: ['test/**/*.ts'],
     rules: {
       'sonarjs/max-lines': 'off',
       'sonarjs/max-lines-per-function': 'off',
+      'sonarjs/no-os-command-from-path': 'off',
+      'security/detect-non-literal-fs-filename': 'off',
+      'security/detect-non-literal-regexp': 'off',
     },
   },
   {

@@ -1,5 +1,5 @@
 /**
- * Core messaging types.
+ * Core messaging types for messagefall-workers.
  *
  * @module
  */
@@ -7,32 +7,84 @@
 import type { KVNamespace } from '@cloudflare/workers-types';
 
 /**
- * Template rendering per channel.
+ * Supported message delivery channels.
+ */
+export type Channel = 'whatsapp' | 'sms' | 'email';
+
+/**
+ * Array of all supported channels.
+ */
+export const CHANNELS = ['whatsapp', 'sms', 'email'] as const;
+
+/**
+ * Message delivery status.
+ */
+export type DeliveryStatus =
+  'sent' | 'delivered' | 'read' | 'failed' | 'undelivered' | 'undecipherable' | 'unknown';
+
+/**
+ * Template kind: 'otp' for one-time codes, 'notification' for general alerts.
+ */
+export type TemplateKind = 'otp' | 'notification' | 'text';
+
+/**
+ * Issue reported by standard schema validation.
+ */
+export interface StandardSchemaIssue {
+  readonly message: string;
+  readonly path?: ReadonlyArray<PropertyKey | { readonly key: PropertyKey }>;
+}
+
+/**
+ * Result of standard schema validation.
+ */
+export type StandardSchemaResult<Output> =
+  | { readonly value: Output; readonly issues?: undefined }
+  | { readonly issues: ReadonlyArray<StandardSchemaIssue> };
+
+/**
+ * Standard Schema specification interface (types only, no runtime dependency).
+ */
+export interface StandardSchemaV1<Input = unknown, Output = Input> {
+  readonly '~standard': {
+    readonly version: 1;
+    readonly vendor: string;
+    readonly validate: (
+      value: unknown
+    ) => StandardSchemaResult<Output> | Promise<StandardSchemaResult<Output>>;
+    readonly types?: {
+      readonly input: Input;
+      readonly output: Output;
+    };
+  };
+}
+
+/**
+ * Template rendering definition per channel.
  */
 export interface TemplateRendering {
   channel: Channel;
-  options: Record<string, string>;
-  name?: string;
-  params?: Record<string, unknown>;
+  options?: Record<string, string>;
+  template?: string;
+  language?: string | Record<string, string>;
+  params?: (input: unknown) => unknown[];
+  text?: string | ((input: unknown, locale?: string) => string);
+  subject?: (input: unknown, locale?: string) => string;
+  html?: (input: unknown, locale?: string) => string;
 }
 
 /**
- * Template definition.
- */
-export interface TemplateDefinition {
-  id: string;
-  kind: TemplateKind;
-  inputSchema: Record<string, unknown>;
-  renderings: TemplateRendering[];
-  deliveryPolicy?: DeliveryPolicy;
-}
-
-/**
- * Delivery policy.
+ * Delivery policy defining fallback chain and always-on channels.
  */
 export interface DeliveryPolicy {
+  fallback?: Channel[];
+  always?: Channel[];
   fallbackChain?: boolean;
   alwaysOnChannels?: Channel[];
+  timeout?: {
+    otp?: number;
+    notification?: number;
+  };
   fallbacks?: {
     from: Channel;
     to: Channel;
@@ -42,49 +94,57 @@ export interface DeliveryPolicy {
 }
 
 /**
- * Channel type.
+ * Template definition in a template catalog.
  */
-export type Channel = 'whatsapp' | 'sms' | 'email';
-
-/**
- * Delivery status.
- */
-export type DeliveryStatus =
-  | 'sent'
-  | 'delivered'
-  | 'read'
-  | 'failed'
-  | 'undelivered'
-  | 'undecipherable'
-  | 'unknown';
-
-/**
- * Template kind.
- */
-export type TemplateKind = 'otp' | 'text';
-
-/**
- * Send options.
- */
-export interface SendOptions {
-  channel: Channel | 'all';
-  input: unknown;
-  policy?: DeliveryPolicy;
-  skipConfirmation?: boolean;
+export interface TemplateDefinition<TInput = never> {
+  id?: string;
+  kind: TemplateKind;
+  input?: StandardSchemaV1<TInput>;
+  inputSchema?: unknown;
+  whatsapp?: {
+    template?: string;
+    language?: string | Record<string, string>;
+    params?: (input: TInput) => unknown[];
+    text?: string | ((input: TInput) => string);
+  };
+  sms?: string | ((input: TInput, locale?: string) => string);
+  email?: {
+    subject?: (input: TInput, locale?: string) => string;
+    text?: (input: TInput, locale?: string) => string;
+    html?: (input: TInput, locale?: string) => string;
+  };
+  delivery?: DeliveryPolicy | 'all';
+  renderings?: TemplateRendering[];
 }
 
 /**
- * Message status.
+ * Catalog of templates.
+ */
+export type TemplateCatalog = Record<string, TemplateDefinition<never>>;
+
+/**
+ * Message status details.
  */
 export interface MessageStatus {
+  id: string;
   status: DeliveryStatus;
-  timestamp: Date;
+  timestamp?: Date;
   provider?: string;
   details?: Record<string, unknown>;
 }
 
 /**
- * Message state.
+ * Status event from webhooks.
+ */
+export interface StatusEvent {
+  providerId: string;
+  status: DeliveryStatus;
+  error?: string;
+  at?: Date | string;
+}
+
+/**
+ * Message state stored in KV.
  */
 export interface MessageState {
   id: string;
@@ -97,7 +157,7 @@ export interface MessageState {
 }
 
 /**
- * Message status entry for KV storage.
+ * Message status entry stored in KV.
  */
 export interface MessageStatusEntry {
   id: string;
@@ -106,30 +166,61 @@ export interface MessageStatusEntry {
 }
 
 /**
- * Template registry entry.
+ * Base environment bindings for messaging.
  */
-export interface TemplateRegistryEntry {
-  id: string;
-  kind: TemplateKind;
-  renderings: TemplateRendering[];
+export interface MessagingEnv {
+  MESSAGES_KV?: KVNamespace;
+  FALLBACK_TIMER?: unknown;
+  [key: string]: unknown;
 }
 
 /**
- * Messaging config.
+ * Provider interface.
  */
-export interface MessagingConfig {
-  kv: KVNamespace;
+export interface Provider {
+  readonly id?: string;
+  readonly name?: string;
+  readonly channel: Channel;
+  send(options: unknown): Promise<{
+    ok?: boolean;
+    messageId?: string;
+    providerId?: string;
+    status?: Promise<MessageStatus>;
+    error?: string;
+    retryable?: boolean;
+  }>;
+  status?(messageId: string): Promise<MessageStatus>;
+  webhook?: {
+    verify?(request: Request): Promise<Response | null>;
+    parse(request: Request): Promise<StatusEvent[]>;
+  };
+  statusHandler?(request: Request): Promise<Response> | Response;
+}
+
+/**
+ * Messaging configuration options.
+ */
+export interface MessagingConfig<Env = MessagingEnv> {
+  kv?: KVNamespace;
+  timer?: unknown;
   durable?: {
-    class: any;
+    class: unknown;
     id: string | number;
   };
-  fallbackTimeoutMs?: number;
+  templates?: TemplateCatalog;
+  providers?:
+    | ((env: Env) => Record<string, Provider>)
+    | {
+        id: string;
+        config: Record<string, unknown>;
+        state?: unknown;
+      }[];
+  delivery?: DeliveryPolicy;
   deliveryPolicy?: DeliveryPolicy;
-  providers: {
-    id: string;
-    config: Record<string, unknown>;
-    state: any;
-  }[];
+  fallbackTimeoutMs?: number;
+  statusTtl?: number;
+  onStatus?: (event: unknown) => void | Promise<void>;
+  basePath?: string;
 }
 
 /**
@@ -139,13 +230,8 @@ export interface MessagingState {
   templates: Map<string, TemplateDefinition>;
   queue: Map<string, MessageState[]>;
   store: Map<string, MessageStatusEntry[]>;
-  providers: Map<string, any>;
+  providers: Map<string, Provider>;
   policy: DeliveryPolicy;
   fallbackTimeout: number;
-  ctx?: { waitUntil: (reason: Promise<any>) => void };
+  ctx?: { waitUntil: (reason: Promise<unknown>) => void };
 }
-
-/**
- * Supported channels.
- */
-export const CHANNELS = ['whatsapp', 'sms', 'email'] as const;

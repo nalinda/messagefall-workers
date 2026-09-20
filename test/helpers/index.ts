@@ -2,9 +2,20 @@
  * Test helpers for messagefall-workers.
  */
 
-import type { DurableObject } from '@cloudflare/workers-types';
+import type { KVNamespace } from '@cloudflare/workers-types';
 
-import type { Channel, DeliveryStatus, MessageState,MessageStatus, MessagingState, Provider, TemplateDefinition } from '../../src/types';
+import type {
+  Channel,
+  DeliveryPolicy,
+  DeliveryStatus,
+  MessageStatus,
+  MessageStatusEntry,
+  MessagingState,
+  Provider,
+  TemplateDefinition,
+} from '../../src/types.js';
+
+const defaultPolicy: DeliveryPolicy = { fallbackChain: false, alwaysOnChannels: [] };
 
 /**
  * Create a test messaging state.
@@ -34,9 +45,9 @@ export function createTestTemplate(kind: 'otp' | 'text'): TemplateDefinition {
     id: kind,
     kind,
     inputSchema: {
-      type: 'object' as const,
+      type: 'object',
       shape: {
-        name: { type: 'string' as const },
+        name: { type: 'string' },
       },
     },
     renderings: [
@@ -53,17 +64,18 @@ export function createTestTemplate(kind: 'otp' | 'text'): TemplateDefinition {
 export function createMessage(
   templateId: string,
   input: Record<string, string>,
-  policy = { fallbackChain: false },
+  policy?: DeliveryPolicy,
 ): {
   template: TemplateDefinition;
+  policy: DeliveryPolicy;
   input: unknown;
   kind: 'otp' | 'text';
 } {
   return {
     template: createTestTemplate(templateId as 'otp' | 'text'),
-    policy,
+    policy: policy ?? defaultPolicy,
     input,
-    kind: templateId,
+    kind: templateId as 'otp' | 'text',
   };
 }
 
@@ -71,45 +83,31 @@ export function createMessage(
  * KV mock for testing.
  */
 export class MockKVNamespace {
-  private readonly data: Map<string, string>;
+  private readonly data: Map<string, string> = new Map();
 
-  constructor() {
-    this.data = new Map();
+  get(key: string): Promise<string | null> {
+    return Promise.resolve(this.data.get(key) ?? null);
   }
 
-  async get(key: string): Promise<string | null> {
-    return this.data.get(key);
-  }
-
-  async put(key: string, value: string): Promise<void> {
+  put(key: string, value: string): Promise<void> {
     this.data.set(key, value);
+    return Promise.resolve();
   }
 
-  async delete(key: string): Promise<void> {
+  delete(key: string): Promise<void> {
     this.data.delete(key);
+    return Promise.resolve();
   }
 }
 
 /**
  * Mock KV namespace with bindings.
  */
-export function createMockKV(): MockKVNamespace {
+export function createMockKV(): KVNamespace {
   const kv = new MockKVNamespace();
-  
-  // Pre-populate with some test data
-  kv.put('templates:otp', JSON.stringify({ id: 'otp', kind: 'otp', renderings: [] }));
-  kv.put('templates:text', JSON.stringify({ id: 'text', kind: 'text', renderings: [] }));
-  
-  return kv;
-}
-
-/**
- * Message status entry.
- */
-export interface MessageStatusEntry {
-  id: string;
-  status: DeliveryStatus;
-  timestamp: Date;
+  void kv.put('templates:otp', JSON.stringify({ id: 'otp', kind: 'otp', renderings: [] }));
+  void kv.put('templates:text', JSON.stringify({ id: 'text', kind: 'text', renderings: [] }));
+  return kv as unknown as KVNamespace;
 }
 
 /**
@@ -117,13 +115,14 @@ export interface MessageStatusEntry {
  */
 export function getMessageStatus(
   id: string,
-  store: Map<string, MessageStatusEntry[]>
-): { status: DeliveryStatus; timestamp: Date } {
+  store: Map<string, MessageStatusEntry[]>,
+): MessageStatusEntry {
   const entries = store.get(id) ?? [];
-  if (entries.length === 0) {
+  const latest = entries.at(-1);
+  if (!latest) {
     throw new Error(`No status for message ${id}`);
   }
-  return entries.at(-1);
+  return latest;
 }
 
 /**
@@ -138,8 +137,10 @@ export function updateMessageStatus(
   if (!store.has(id)) {
     store.set(id, []);
   }
-  const arr = store.get(id)!;
-  arr.push({ id, status, timestamp });
+  const arr = store.get(id);
+  if (arr) {
+    arr.push({ id, status, timestamp });
+  }
 }
 
 /**
@@ -150,44 +151,11 @@ export type TestProvider = { readonly id: string; readonly channel: Channel };
 export function createTestProvider(
   id: string,
   channel: Channel,
-  state: any,
 ): TestProvider {
   return {
     id,
     channel,
-    async send(options: any) {
-      return {
-        messageId: `test-${Date.now()}`,
-        status: Promise.resolve({
-          status: 'sent' as const,
-          timestamp: new Date(),
-          details: { test: true },
-        }),
-      };
-    },
-    status: async (messageId: string) => {
-      return {
-        status: 'sent' as const,
-        timestamp: new Date(),
-        details: { test: true },
-      };
-    },
-    async statusHandler(_request: Request) {
-      return new Response('OK', { status: 200 });
-    },
   };
-}
-
-/**
- * Run async functions with mock execution context.
- */
-export async function runWithContext<T>(
-  fn: () => Promise<T>,
-  waitUntil: (reason: Promise<any>) => void,
-): Promise<T> {
-  return (await fn())
-    .then(waitUntil)
-    .catch((err) => waitUntil(Promise.reject(err)));
 }
 
 /**
@@ -195,11 +163,18 @@ export async function runWithContext<T>(
  */
 export class BasicProvider implements Provider {
   readonly id = 'test-basic';
-  readonly channel = 'whatsapp';
+  readonly channel: Channel = 'whatsapp';
 
-  async send(options: { template: TemplateDefinition; input: unknown; channel: Channel }): Promise<{ messageId: string; status: Promise<MessageStatus> }> {
+  send(_options: unknown): Promise<{ messageId: string; status: Promise<MessageStatus> }> {
     const messageId = `test-${Date.now()}`;
-    return { messageId, status: Promise.resolve({ status: 'sent', timestamp: new Date() }) };
+    return Promise.resolve({
+      messageId,
+      status: Promise.resolve({
+        id: messageId,
+        status: 'sent',
+        timestamp: new Date(),
+      }),
+    });
   }
 }
 
@@ -208,97 +183,5 @@ export class BasicProvider implements Provider {
  */
 export const testBasicFactory = {
   id: 'test-basic',
-  create: (config: { state: any }) => new BasicProvider(config.state, config.state),
-};
-
-/**
- * Status provider for testing.
- */
-export class TestStatusProvider implements Provider {
-  readonly id = 'test-status';
-  readonly channel = 'whatsapp';
-
-  async send(options: { template: TemplateDefinition; input: unknown; channel: Channel }): Promise<{ messageId: string; status: Promise<MessageStatus> }> {
-    const messageId = `test-${Date.now()}`;
-    return { messageId, status: Promise.resolve({ status: 'sent', timestamp: new Date() }) };
-  }
-
-  async status(messageId: string): Promise<MessageStatus> {
-    return { status: 'sent', timestamp: new Date() };
-  }
-
-  async statusHandler(request: Request): Promise<Response> {
-    return new Response('OK', { status: 200 });
-  }
-}
-
-/**
- * Test status handler factory for testing.
- */
-export const testStatusHandlerFactory = {
-  id: 'test-status',
-  create: (config: { state: any; channel: string }) => new TestStatusProvider(config.state),
-};
-
-/**
- * Email provider for testing.
- */
-export class TestEmailProvider implements Provider {
-  readonly id = 'test-email';
-  readonly channel = 'email';
-
-  async send(options: { template: TemplateDefinition; input: unknown; channel: Channel }): Promise<{ messageId: string; status: Promise<MessageStatus> }> {
-    const messageId = `test-${Date.now()}`;
-    return { messageId, status: Promise.resolve({ status: 'sent', timestamp: new Date() }) };
-  }
-}
-
-/**
- * Email factory for testing.
- */
-export const testEmailFactory = {
-  id: 'test-email',
-  create: (config: { state: any }) => new TestEmailProvider(config.state),
-};
-
-/**
- * SMS provider for testing.
- */
-export class TestSmsProvider implements Provider {
-  readonly id = 'test-sms';
-  readonly channel = 'sms';
-
-  async send(options: { template: TemplateDefinition; input: unknown; channel: Channel }): Promise<{ messageId: string; status: Promise<MessageStatus> }> {
-    const messageId = `test-${Date.now()}`;
-    return { messageId, status: Promise.resolve({ status: 'sent', timestamp: new Date() }) };
-  }
-}
-
-/**
- * SMS factory for testing.
- */
-export const testSmsFactory = {
-  id: 'test-sms',
-  create: (config: { state: any }) => new TestSmsProvider(config.state),
-};
-
-/**
- * WhatsApp provider for testing.
- */
-export class TestWhatsappProvider implements Provider {
-  readonly id = 'test-whatsapp';
-  readonly channel = 'whatsapp';
-
-  async send(options: { template: TemplateDefinition; input: unknown; channel: Channel }): Promise<{ messageId: string; status: Promise<MessageStatus> }> {
-    const messageId = `test-${Date.now()}`;
-    return { messageId, status: Promise.resolve({ status: 'sent', timestamp: new Date() }) };
-  }
-}
-
-/**
- * WhatsApp factory for testing.
- */
-export const testWhatsappFactory = {
-  id: 'test-whatsapp',
-  create: (config: { state: any }) => new TestWhatsappProvider(config.state),
+  create: (): BasicProvider => new BasicProvider(),
 };

@@ -69,7 +69,7 @@ export const myProviderFactory: ProviderFactory = {
 
 - `meta-whatsapp`: Meta Cloud WhatsApp API
 - `twilio-sms`: Twilio SMS
-- `vonage-sms`: Vonage SMS  
+- `vonage-sms`: Vonage SMS
 - `gmail`: Gmail API (send with OAuth refresh token)
 - `http-sms`: Generic HTTP SMS gateway skeleton
 - `console`: Development mode, logs to console
@@ -101,29 +101,29 @@ export const myProviderFactory: ProviderFactory = {
 
 Map provider statuses to the standard `DeliveryStatus`:
 
-| Provider Status | Mapped To |
-|----------------|-----------|
-| `sent` | `sent` |
-| `delivered` | `delivered` |
-| `read` | `read` |
-| `failed`, `error` | `failed` |
-| `not_delivered`, `bounce`, `undelivered` | `undelivered` |
-| `undecipherable`, `blocked` | `undecipherable` |
-| `pending`, unknown | `unknown` |
+| Provider Status                          | Mapped To        |
+| ---------------------------------------- | ---------------- |
+| `sent`                                   | `sent`           |
+| `delivered`                              | `delivered`      |
+| `read`                                   | `read`           |
+| `failed`, `error`                        | `failed`         |
+| `not_delivered`, `bounce`, `undelivered` | `undelivered`    |
+| `undecipherable`, `blocked`              | `undecipherable` |
+| `pending`, unknown                       | `unknown`        |
 
 ## Environment Variables
 
 Each provider may require specific environment variables:
 
-| Variable | Description |
-|----------|-------------|
-| `META_WHATSAPP_*` | Meta WhatsApp API credentials |
-| `TWILIO_ACCOUNT_SID` | Twilio account SID |
-| `TWILIO_AUTH_TOKEN` | Twilio auth token |
-| `TWILIO_ACCOUNT_SID` | Vonage phone number |
-| `GMAIL_CLIENT_ID` | Gmail OAuth client ID |
-| `GMAIL_CLIENT_SECRET` | Gmail OAuth client secret |
-| `GMAIL_REFRESH_TOKEN` | Gmail OAuth refresh token |
+| Variable              | Description                   |
+| --------------------- | ----------------------------- |
+| `META_WHATSAPP_*`     | Meta WhatsApp API credentials |
+| `TWILIO_ACCOUNT_SID`  | Twilio account SID            |
+| `TWILIO_AUTH_TOKEN`   | Twilio auth token             |
+| `TWILIO_ACCOUNT_SID`  | Vonage phone number           |
+| `GMAIL_CLIENT_ID`     | Gmail OAuth client ID         |
+| `GMAIL_CLIENT_SECRET` | Gmail OAuth client secret     |
+| `GMAIL_REFRESH_TOKEN` | Gmail OAuth refresh token     |
 
 These should be passed in `ProviderConfig` or loaded from bindings.
 
