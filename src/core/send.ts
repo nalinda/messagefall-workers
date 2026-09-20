@@ -259,18 +259,22 @@ export interface AttemptRecorder {
  * the last are `failed`).
  *
  * This is THE chain-advance logic; do not write a second one. It only sees failures the
- * provider reports synchronously. The asynchronous path (#7: a `failed` delivery status from a
- * webhook; #8: the fallback timer firing) must reuse it by calling `runChain` again with the
- * remaining channels, `policy.fallback.slice(record.chain.attempts.length)`, and a recorder
- * built with `attemptRecorder` (which appends the attempt, recomputes `chainStatus` and
- * `deriveOverallStatus`, indexes the providerId and notifies `onStatus`).
+ * provider reports synchronously. The asynchronous path (a `failed` delivery status from a
+ * webhook, or the fallback timer firing) reuses it: `advanceChain` calls `runChain` again with
+ * the channels left after the one the last attempt used, and a recorder built with
+ * `attemptRecorder` (which appends the attempt, recomputes `chainStatus` and
+ * `deriveOverallStatus`, indexes the providerId and notifies `onStatus`). It finds that
+ * remainder from the last attempt's own channel — `fallback.indexOf(last.channel)`, then
+ * `slice(index + 1)` — not from `record.chain.attempts.length`: a lost attempt write makes the
+ * attempt count diverge from the position in the chain, and only the channel says where the
+ * walk actually got to.
  *
  * Inputs for that async path: `runChain` needs a `ValidatedSendRequest` (to, locale, validated
- * input). The `MessageRecord` deliberately carries none of them. Per #7's own acceptance
- * criterion they live in a separate KV key, `in:<id>`, written on send with a TTL matching the
- * chain timeout and deleted once the chain reaches a terminal state; #7's fallback path reads
- * it (or takes a synchronous `input` pass-through) to rebuild the render with `validateInput` +
- * `renderValidated`. The `in:<id>` write is part of #7's scope and is not done here yet.
+ * input). The `MessageRecord` deliberately carries none of them, so they live in a separate KV
+ * key, `in:<id>`, written by `runSend` below with a TTL matching the chain timeout and stashed
+ * with the fallback timer too. The fallback path reads whichever of the two it finds (or takes
+ * a synchronous `input` pass-through) to rebuild the render with `validateInput` +
+ * `renderValidated`, and drops the key once the chain reaches a terminal state.
  */
 export async function runChain(
   req: ValidatedSendRequest,
