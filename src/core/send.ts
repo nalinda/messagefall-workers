@@ -233,7 +233,7 @@ export interface AttemptRecorder {
  * webhook; #8: the fallback timer firing) must reuse it by calling `runChain` again with the
  * remaining channels, `policy.fallback.slice(record.chain.attempts.length)`, and a recorder
  * built with `attemptRecorder` (which appends the attempt, recomputes `chainStatus` and
- * `deriveOverallStatus`, and calls `observe`).
+ * `deriveOverallStatus`, indexes the providerId and notifies `onStatus`).
  *
  * Inputs for that async path: `runChain` needs a `ValidatedSendRequest` (to, locale, validated
  * input). The `MessageRecord` deliberately carries none of them. Per #7's own acceptance
@@ -396,7 +396,15 @@ export function attemptRecorder(
                 attempt,
               ])
         );
-        await observe(deps, id, attempt);
+        await indexAttempt(deps, id, attempt);
+        // Observers run off the write queue: a slow onStatus must not stall the next attempt's
+        // record write or the chain seal. notifyStatus already contains the observer's errors.
+        void notifyStatus(deps.onStatus, {
+          id,
+          channel: attempt.channel,
+          provider: attempt.provider,
+          status: attempt.status,
+        });
       }),
     sealChain: (progress) =>
       enqueue(() =>
@@ -455,20 +463,19 @@ async function deliverGuarded(
 }
 
 /**
- * Indexes the providerId and notifies `onStatus` for one attempt. Both are observers of a
- * send that has already happened, so their failures are logged (without content) and swallowed
- * rather than allowed to fail the send.
+ * Indexes the providerId of one attempt. The send has already happened, so a failure is logged
+ * (without content) and swallowed rather than allowed to fail the send.
  */
-async function observe(deps: SendDeps, id: string, attempt: Attempt): Promise<void> {
-  const { channel, provider, status } = attempt;
-  if (attempt.providerId) {
-    try {
-      await deps.store.indexProviderId(attempt.providerId, { id, channel, provider });
-    } catch {
-      console.warn(`[messagefall] indexProviderId failed id=${id} channel=${channel}`);
-    }
+async function indexAttempt(deps: SendDeps, id: string, attempt: Attempt): Promise<void> {
+  const { channel, provider } = attempt;
+  if (!attempt.providerId) {
+    return;
   }
-  await notifyStatus(deps.onStatus, { id, channel, provider, status });
+  try {
+    await deps.store.indexProviderId(attempt.providerId, { id, channel, provider });
+  } catch {
+    console.warn(`[messagefall] indexProviderId failed id=${id} channel=${channel}`);
+  }
 }
 
 /**

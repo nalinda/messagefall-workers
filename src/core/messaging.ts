@@ -23,7 +23,7 @@ import {
   type MessageRecord,
   type StatusStore,
 } from './status.js';
-import { createWebhookHandler, type StatusApplied } from './webhook.js';
+import { createWebhookHandler } from './webhook.js';
 
 export type { ProviderSet, SendContext, StatusCallbackEvent } from './send.js';
 export { E164, RecipientError } from './send.js';
@@ -40,11 +40,6 @@ export interface MessagingOptions<T extends Templates<any> = Templates<any>> {
   timer?: DurableObjectNamespace;
   statusTtl?: number;
   onStatus?: (event: StatusCallbackEvent) => void | Promise<void>;
-  /**
-   * Fired by the webhook path (#5) when a delivery status lands on a chain attempt; consumed
-   * by fallback (#7) and the timer cancel path (#8).
-   */
-  onStatusApplied?: (event: StatusApplied) => void | Promise<void>;
 }
 
 /**
@@ -245,7 +240,6 @@ export function createMessaging<T extends Templates<any>>(
             ? notifyStatus(options.onStatus, { ...ref, status: (raw as StatusEvent).status })
             : undefined
       : undefined,
-    onStatusApplied: options.onStatusApplied,
   });
 
   return {

@@ -1007,6 +1007,41 @@ describe('Issue #3: createMessaging send pipeline', () => {
     });
   });
 
+  describe('onStatus does not block the write queue', () => {
+    it('records the next chain attempt while a slow onStatus for the previous one is still running', async () => {
+      const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'dead-wa', [
+        { ok: false, error: 'no' },
+      ]);
+      const sms = recordingProvider<RenderedSms>('sms', 'rec-sms', [
+        { ok: true, providerId: 'sms-while-observer-hangs' },
+      ]);
+      const { promise: gate, resolve: open } = Promise.withResolvers<void>();
+      const observed: string[] = [];
+
+      const messaging = createMessaging(newEnv(), {
+        templates,
+        providers: () => ({ whatsapp: wa, sms }),
+        delivery: { fallback: ['whatsapp', 'sms'], always: [] },
+        onStatus: async (event) => {
+          observed.push(`${event.channel}:${event.status}`);
+          if (event.channel === 'whatsapp') {
+            await gate; // never resolves until the assertions below have run
+          }
+        },
+      });
+
+      const { id } = await messaging.send({ template: 'orderUpdate', to: TO, locale: 'en', input: INPUT });
+
+      // send() resolved and the sms attempt is on the record although the whatsapp observer
+      // is still hanging.
+      const record = await messaging.status(id);
+      expect(record!.chain.attempts.map((a) => a.channel)).toEqual(['whatsapp', 'sms']);
+      expect(record!.chain.status).toBe('sent');
+      expect(observed).toEqual(['whatsapp:failed', 'sms:sent']);
+      open();
+    });
+  });
+
   describe('attempts are persisted as each provider settles', () => {
     it('indexes a fast always provider before a slow chain provider has returned', async () => {
       const env = newEnv();
