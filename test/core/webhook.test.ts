@@ -13,15 +13,14 @@ import type { ExecutionContext, KVNamespace } from '@cloudflare/workers-types';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
 import { kvStatusStore, type MessageRecord } from '../../src/core/status.js';
-import type { DeliveryStatus, Provider, StatusEvent } from '../../src/providers/types.js';
-import { createMiniflareKV } from '../helpers/status.js';
 import {
-  createMockExecutionContext,
-  loadWebhookHandler,
-  type MockExecutionContext,
+  createWebhookHandler,
   type StatusApplied,
   type WebhookHandler,
-} from '../helpers/webhook.js';
+} from '../../src/core/webhook.js';
+import type { DeliveryStatus, Provider, StatusEvent } from '../../src/providers/types.js';
+import { createMiniflareKV } from '../helpers/status.js';
+import { createMockExecutionContext, type MockExecutionContext } from '../helpers/webhook.js';
 
 function createSignedProvider(): Provider {
   return {
@@ -81,7 +80,7 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
         },
       };
 
-      const handleWebhook: WebhookHandler = await loadWebhookHandler({
+      const handleWebhook: WebhookHandler = createWebhookHandler({
         providers: { whatsapp: provider },
         kv,
       });
@@ -103,7 +102,7 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
         send: () => Promise.resolve({ ok: true }),
       };
 
-      const handleWebhook: WebhookHandler = await loadWebhookHandler({
+      const handleWebhook: WebhookHandler = createWebhookHandler({
         providers: { sms: providerWithoutWebhook },
         kv,
       });
@@ -148,7 +147,7 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
         },
       };
 
-      const handleWebhook = await loadWebhookHandler({
+      const handleWebhook = createWebhookHandler({
         providers: { whatsapp: providerWithVerify },
         kv,
       });
@@ -182,7 +181,7 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
         },
       };
 
-      const handleWebhook = await loadWebhookHandler({
+      const handleWebhook = createWebhookHandler({
         providers: { whatsapp: provider },
         kv,
       });
@@ -213,7 +212,7 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
         },
       };
 
-      const handleWebhook = await loadWebhookHandler({
+      const handleWebhook = createWebhookHandler({
         providers: { whatsapp: provider },
         kv,
       });
@@ -247,7 +246,7 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
         },
       };
 
-      const handleWebhook = await loadWebhookHandler({
+      const handleWebhook = createWebhookHandler({
         providers: { whatsapp: provider },
         kv,
       });
@@ -325,7 +324,7 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
 
       let onStatusCalledWith: unknown = null;
 
-      const handleWebhook = await loadWebhookHandler({
+      const handleWebhook = createWebhookHandler({
         providers: { whatsapp: provider },
         kv,
         onStatus: (event) => {
@@ -409,7 +408,7 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
         },
       };
 
-      const handleWebhook = await loadWebhookHandler({
+      const handleWebhook = createWebhookHandler({
         providers: { whatsapp: provider },
         kv,
       });
@@ -456,7 +455,7 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
         },
       };
 
-      const handleWebhook = await loadWebhookHandler({
+      const handleWebhook = createWebhookHandler({
         providers: { whatsapp: provider },
         kv,
       });
@@ -492,7 +491,7 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
         },
       };
 
-      const handleWebhook = await loadWebhookHandler({
+      const handleWebhook = createWebhookHandler({
         providers: { whatsapp: provider },
         kv,
       });
@@ -559,7 +558,7 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
         },
       };
 
-      const handleWebhook = await loadWebhookHandler({
+      const handleWebhook = createWebhookHandler({
         providers: { whatsapp: provider },
         kv,
       });
@@ -633,7 +632,7 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
         },
       };
 
-      const handleWebhook = await loadWebhookHandler({
+      const handleWebhook = createWebhookHandler({
         providers: { whatsapp: provider },
         kv,
         onStatusApplied: (applied) => {
@@ -721,7 +720,7 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
         },
       };
 
-      const handleWebhook = await loadWebhookHandler({
+      const handleWebhook = createWebhookHandler({
         providers: { email: emailProvider },
         kv,
         onStatusApplied: (applied) => {
@@ -792,7 +791,7 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
         },
       };
 
-      const handleWebhook = await loadWebhookHandler({
+      const handleWebhook = createWebhookHandler({
         providers: { whatsapp: provider },
         kv,
       });
@@ -855,7 +854,7 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
 
       const provider = createSignedProvider();
 
-      const handleWebhook = await loadWebhookHandler({
+      const handleWebhook = createWebhookHandler({
         providers: { whatsapp: provider },
         kv,
         env: { MESSAGING_DEV_UNSIGNED: 'true' },
@@ -910,7 +909,7 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
 
       const provider = createSignedProvider();
 
-      const handleWebhook = await loadWebhookHandler({
+      const handleWebhook = createWebhookHandler({
         providers: { whatsapp: provider },
         kv,
         env: { MESSAGING_DEV_UNSIGNED: 'true' },
@@ -933,7 +932,7 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
     it('REFUSES dev bypass and returns 401 on non-localhost URL even when MESSAGING_DEV_UNSIGNED is "true"', async () => {
       const provider = createSignedProvider();
 
-      const handleWebhook = await loadWebhookHandler({
+      const handleWebhook = createWebhookHandler({
         providers: { whatsapp: provider },
         kv,
         env: { MESSAGING_DEV_UNSIGNED: 'true' },
@@ -956,7 +955,7 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
     it('REFUSES dev bypass and returns 401 when MESSAGING_DEV_UNSIGNED is not "true" even on localhost', async () => {
       const provider = createSignedProvider();
 
-      const handleWebhook = await loadWebhookHandler({
+      const handleWebhook = createWebhookHandler({
         providers: { whatsapp: provider },
         kv,
         env: { MESSAGING_DEV_UNSIGNED: 'false' },
