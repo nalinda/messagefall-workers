@@ -69,6 +69,11 @@ export function buildMessageBody(
     to: recipientOf(message.to),
   };
 
+  // `OutboundMeta.template` (the catalog template id, a string) and
+  // `RenderedWhatsApp.template` (the rendered Meta template object) share a
+  // key, so the intersection type resolves `template` to `never`. The cast
+  // reads the rendered shape the core actually passes; the contract fix is
+  // tracked in #28.
   const { template } = message as RenderedWhatsApp;
   if (template && typeof template === 'object') {
     return {

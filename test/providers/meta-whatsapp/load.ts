@@ -1,14 +1,8 @@
 /**
- * Loader for the meta-whatsapp provider under test (Issue #4).
- *
- * The provider module is imported dynamically so that, while it does not yet
- * exist, every test still fails on its own assertion rather than on a
- * module-resolution error. When the import fails a deliberately wrong
- * placeholder is returned: it never calls fetch, never succeeds, answers every
- * handshake with a 500, and always parses to a sentinel event, so no test in
- * this directory can pass against it.
+ * Loader and shared fixtures for the meta-whatsapp provider tests (Issue #4).
  */
 
+import { metaWhatsApp } from '../../../src/providers/meta-whatsapp/index.js';
 import type { Provider, RenderedWhatsApp } from '../../../src/providers/types.js';
 
 /**
@@ -25,36 +19,14 @@ export interface MetaWhatsAppConfig {
 
 export type MetaWhatsAppFactory = (config: MetaWhatsAppConfig) => Provider<RenderedWhatsApp>;
 
-const MODULE_PATH = '../../../src/providers/meta-whatsapp/index.js';
-
-function placeholderProvider(): Provider<RenderedWhatsApp> {
-  return {
-    name: 'placeholder',
-    channel: 'sms',
-    send: () => Promise.resolve({ ok: false, error: 'meta-whatsapp provider not implemented' }),
-    webhook: {
-      verify: () => Promise.resolve(new Response('placeholder', { status: 500 })),
-      parse: () =>
-        Promise.resolve([
-          { providerId: 'placeholder', status: 'failed' as const, at: 'placeholder' },
-        ]),
-    },
-  };
-}
-
 /**
  * Load the `metaWhatsApp` factory from `src/providers/meta-whatsapp`.
+ *
+ * Kept async so the test files' `beforeAll` hooks are unchanged; a broken
+ * import now fails with a real module-resolution error.
  */
-export async function loadMetaWhatsApp(): Promise<MetaWhatsAppFactory> {
-  try {
-    const mod = (await import(MODULE_PATH)) as { metaWhatsApp?: unknown };
-    if (typeof mod.metaWhatsApp === 'function') {
-      return mod.metaWhatsApp as MetaWhatsAppFactory;
-    }
-    return placeholderProvider;
-  } catch {
-    return placeholderProvider;
-  }
+export function loadMetaWhatsApp(): Promise<MetaWhatsAppFactory> {
+  return Promise.resolve(metaWhatsApp);
 }
 
 /**

@@ -118,22 +118,29 @@ interface WebhookPayload {
   entry?: { changes?: { value?: { statuses?: WebhookStatus[] } }[] }[];
 }
 
-function toIsoTimestamp(timestamp: unknown): string {
+/**
+ * Convert a Meta epoch-seconds `timestamp` to ISO, or `null` when it is
+ * missing or not numeric so the caller can drop the status rather than
+ * fabricate a time for it.
+ */
+function toIsoTimestamp(timestamp: unknown): string | null {
   const seconds = typeof timestamp === 'string' ? Number(timestamp) : timestamp;
   if (typeof seconds === 'number' && Number.isFinite(seconds)) {
     return new Date(seconds * 1000).toISOString();
   }
-  return new Date().toISOString();
+  return null;
 }
 
 function toStatusEvent(status: WebhookStatus): StatusEvent | null {
   if (typeof status.id !== 'string' || typeof status.status !== 'string') return null;
   if (!STATUSES.has(status.status)) return null;
+  const at = toIsoTimestamp(status.timestamp);
+  if (at === null) return null;
 
   const event: StatusEvent = {
     providerId: status.id,
     status: status.status as DeliveryStatus,
-    at: toIsoTimestamp(status.timestamp),
+    at,
   };
 
   const title = status.errors?.[0]?.title;
