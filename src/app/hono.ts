@@ -18,9 +18,9 @@ import { RecipientError, type SendContext } from '../core/send.js';
 import { resolveTimer } from '../core/status.js';
 import { registerMessagingOptions } from '../core/timer.js';
 import { type MessagingEnv, validateEnv } from '../env.js';
+import { TemplateValidationError } from '../templates.js';
 
 const logger = createLogger();
-import { TemplateValidationError } from '../templates.js';
 
 function getExecutionContext(c: { executionCtx: unknown }): SendContext | undefined {
   try {

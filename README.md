@@ -209,7 +209,7 @@ The chain runs like this:
 
 Without the Durable Object binding, steps 3 and 5 do not happen: chain fallback is driven only by explicit failure statuses, and the app logs one `timer.off` line on its first request so the missing binding is visible. That is enough for notifications. For one-time codes you want the timer, because "no status yet" after thirty seconds is the common failure mode, not an explicit rejection.
 
-The timer is one Durable Object per message, named by the message id. Its alarm re-creates the messaging core from the options passed to `createMessagingApp` (or `createMessaging`) in the same isolate, so `FallbackTimer` must be exported from the same Worker module that makes that call, as the quick start does. A chain with only one channel, or a `'all'` policy, never arms it: there is nothing a timeout could move on to.
+The timer is one Durable Object per message, named by the message id. Its alarm re-creates the messaging core from the options passed to `createMessagingApp` (or `createMessaging`) in the same isolate, and an isolate woken only by an alarm runs nothing but module evaluation before the handler. So `FallbackTimer` must be exported from the same Worker module that calls `createMessagingApp`, and that call must run at module top level (`const app = createMessagingApp({...})` at module scope, as the quick start does), not lazily inside a request handler; the last registration in an isolate wins, so configure one set of options per Worker. If an alarm fires with no options registered it throws and keeps its state for the platform's retry. A chain with only one channel, or a `'all'` policy, never arms it: there is nothing a timeout could move on to.
 
 ### Overriding the policy
 

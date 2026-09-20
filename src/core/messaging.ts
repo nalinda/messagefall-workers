@@ -181,7 +181,7 @@ export async function advanceChainFor<T extends Templates<Record<string, Templat
 ): Promise<void> {
   const kv = requireKv(env, options);
   const providers = memoProviders(env, options.providers);
-  const store = memoStore(kv, options.statusTtl ?? DEFAULT_STATUS_TTL);
+  const store = statusStoreFor(env, options);
   await advanceChain({
     id: request.id,
     reason: request.reason,
@@ -226,6 +226,24 @@ function requireKv(env: MessagingEnv, options: { kv?: KVNamespace }): KVNamespac
 }
 
 /**
+ * The status store `createMessaging` would use for `env` and `options`: `options.kv` else
+ * `env.MESSAGES_KV`, memoised per namespace and TTL. The one resolution every path shares —
+ * the request path, the webhook bridge and the `FallbackTimer` Durable Object — so a missing
+ * namespace fails identically everywhere.
+ *
+ * @param env - Worker bindings.
+ * @param options - The messaging options the Worker was configured with.
+ * @returns The status store.
+ * @throws {MessagingConfigError} If no KV namespace is available.
+ */
+export function statusStoreFor(
+  env: MessagingEnv,
+  options: { kv?: KVNamespace; statusTtl?: number }
+): StatusStore {
+  return memoStore(requireKv(env, options), options.statusTtl ?? DEFAULT_STATUS_TTL);
+}
+
+/**
  * Creates a messaging instance bound to a Worker env.
  *
  * Providers and the status store are memoised per `env` object, so calling this on every
@@ -248,7 +266,7 @@ export function createMessaging<T extends Templates<any>>(
     fallback: options.delivery?.fallback ?? DEFAULT_POLICY.fallback,
     always: options.delivery?.always ?? DEFAULT_POLICY.always,
   };
-  const store = memoStore(kv, options.statusTtl ?? DEFAULT_STATUS_TTL);
+  const store = statusStoreFor(env, options);
   const providers = memoProviders(env, options.providers);
   const templates = new Map<string, TemplateDef<unknown>>(Object.entries(options.templates));
   const webhook = createWebhookHandler({

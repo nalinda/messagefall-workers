@@ -628,7 +628,7 @@ async function stashChainInput(
     try {
       await deps.timer.setState(id, timeoutMs, inputPayload);
     } catch {
-      defaultLogger.warn('timer.armed', { id, kind: req.template.kind });
+      defaultLogger.warn('timer.arm-failed', { id, kind: req.template.kind });
     }
   }
 }

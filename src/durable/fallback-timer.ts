@@ -6,16 +6,18 @@
  * still `sent` — a status that simply never arrived — and cleans up.
  *
  * The object rebuilds the core from the options the Worker registered with
- * `createMessagingApp` / `createMessaging`, so it must be exported from the same Worker module
- * that makes that call: both then run in the isolate the alarm fires in.
+ * `createMessagingApp` / `createMessaging`. An isolate woken only by an alarm runs nothing but
+ * module evaluation before the handler, so that call must happen at module top level of the
+ * Worker module that exports this class — not lazily inside a request handler. When no options
+ * are registered the alarm throws (the platform retries it) and keeps its storage.
  *
  * @module
  */
 
 import { createLogger } from '../core/logger.js';
-import { advanceChainFor, type MessagingOptions } from '../core/messaging.js';
+import { advanceChainFor, MessagingConfigError, statusStoreFor } from '../core/messaging.js';
 import type { RenderInput } from '../core/render-input.js';
-import { type FallbackTimerClient, kvStatusStore } from '../core/status.js';
+import type { FallbackTimerClient } from '../core/status.js';
 import { armArgs, type ArmTimerArgs, registeredMessagingOptions } from '../core/timer.js';
 import type { MessagingEnv } from '../env.js';
 import { DurableObjectBase } from './base.js';
@@ -69,9 +71,12 @@ export class FallbackTimer extends DurableObjectBase<MessagingEnv> {
     const options = registeredMessagingOptions();
     if (!options) {
       logger.warn('timer.off', { id: stored.id });
-      return;
+      throw new MessagingConfigError(
+        'FallbackTimer found no messaging options in this isolate: call createMessagingApp ' +
+          '(or createMessaging) at module top level of the Worker that exports the class'
+      );
     }
-    const record = await this.store(options).get(stored.id);
+    const record = await statusStoreFor(this.env, options).get(stored.id);
     if (record?.chain.status !== 'sent') {
       return;
     }
@@ -81,12 +86,6 @@ export class FallbackTimer extends DurableObjectBase<MessagingEnv> {
       reason: 'timeout',
       input: toRenderInput(stored),
       timer: this.self(),
-    });
-  }
-
-  private store(options: MessagingOptions): ReturnType<typeof kvStatusStore> {
-    return kvStatusStore(options.kv ?? this.env.MESSAGES_KV, {
-      ...(options.statusTtl !== undefined && { ttlSeconds: options.statusTtl }),
     });
   }
 
@@ -132,8 +131,10 @@ export class FallbackTimer extends DurableObjectBase<MessagingEnv> {
   }
 
   /**
-   * Alarm handler: if the chain is still `sent`, advance it from the stored input; either way
-   * the storage is empty afterwards unless the advance re-armed the object.
+   * Alarm handler: if the chain is still `sent`, advance it from the stored input. Storage is
+   * cleared only once the advance has settled without re-arming the object; an advance that
+   * throws propagates with the storage intact, so the platform's alarm retry finds the state it
+   * needs rather than an empty object.
    */
   async alarm(): Promise<void> {
     const stored = await this.ctx.storage.get<StoredTimer>(STATE_KEY);
@@ -142,12 +143,9 @@ export class FallbackTimer extends DurableObjectBase<MessagingEnv> {
       return;
     }
     const generation = this.generation;
-    try {
-      await this.advance(stored);
-    } finally {
-      if (this.generation === generation) {
-        await this.clear();
-      }
+    await this.advance(stored);
+    if (this.generation === generation) {
+      await this.clear();
     }
   }
 }

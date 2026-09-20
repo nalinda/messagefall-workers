@@ -183,9 +183,15 @@ const registry: { options: MessagingOptions | undefined } = { options: undefined
 /**
  * Records the messaging options of this Worker for the `FallbackTimer` Durable Object, which
  * re-creates the core (templates, providers, store) from them when its alarm fires. Called by
- * `createMessagingApp` and `createMessaging`; the last call wins. This is why the Durable Object
- * must be exported from the same Worker module that calls `createMessagingApp`: both run in the
- * isolate the alarm fires in.
+ * `createMessagingApp` and `createMessaging`.
+ *
+ * This is a module-level singleton and the last call wins, so a Worker must configure one set of
+ * options: two `createMessaging` calls with different options in one isolate would hand the
+ * alarm whichever ran last. An isolate woken only by an alarm executes module evaluation and
+ * nothing else before the handler runs, so the registering call must happen at module top level
+ * of the Worker module that exports `FallbackTimer` — `createMessagingApp(...)` as a module-scope
+ * `const`, as in the README's quick start — not lazily inside a request handler. Otherwise the
+ * alarm finds no options and throws (keeping its storage for the platform's retry).
  *
  * @param options - The options the Worker was configured with.
  */
@@ -200,7 +206,8 @@ export function registerMessagingOptions<T extends Templates<any>>(
  * The options recorded by {@link registerMessagingOptions}, if any.
  *
  * @returns The options, or undefined when no `createMessagingApp` / `createMessaging` call has
- * happened in this isolate.
+ * run in this isolate yet (see {@link registerMessagingOptions} for why that must happen at
+ * module top level).
  */
 export function registeredMessagingOptions(): MessagingOptions | undefined {
   return registry.options;

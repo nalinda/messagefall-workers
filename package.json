@@ -80,6 +80,7 @@
     "hono": "^4.0.0",
     "husky": "^9.1.7",
     "lint-staged": "^17.5.1",
+    "miniflare": "5.20260918.0-alpha",
     "prettier": "^3.9.6",
     "typescript": "~6.0.2",
     "wrangler": "^4.0.0"
