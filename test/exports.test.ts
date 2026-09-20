@@ -165,6 +165,40 @@ describe('Entry points export documented functions', () => {
     const provider = await loadExport('./providers/http-sms');
     expect(typeof provider.httpSms).toBe('function');
   });
+
+  // Issue #4: meta-whatsapp is its own entry point and is absent from the
+  // root bundle when unused.
+  it('builds ./providers/meta-whatsapp as its own entry point (Issue #4)', () => {
+    const target = exportTarget('./providers/*');
+    const esm = target.import.replace('*', 'meta-whatsapp');
+    const dts = target.types.replace('*', 'meta-whatsapp');
+    expect(fs.existsSync(distFile(esm))).toBe(true);
+    expect(fs.existsSync(distFile(dts))).toBe(true);
+    for (const part of ['graph', 'webhook']) {
+      expect(fs.existsSync(distFile(`./dist/providers/meta-whatsapp/${part}.js`))).toBe(true);
+    }
+  });
+
+  it('exports metaWhatsApp as a function from the built ./providers/meta-whatsapp entry point (Issue #4)', async () => {
+    const esm = exportTarget('./providers/*').import.replace('*', 'meta-whatsapp');
+    expect(fs.existsSync(distFile(esm))).toBe(true);
+    const provider = await loadExport('./providers/meta-whatsapp');
+    expect(typeof provider.metaWhatsApp).toBe('function');
+  });
+
+  it('keeps meta-whatsapp out of the root bundle: no root dist file imports it (Issue #4)', () => {
+    const rootFiles = [
+      './dist/index.js',
+      './dist/client/index.js',
+      './dist/durable/index.js',
+      './dist/providers/index.js',
+    ];
+    for (const file of rootFiles) {
+      const content = fs.readFileSync(distFile(file), 'utf8');
+      expect(content).not.toContain('meta-whatsapp');
+      expect(content).not.toContain('graph.facebook.com');
+    }
+  });
 });
 
 describe('Node runtime package resolution', () => {
