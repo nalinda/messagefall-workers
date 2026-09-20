@@ -42,6 +42,43 @@ function distFile(relative: string): string {
   return path.join(rootDir, relative);
 }
 
+// `from './x.js'` (static import/export), `import('./x.js')` (dynamic) and
+// `import './x.js'` (bare side-effect import).
+const STATIC_SPECIFIER = /\bfrom\s*['"]([^'"]+)['"]/g;
+const DYNAMIC_SPECIFIER = /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+const BARE_SPECIFIER = /\bimport\s+['"]([^'"]+)['"]/g;
+
+/**
+ * Absolute paths of the relative modules `file` imports.
+ */
+function relativeImportsOf(file: string): string[] {
+  const source = fs.readFileSync(file, 'utf8');
+  const specifiers = [
+    ...source.matchAll(STATIC_SPECIFIER),
+    ...source.matchAll(DYNAMIC_SPECIFIER),
+    ...source.matchAll(BARE_SPECIFIER),
+  ].map((match) => match[1]);
+  return specifiers
+    .filter((specifier) => specifier.startsWith('.'))
+    .map((specifier) => path.resolve(path.dirname(file), specifier));
+}
+
+/**
+ * Walk the ESM import graph from the given absolute files, following only
+ * relative specifiers, and return every file reached (including the roots).
+ */
+function walkImportGraph(roots: string[]): Set<string> {
+  const seen = new Set<string>();
+  const queue = [...roots];
+  for (let file = queue.pop(); file !== undefined; file = queue.pop()) {
+    if (seen.has(file)) continue;
+    if (!fs.existsSync(file)) throw new Error(`import graph reached a missing file: ${file}`);
+    seen.add(file);
+    queue.push(...relativeImportsOf(file));
+  }
+  return seen;
+}
+
 async function loadExport(subpath: string): Promise<Record<string, unknown>> {
   if (subpath.startsWith('./providers/')) {
     const providerName = subpath.replace('./providers/', '');
@@ -164,6 +201,48 @@ describe('Entry points export documented functions', () => {
   it('exports httpSms provider from the built ./providers/http-sms entry point', async () => {
     const provider = await loadExport('./providers/http-sms');
     expect(typeof provider.httpSms).toBe('function');
+  });
+
+  // Issue #4: meta-whatsapp is its own entry point and is absent from the
+  // root bundle when unused.
+  it('builds ./providers/meta-whatsapp as its own entry point (Issue #4)', () => {
+    const target = exportTarget('./providers/*');
+    const esm = target.import.replace('*', 'meta-whatsapp');
+    const dts = target.types.replace('*', 'meta-whatsapp');
+    expect(fs.existsSync(distFile(esm))).toBe(true);
+    expect(fs.existsSync(distFile(dts))).toBe(true);
+    for (const part of ['graph', 'webhook']) {
+      expect(fs.existsSync(distFile(`./dist/providers/meta-whatsapp/${part}.js`))).toBe(true);
+    }
+  });
+
+  it('exports metaWhatsApp as a function from the built ./providers/meta-whatsapp entry point (Issue #4)', async () => {
+    const esm = exportTarget('./providers/*').import.replace('*', 'meta-whatsapp');
+    expect(fs.existsSync(distFile(esm))).toBe(true);
+    const provider = await loadExport('./providers/meta-whatsapp');
+    expect(typeof provider.metaWhatsApp).toBe('function');
+  });
+
+  it('keeps meta-whatsapp out of the root bundle: nothing reachable from another entry imports it (Issue #4)', () => {
+    const pkg = readPackageJson();
+    const providerTarget = exportTarget('./providers/*');
+    const providerDirs = fs
+      .readdirSync(distFile('./dist/providers'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name !== 'meta-whatsapp')
+      .map((entry) => entry.name);
+
+    const roots = [
+      ...Object.entries(pkg.exports)
+        .filter(([key]) => key !== './providers/*')
+        .map(([, target]) => target.import),
+      ...providerDirs.map((name) => providerTarget.import.replace('*', () => name)),
+    ];
+
+    const reachable = walkImportGraph(roots.map((relative) => distFile(relative)));
+    const offenders = [...reachable].filter((file) =>
+      file.includes(path.join('providers', 'meta-whatsapp') + path.sep),
+    );
+    expect(offenders).toEqual([]);
   });
 });
 

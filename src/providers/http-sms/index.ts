@@ -6,6 +6,7 @@
  * @module
  */
 
+import { formatHttpError, isRetryableStatus } from '../shared.js';
 import type { OutboundMeta, Provider, RenderedSms, SendResult, StatusEvent } from '../types.js';
 
 /**
@@ -118,15 +119,6 @@ async function parseResponsePayload(response: Response): Promise<{ text: string;
   return { text, json: undefined };
 }
 
-function isDefaultRetryable(status: number): boolean {
-  return status === 429 || (status >= 500 && status < 600);
-}
-
-function formatErrorMessage(status: number, responseText: string): string {
-  const snippet = responseText.slice(0, 200);
-  return snippet.length > 0 ? `${status} ${snippet}` : String(status);
-}
-
 /**
  * Creates a generic HTTP SMS provider.
  *
@@ -179,11 +171,11 @@ export function httpSms(c: HttpSmsOptions): Provider<RenderedSms> {
 
       const isRetryable = c.retryable
         ? c.retryable(response, payload.json)
-        : isDefaultRetryable(response.status);
+        : isRetryableStatus(response.status);
 
       return {
         ok: false,
-        error: formatErrorMessage(response.status, payload.text),
+        error: formatHttpError(response.status, payload.text),
         retryable: isRetryable,
       };
     },
