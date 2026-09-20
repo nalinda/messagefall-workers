@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from 'bun:test';
 
-import { decodeRfc2047, loadBuildMimeMessage } from '../helpers/gmail.js';
+import { decodeRfc2047, loadBuildMimeMessage } from '../../helpers/gmail.js';
 
 describe('MIME message builder (Issue #20)', () => {
   it('builds a text-only MIME message with required headers and CRLF line endings', async () => {

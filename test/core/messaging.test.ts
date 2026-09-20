@@ -1,13 +1,11 @@
 /**
- * Basic tests for messagefall-workers.
- *
- * These tests verify the core functionality works as expected.
+ * Tests for createMessaging: provider wiring, sends and status.
  */
 
 import { describe, expect, it } from 'bun:test';
 
-import { createMessaging, defineTemplates, type Provider, type RenderedSms } from '../src/index.js';
-import { captureConsole, newEnv, pingTemplates as templates } from './helpers/messaging.js';
+import { createMessaging, defineTemplates, type Provider, type RenderedSms } from '../../src/index.js';
+import { captureConsole, newEnv, pingTemplates as templates } from '../helpers/messaging.js';
 
 function stubSms(name: string): Provider<RenderedSms> & { calls: number } {
   const provider = {
