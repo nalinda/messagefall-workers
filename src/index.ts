@@ -7,7 +7,10 @@
  * @module
  */
 
+import type { ExecutionContext } from '@cloudflare/workers-types';
+
 import { DEFAULT_POLICY } from './core/policy.js';
+import { createWebhookHandler } from './core/webhook.js';
 import type {
   DeliveryOverride,
   DeliveryPolicy,
@@ -19,6 +22,7 @@ import type {
 
 export * from './core/policy.js';
 export * from './core/status.js';
+export * from './core/webhook.js';
 export * from './providers/index.js';
 export type { AnyRendered } from './templates.js';
 export * from './templates.js';
@@ -175,6 +179,14 @@ export function createMessaging<Env = MessagingEnv>(
   const env = mergedConfig.env ?? ({} as Env);
   registerProviders(mergedConfig.providers, env, state.providers);
 
+  const webhookHandler = createWebhookHandler({
+    providers: state.providers,
+    kv: mergedConfig.kv,
+    env: (mergedConfig.env ?? env) as Record<string, unknown>,
+    onStatus: mergedConfig.onStatus,
+    onStatusApplied: mergedConfig.onStatusApplied,
+  });
+
   return {
     ...state,
     send: (_templateId: string, _opts: unknown) =>
@@ -183,8 +195,8 @@ export function createMessaging<Env = MessagingEnv>(
         messageId: `msg_${Date.now()}`,
       }),
     status: (_id: string) => Promise.resolve(null),
-    handleWebhook: (_provider: string, _request: Request) =>
-      Promise.resolve(new Response('OK', { status: 200 })),
+    handleWebhook: (provider: string, request: Request, ctx?: ExecutionContext) =>
+      webhookHandler(provider, request, ctx),
   };
 }
 

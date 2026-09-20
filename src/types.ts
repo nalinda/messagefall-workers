@@ -7,6 +7,7 @@
 import type { KVNamespace } from '@cloudflare/workers-types';
 
 import type { DeliveryOverride, DeliveryPolicy } from './core/policy.js';
+import type { StatusApplied } from './core/webhook.js';
 import type { Channel, DeliveryStatus, Provider } from './providers/types.js';
 import type { TemplateDef } from './templates.js';
 
@@ -84,6 +85,8 @@ export type {
   StatusStoreOptions,
 } from './core/status.js';
 export { DEFAULT_STATUS_TTL, deriveOverallStatus, kvStatusStore } from './core/status.js';
+export type { StatusApplied, WebhookDispatchOptions, WebhookHandler } from './core/webhook.js';
+export { createWebhookHandler, handleWebhook } from './core/webhook.js';
 
 /**
  * Message status details.
@@ -152,6 +155,7 @@ export interface MessagingConfig<Env = MessagingEnv> {
   fallbackTimeoutMs?: number;
   statusTtl?: number;
   onStatus?: (event: unknown) => void | Promise<void>;
+  onStatusApplied?: (event: StatusApplied) => void | Promise<void>;
   basePath?: string;
   env?: Env;
 }

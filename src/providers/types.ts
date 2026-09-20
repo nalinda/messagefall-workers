@@ -141,6 +141,25 @@ export type SendResult =
     };
 
 /**
+ * Options passed to a provider's webhook parse method.
+ */
+export interface WebhookParseOptions {
+  /**
+   * Whether unsigned payload development bypass is enabled.
+   */
+  devUnsigned?: boolean;
+  /**
+   * Alias for devUnsigned.
+   */
+  unsigned?: boolean;
+  /**
+   * Alias for devUnsigned.
+   */
+  allowUnsigned?: boolean;
+  [key: string]: unknown;
+}
+
+/**
  * Provider interface contract.
  *
  * A provider without a `webhook` leaves attempts in the `sent` status
@@ -170,7 +189,7 @@ export interface Provider<R = unknown> {
     /**
      * Parse webhook delivery status payload into status events. Throws to reject unsigned/invalid payloads.
      */
-    parse(request: Request): Promise<StatusEvent[]>;
+    parse(request: Request, options?: WebhookParseOptions): Promise<StatusEvent[]>;
   };
   /**
    * Optional direct status lookup by message ID.
