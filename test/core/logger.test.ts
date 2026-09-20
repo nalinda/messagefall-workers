@@ -18,17 +18,20 @@ import path from 'node:path';
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
 
+import {
+  createLogger,
+  type LogEvent,
+  type LogFields,
+  type Logger,
+} from '../../src/core/logger.js';
 import { createMessaging } from '../../src/core/messaging.js';
+import { scrubError } from '../../src/core/redact.js';
 import type { Channel, Provider, RenderedSms } from '../../src/providers/types.js';
 import { defineTemplates, render } from '../../src/templates.js';
 import {
   assertType,
   type Expect,
   type Extends,
-  loadLoggerApi,
-  type LogEvent,
-  type LogFields,
-  type Logger,
   type Not,
 } from '../helpers/logger.js';
 import { captureConsole, memoryKV } from '../helpers/messaging.js';
@@ -147,10 +150,9 @@ describe('Issue #10: No message bodies in logs, enforced in code', () => {
       expect(typeof assertType).toBe('function');
     });
 
-    it('creates a logger that formats structured JSON records to the provided sink', async () => {
-      const api = await loadLoggerApi();
+    it('creates a logger that formats structured JSON records to the provided sink', () => {
       const sinkLines: string[] = [];
-      const logger = api.createLogger((line) => {
+      const logger = createLogger((line) => {
         sinkLines.push(line);
       });
 
@@ -180,12 +182,11 @@ describe('Issue #10: No message bodies in logs, enforced in code', () => {
       expect(parsed2['level']).toBe('error');
     });
 
-    it('creates a logger with default JSON console sink when no custom sink is provided', async () => {
-      const api = await loadLoggerApi();
+    it('creates a logger with default JSON console sink when no custom sink is provided', () => {
       const { logs, restore } = captureConsole(['log', 'info', 'warn', 'error']);
 
       try {
-        const logger = api.createLogger();
+        const logger = createLogger();
         logger.info('timer.armed', { id: 'msg_01JXYZ', count: 30 });
 
         expect(logs.length).toBeGreaterThan(0);
@@ -199,15 +200,14 @@ describe('Issue #10: No message bodies in logs, enforced in code', () => {
       }
     });
 
-    it('scrubs vendor error strings removing substrings matching rendered body, code, subject, and params', async () => {
-      const api = await loadLoggerApi();
-      expect(typeof api.scrubError).toBe('function');
+    it('scrubs vendor error strings removing substrings matching rendered body, code, subject, and params', () => {
+      expect(typeof scrubError).toBe('function');
 
       const rawVendorError =
         'Vendor Gateway error: message payload "Your secret code is 482913" failed due to route error 482913';
       const sensitive = ['Your secret code is 482913', '482913'];
 
-      const scrubbed = api.scrubError!(rawVendorError, sensitive);
+      const scrubbed = scrubError(rawVendorError, sensitive);
       expect(scrubbed).toBeDefined();
       expect(scrubbed).not.toContain('482913');
       expect(scrubbed).not.toContain('Your secret code is 482913');
