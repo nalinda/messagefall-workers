@@ -4,8 +4,6 @@
  * @module
  */
 
-import type { KVNamespace } from '@cloudflare/workers-types';
-
 export type {
   Channel,
   DeliveryStatus,
@@ -84,12 +82,5 @@ export type {
 export { DEFAULT_STATUS_TTL, deriveOverallStatus, kvStatusStore } from './core/status.js';
 export type { StatusApplied, WebhookDispatchOptions, WebhookHandler } from './core/webhook.js';
 export { createWebhookHandler, handleWebhook } from './core/webhook.js';
-
-/**
- * Base environment bindings for messaging.
- */
-export interface MessagingEnv {
-  MESSAGES_KV?: KVNamespace;
-  FALLBACK_TIMER?: unknown;
-  [key: string]: unknown;
-}
+export type { MessagingEnv } from './env.js';
+export { validateEnv } from './env.js';

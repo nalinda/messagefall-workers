@@ -260,7 +260,7 @@ export function createMessaging<T extends Templates<any>>(
   env: MessagingEnv,
   options: MessagingOptions<T>
 ): Messaging<T> {
-  const kv = options.kv ?? env.MESSAGES_KV;
+  const kv = options.kv ?? (env as Partial<MessagingEnv>).MESSAGES_KV;
   if (!kv) {
     throw new MessagingConfigError('createMessaging needs options.kv or env.MESSAGES_KV');
   }

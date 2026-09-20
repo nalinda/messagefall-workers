@@ -89,9 +89,13 @@ interface InputPayload {
 }
 
 function cancelTimer(env: MessagingEnv, optionsTimer: unknown, id: string): void {
-  const timer = (optionsTimer ?? env.FALLBACK_TIMER) as MockTimerCandidate | undefined;
+  const rawTimer = optionsTimer ?? env.FALLBACK_TIMER;
+  if (!rawTimer || typeof rawTimer !== 'object') {
+    return;
+  }
+  const timer = rawTimer as MockTimerCandidate;
   try {
-    timer?.cancel?.(id);
+    timer.cancel?.(id);
   } catch {
     // Best-effort cancellation
   }
@@ -104,9 +108,13 @@ function rearmTimer(
   timeoutMs: number,
   inputPayload?: unknown
 ): void {
-  const timer = (optionsTimer ?? env.FALLBACK_TIMER) as MockTimerCandidate | undefined;
+  const rawTimer = optionsTimer ?? env.FALLBACK_TIMER;
+  if (!rawTimer || typeof rawTimer !== 'object') {
+    return;
+  }
+  const timer = rawTimer as MockTimerCandidate;
   try {
-    timer?.setState?.(id, timeoutMs, inputPayload);
+    timer.setState?.(id, timeoutMs, inputPayload);
   } catch {
     // Best-effort rearming
   }

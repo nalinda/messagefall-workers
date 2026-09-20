@@ -845,7 +845,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
         expect(record!.status).toBe('sent');
         expect(record!.chain.attempts).toHaveLength(1);
         expect(record!.chain.attempts[0]).toMatchObject({ providerId: 'sms-after-retry' });
-        expect(await kvStatusStore(env.MESSAGES_KV!).lookupProviderId('sms-after-retry')).toEqual({
+        expect(await kvStatusStore(env.MESSAGES_KV).lookupProviderId('sms-after-retry')).toEqual({
           id,
           channel: 'sms',
           provider: 'rec-sms',
@@ -1078,7 +1078,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
         input: INPUT,
       });
 
-      const store = kvStatusStore(env.MESSAGES_KV!);
+      const store = kvStatusStore(env.MESSAGES_KV);
       // While whatsapp is still held open, the email attempt is already on the record and indexed.
       await waitFor(() => events.length === 1);
       expect(wa.calls).toHaveLength(1);
@@ -1389,7 +1389,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
         input: INPUT,
       });
 
-      const store = kvStatusStore(env.MESSAGES_KV!);
+      const store = kvStatusStore(env.MESSAGES_KV);
       expect(await store.lookupProviderId('wa-pid-1')).toEqual({
         id,
         channel: 'whatsapp',
@@ -1455,7 +1455,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
         providerId: 'otp-pid',
         status: 'sent',
       });
-      expect(await kvStatusStore(env.MESSAGES_KV!).lookupProviderId('otp-pid')).toEqual({
+      expect(await kvStatusStore(env.MESSAGES_KV).lookupProviderId('otp-pid')).toEqual({
         id,
         channel: 'sms',
         provider: 'otp-sms',

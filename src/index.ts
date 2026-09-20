@@ -7,41 +7,20 @@
  * @module
  */
 
-import type { MessagingOptions } from './core/messaging.js';
-import type { MessagingEnv, Provider } from './types.js';
+import type { Provider } from './providers/types.js';
 
+export * from './app/hono.js';
 export * from './core/fallback.js';
 export * from './core/logger.js';
 export * from './core/messaging.js';
 export * from './core/policy.js';
 export * from './core/status.js';
 export * from './core/webhook.js';
+export * from './env.js';
 export * from './providers/index.js';
 export type { AnyRendered } from './templates.js';
 export * from './templates.js';
 export * from './types.js';
-
-/**
- * Create a ready-to-deploy messaging application (Hono-compatible fetch handler).
- *
- * @param _options - Application configuration options.
- * @returns An application object with a `fetch` method.
- */
-export function createMessagingApp<Env extends MessagingEnv = MessagingEnv>(
-  _options?: MessagingOptions
-): {
-  fetch: (request: Request, env?: Env, ctx?: unknown) => Promise<Response> | Response;
-} {
-  return {
-    fetch: (request: Request) => {
-      const url = new URL(request.url);
-      if (url.pathname === '/send' && request.method === 'POST') {
-        return Response.json({ ok: true, id: `msg_${Date.now()}` });
-      }
-      return new Response('OK', { status: 200 });
-    },
-  };
-}
 
 /**
  * Multi-provider routing helper for a single channel.

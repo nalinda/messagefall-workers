@@ -11,7 +11,7 @@ import type { StatusStore } from '../../src/core/status.js';
 import { createMessaging } from '../../src/index.js';
 import type { Channel, Provider, StatusEvent } from '../../src/providers/types.js';
 import type { MessagingEnv } from '../../src/types.js';
-import { pingTemplates } from './messaging.js';
+import { memoryKV, pingTemplates } from './messaging.js';
 
 /**
  * Event emitted when a delivery status update is applied to an attempt.
@@ -128,7 +128,7 @@ export async function loadWebhookHandler(
   for (const provider of list) {
     (set as Record<string, Provider>)[provider.channel] = provider;
   }
-  const env: MessagingEnv = { ...options.env };
+  const env = { MESSAGES_KV: options.kv ?? memoryKV(), ...options.env } as MessagingEnv;
   const messaging = createMessaging(env, {
     templates: pingTemplates,
     providers: () => set,

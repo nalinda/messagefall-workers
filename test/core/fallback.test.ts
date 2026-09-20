@@ -13,7 +13,7 @@
  * - Immediate send failure during fallback recurses to next channel until exhausted.
  */
 
-import type { KVNamespace } from '@cloudflare/workers-types';
+import type { DurableObjectNamespace, KVNamespace } from '@cloudflare/workers-types';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
 import type { DeliveryPolicy } from '../../src/core/policy.js';
@@ -163,7 +163,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       const args: AdvanceChainArgs = {
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv, FALLBACK_TIMER: mockTimer },
+        env: { MESSAGES_KV: kv, FALLBACK_TIMER: mockTimer as unknown as DurableObjectNamespace },
         options: {
           templates: testTemplates,
           providers: [waProvider, smsProvider],
@@ -313,7 +313,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv, FALLBACK_TIMER: mockTimer },
+        env: { MESSAGES_KV: kv, FALLBACK_TIMER: mockTimer as unknown as DurableObjectNamespace },
         options: {
           templates: testTemplates,
           providers: [waProvider, smsProvider],
@@ -381,7 +381,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv, FALLBACK_TIMER: mockTimer },
+        env: { MESSAGES_KV: kv, FALLBACK_TIMER: mockTimer as unknown as DurableObjectNamespace },
         options: {
           templates: testTemplates,
           providers: [waProvider, smsProvider],
@@ -448,7 +448,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv, FALLBACK_TIMER: mockTimer },
+        env: { MESSAGES_KV: kv, FALLBACK_TIMER: mockTimer as unknown as DurableObjectNamespace },
         options: {
           templates: testTemplates,
           providers: [],
