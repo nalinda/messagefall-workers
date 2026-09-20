@@ -7,10 +7,11 @@
 import type { DurableObjectNamespace, KVNamespace } from '@cloudflare/workers-types';
 
 import type { MessagingEnv } from '../env.js';
-import { CHANNELS, type Provider, type StatusEvent } from '../providers/types.js';
+import type { Provider, StatusEvent } from '../providers/types.js';
 import type { InputOf, TemplateDef, Templates } from '../templates.js';
 import { advanceChain } from './fallback.js';
 import { DEFAULT_POLICY, type DeliveryOverride, type DeliveryPolicy } from './policy.js';
+import { validateProviderSet } from './provider-set.js';
 import {
   notifyStatus,
   type ProviderSet,
@@ -26,6 +27,7 @@ import {
 } from './status.js';
 import { createWebhookHandler } from './webhook.js';
 
+export { ProviderConfigError } from './provider-set.js';
 export type { ProviderSet, SendContext, StatusCallbackEvent } from './send.js';
 export { E164, RecipientError } from './send.js';
 
@@ -96,74 +98,6 @@ export class UnknownTemplateError extends Error {
 type ProviderFactory = (env: MessagingEnv) => ProviderSet;
 
 const providerCache = new WeakMap<MessagingEnv, ProviderSet>();
-
-/**
- * Thrown by createMessaging when the provider set built from env is invalid.
- */
-export class ProviderConfigError extends Error {
-  readonly problems: string[];
-
-  constructor(problems: string[]) {
-    const bullets = problems.map((problem) => `- ${problem}`).join('\n');
-    super(`Provider configuration validation failed:\n${bullets}`);
-    this.name = 'ProviderConfigError';
-    this.problems = problems;
-  }
-}
-
-function missingProviderFields(p: Partial<Provider>): string[] {
-  const missing: string[] = [];
-  if (!p.name) missing.push('name');
-  if (!p.channel) missing.push('channel');
-  if (typeof p.send !== 'function') missing.push('send');
-  return missing;
-}
-
-const KNOWN_SLOTS: ReadonlySet<string> = new Set(CHANNELS);
-
-/**
- * Problems with one provider in isolation: unknown slot, missing fields, channel/slot mismatch.
- */
-function slotProblems(slot: string, p: Partial<Provider>): string[] {
-  const problems: string[] = [];
-  if (!KNOWN_SLOTS.has(slot)) {
-    // Same union `providerFor` switches on; anything else could never be sent through.
-    problems.push(
-      `Provider slot "${slot}" is not a channel (expected one of ${CHANNELS.join(', ')})`
-    );
-  }
-  const missing = missingProviderFields(p);
-  if (missing.length > 0) {
-    problems.push(`Provider "${slot}" is missing required field(s): ${missing.join(', ')}`);
-  }
-  if (p.channel && p.channel !== slot) {
-    problems.push(
-      `Provider "${slot}" declares channel "${p.channel}" but is registered under the "${slot}" slot`
-    );
-  }
-  return problems;
-}
-
-function validateProviderSet(set: ProviderSet): void {
-  const problems: string[] = [];
-  const seen = new Set<string>();
-  for (const [slot, candidate] of Object.entries(set)) {
-    const p = candidate as Partial<Provider> | undefined;
-    if (!p) {
-      continue;
-    }
-    problems.push(...slotProblems(slot, p));
-    if (p.name && seen.has(p.name)) {
-      problems.push(`Duplicate provider name "${p.name}" configured across multiple providers`);
-    }
-    if (p.name) {
-      seen.add(p.name);
-    }
-  }
-  if (problems.length > 0) {
-    throw new ProviderConfigError(problems);
-  }
-}
 
 /**
  * Deliberately keyed on the KV namespace (then TTL), not on `env`: `options.kv` may differ from

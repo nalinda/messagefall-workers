@@ -16,6 +16,7 @@ import type {
 } from '../providers/types.js';
 import {
   type AnyRendered,
+  assertNoOtpWhatsAppText,
   definedChannels,
   renderValidated,
   type TemplateDef,
@@ -525,16 +526,7 @@ function validateSendRequest(req: SendRequest): void {
   if (!E164.test(req.to)) {
     throw new RecipientError(req.to);
   }
-  if (
-    req.template.kind === 'otp' &&
-    req.template.whatsapp &&
-    'text' in req.template.whatsapp &&
-    typeof req.template.whatsapp.text === 'function'
-  ) {
-    throw new Error(
-      `Template "${req.templateName}" of kind "otp" must not use whatsapp.text (Meta requires an authentication template for codes)`
-    );
-  }
+  assertNoOtpWhatsAppText(req.templateName, req.template);
 }
 
 function resolveEffectivePolicy(
