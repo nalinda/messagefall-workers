@@ -273,6 +273,54 @@ describe('metaWhatsApp provider: webhook', () => {
       expect(await rejectionOf(webhook().parse(request))).toBeInstanceOf(Error);
     });
 
+    it.each([
+      ['missing', undefined],
+      ['non-numeric', 'not-a-timestamp'],
+    ])(
+      'keeps a status with a %s timestamp and falls back to the receipt time for at',
+      async (_label, timestamp) => {
+        const status: Record<string, unknown> = {
+          id: 'wamid.NOTIME1',
+          status: 'failed',
+          recipient_id: '94771234567',
+          errors: [{ code: 131_026, title: 'Message undeliverable' }],
+        };
+        if (timestamp !== undefined) status.timestamp = timestamp;
+        const payload = {
+          object: 'whatsapp_business_account',
+          entry: [
+            {
+              id: 'WABA_ID',
+              changes: [
+                {
+                  field: 'messages',
+                  value: { messaging_product: 'whatsapp', metadata: METADATA, statuses: [status] },
+                },
+              ],
+            },
+          ],
+        };
+        const request = await signedRequest(payload, testConfig.appSecret);
+
+        const before = Date.now();
+        const events = await webhook().parse(request);
+        const after = Date.now();
+
+        expect(events).toHaveLength(1);
+        const [event] = events;
+        expect(event).toMatchObject({
+          providerId: 'wamid.NOTIME1',
+          status: 'failed',
+          error: 'Message undeliverable',
+        });
+        const at = Date.parse(event.at);
+        expect(Number.isNaN(at)).toBe(false);
+        expect(new Date(at).toISOString()).toBe(event.at);
+        expect(at).toBeGreaterThanOrEqual(before - 1000);
+        expect(at).toBeLessThanOrEqual(after + 1000);
+      },
+    );
+
     it('yields [] for a signed message-received (non-status) payload', async () => {
       const request = await signedRequest(messageReceivedPayload(), testConfig.appSecret);
 
