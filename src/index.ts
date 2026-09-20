@@ -7,7 +7,8 @@
  * @module
  */
 
-import type { MessagingConfig, MessagingEnv, Provider } from './types.js';
+import type { MessagingOptions } from './core/messaging.js';
+import type { MessagingEnv, Provider } from './types.js';
 
 export * from './core/messaging.js';
 export * from './core/policy.js';
@@ -23,8 +24,8 @@ export * from './types.js';
  * @param _options - Application configuration options.
  * @returns An application object with a `fetch` method.
  */
-export function createMessagingApp<Env = MessagingEnv>(
-  _options?: MessagingConfig<Env>
+export function createMessagingApp<Env extends MessagingEnv = MessagingEnv>(
+  _options?: MessagingOptions
 ): {
   fetch: (request: Request, env?: Env, ctx?: unknown) => Promise<Response> | Response;
 } {

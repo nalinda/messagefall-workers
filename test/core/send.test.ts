@@ -17,6 +17,7 @@ import { z } from 'zod';
 
 import { createMessaging, RecipientError } from '../../src/core/messaging.js';
 import { PolicyError } from '../../src/core/policy.js';
+import { NO_PROVIDER } from '../../src/core/send.js';
 import { kvStatusStore } from '../../src/core/status.js';
 import { consoleProvider } from '../../src/providers/console/index.js';
 import type {
@@ -477,6 +478,52 @@ describe('Issue #3: createMessaging send pipeline', () => {
       } finally {
         captured.restore();
       }
+    });
+  });
+
+  describe('resolved channel with no provider configured', () => {
+    it('records a failed attempt under NO_PROVIDER, fires onStatus, and advances the chain', async () => {
+      // whatsapp is in the policy and defined on the template, but no whatsapp provider exists.
+      const sms = recordingProvider<RenderedSms>('sms', 'rec-sms', [
+        { ok: true, providerId: 'sms-after-none' },
+      ]);
+      const events: StatusCallbackEvent[] = [];
+
+      const messaging = createMessaging(newEnv(), {
+        templates,
+        providers: () => ({ sms }),
+        delivery: { fallback: ['whatsapp', 'sms'], always: [] },
+        onStatus: (event) => {
+          events.push(event);
+        },
+      });
+
+      const { id } = await messaging.send({
+        template: 'orderUpdate',
+        to: TO,
+        locale: 'en',
+        input: INPUT,
+      });
+
+      const record = await messaging.status(id);
+      expect(record!.chain.attempts).toHaveLength(2);
+      expect(record!.chain.attempts[0]).toMatchObject({
+        channel: 'whatsapp',
+        provider: NO_PROVIDER,
+        status: 'failed',
+      });
+      expect(record!.chain.attempts[0].error).toContain('whatsapp');
+      expect(record!.chain.attempts[1]).toMatchObject({
+        channel: 'sms',
+        provider: 'rec-sms',
+        providerId: 'sms-after-none',
+        status: 'sent',
+      });
+      expect(record!.status).toBe('sent');
+      expect(events).toEqual([
+        { id, channel: 'whatsapp', provider: NO_PROVIDER, status: 'failed' },
+        { id, channel: 'sms', provider: 'rec-sms', status: 'sent' },
+      ]);
     });
   });
 

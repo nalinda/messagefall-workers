@@ -329,21 +329,36 @@ describe('httpSms provider', () => {
     expect(capturedInit?.body).toBe(expectedBody);
   });
 
-  it('registers properly with createMessaging and supports custom name', () => {
+  it('registers properly with createMessaging and supports custom name', async () => {
     const provider = httpSms({
       name: 'regional-gateway-lk',
       url: 'https://sms.example.lk/send',
+      messageId: (json: unknown) => (json as { id?: string }).id,
     });
 
     expect(provider.name).toBe('regional-gateway-lk');
     expect(provider.channel).toBe('sms');
 
+    let capturedUrl: string | undefined;
+    mockFetch((url) => {
+      capturedUrl = url instanceof Request ? url.url : String(url);
+      return Promise.resolve(Response.json({ id: 'gw-777' }));
+    });
     const messaging = createMessaging(newEnv(), {
       templates: pingTemplates,
       providers: () => ({ sms: provider }),
     });
 
-    expect(typeof messaging.send).toBe('function');
+    const { id } = await messaging.send({ template: 'ping', to: '+94771234567', locale: 'en', input: undefined });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(capturedUrl).toBe('https://sms.example.lk/send');
+    const record = await messaging.status(id);
+    expect(record!.chain.attempts[0]).toMatchObject({
+      channel: 'sms',
+      provider: 'regional-gateway-lk',
+      providerId: 'gw-777',
+      status: 'sent',
+    });
   });
 
   it('is not present in the root bundle exports', async () => {

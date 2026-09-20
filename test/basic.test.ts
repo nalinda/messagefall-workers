@@ -9,20 +9,32 @@ import { describe, expect, it } from 'bun:test';
 import { createMessaging, defineTemplates, type Provider, type RenderedSms } from '../src/index.js';
 import { newEnv, pingTemplates as templates } from './helpers/messaging.js';
 
-function stubSms(name: string): Provider<RenderedSms> {
-  return { name, channel: 'sms', send: () => Promise.resolve({ ok: true }) };
+function stubSms(name: string): Provider<RenderedSms> & { calls: number } {
+  const provider = {
+    name,
+    channel: 'sms' as const,
+    calls: 0,
+    send: () => {
+      provider.calls += 1;
+      return Promise.resolve({ ok: true as const, providerId: `${name}-1` });
+    },
+  };
+  return provider;
 }
 
 describe('createMessaging', () => {
-  it('creates a messaging instance with send and status', () => {
+  it('sends through the registered provider and exposes the record via status', async () => {
+    const stub = stubSms('stub');
     const messaging = createMessaging(newEnv(), {
       templates,
-      providers: () => ({ sms: stubSms('stub') }),
+      providers: () => ({ sms: stub }),
     });
 
-    expect(messaging).toBeDefined();
-    expect(typeof messaging.send).toBe('function');
-    expect(typeof messaging.status).toBe('function');
+    const { id } = await messaging.send({ template: 'ping', to: '+14155550123', locale: 'en', input: undefined });
+
+    expect(stub.calls).toBe(1);
+    const record = await messaging.status(id);
+    expect(record!.chain.attempts[0]).toMatchObject({ provider: 'stub', providerId: 'stub-1', status: 'sent' });
   });
 });
 
