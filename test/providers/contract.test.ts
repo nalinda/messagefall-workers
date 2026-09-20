@@ -6,9 +6,10 @@
  *   console provider is assignable to the `sms` slot of the `providers` option.
  */
 
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, spyOn } from 'bun:test';
 
-import { createMessaging } from '../../src/index.js';
+import { createMessaging, defineTemplates } from '../../src/index.js';
+import { newEnv, pingTemplates as templates } from '../helpers/messaging.js';
 import type {
   DeliveryStatus,
   OutboundMeta,
@@ -29,7 +30,7 @@ function assertType<T>(_value: T): void {
 }
 
 describe('Provider contract type-level specification', () => {
-  it('allows an object literal implementing Provider<RenderedSms> to be assigned to the sms provider slot without console provider import', () => {
+  it('allows an object literal implementing Provider<RenderedSms> to be assigned to the sms provider slot without console provider import', async () => {
     // Implement custom SMS provider without importing console provider
     const customSmsProvider: Provider<RenderedSms> = {
       name: 'my-custom-sms',
@@ -77,14 +78,17 @@ describe('Provider contract type-level specification', () => {
     >;
     assertType<TestAssignableToSmsSlot>(true);
 
-    // Runtime assertion: Register custom SMS provider with createMessaging
-    const messaging = createMessaging({
-      providers: providersFactory,
-    });
-    expect(messaging.providers.get('my-custom-sms')).toBeDefined();
+    // Runtime assertion: the registered custom provider is the one a send goes through.
+    const sendSpy = spyOn(customSmsProvider, 'send');
+    const messaging = createMessaging(newEnv(), { templates, providers: providersFactory });
+    const { id } = await messaging.send({ template: 'ping', to: '+14155550123', locale: 'en', input: undefined });
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy.mock.calls[0][0]).toMatchObject({ to: '+14155550123', messageId: id, text: 'ping' });
+    const record = await messaging.status(id);
+    expect(record!.chain.attempts[0]).toMatchObject({ provider: 'my-custom-sms', providerId: `gw_${id}` });
   });
 
-  it('allows Provider<RenderedWhatsApp> and Provider<RenderedEmail> in their respective slots', () => {
+  it('allows Provider<RenderedWhatsApp> and Provider<RenderedEmail> in their respective slots', async () => {
     const customWhatsAppProvider: Provider<RenderedWhatsApp> = {
       name: 'meta-whatsapp-direct',
       channel: 'whatsapp',
@@ -141,12 +145,26 @@ describe('Provider contract type-level specification', () => {
     assertType<TestWaAssignable>(true);
     assertType<TestEmailAssignable>(true);
 
-    // Runtime assertion: Register custom WhatsApp & Email providers with createMessaging
-    const messaging = createMessaging({
+    // Runtime assertion: both registered providers are the ones a send goes through.
+    const waSpy = spyOn(customWhatsAppProvider, 'send');
+    const emailSpy = spyOn(customEmailProvider, 'send');
+    const messaging = createMessaging(newEnv(), {
+      templates: defineTemplates({
+        hello: {
+          kind: 'notification',
+          whatsapp: { text: () => 'hi' },
+          email: { subject: () => 'hi', text: () => 'hi' },
+        },
+      }),
       providers: providersFactory,
+      delivery: { fallback: ['whatsapp'], always: ['email'] },
     });
-    expect(messaging.providers.get('meta-whatsapp-direct')).toBeDefined();
-    expect(messaging.providers.get('direct-smtp-email')).toBeDefined();
+    const { id } = await messaging.send({ template: 'hello', to: '+14155550123', locale: 'en', input: undefined });
+    expect(waSpy).toHaveBeenCalledTimes(1);
+    expect(emailSpy).toHaveBeenCalledTimes(1);
+    const record = await messaging.status(id);
+    expect(record!.chain.attempts[0]).toMatchObject({ provider: 'meta-whatsapp-direct' });
+    expect(record!.always[0]).toMatchObject({ provider: 'direct-smtp-email', providerId: 'email_msg_123' });
   });
 
   it('verifies SendResult discriminant shape and StatusEvent fields', () => {

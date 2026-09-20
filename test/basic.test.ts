@@ -6,46 +6,125 @@
 
 import { describe, expect, it } from 'bun:test';
 
-import { createMessaging, defineTemplates } from '../src/index.js';
-import { createMockKV } from './helpers/index.js';
+import { createMessaging, defineTemplates, type Provider, type RenderedSms } from '../src/index.js';
+import { captureConsole, newEnv, pingTemplates as templates } from './helpers/messaging.js';
+
+function stubSms(name: string): Provider<RenderedSms> & { calls: number } {
+  const provider = {
+    name,
+    channel: 'sms' as const,
+    calls: 0,
+    send: () => {
+      provider.calls += 1;
+      return Promise.resolve({ ok: true as const, providerId: `${name}-1` });
+    },
+  };
+  return provider;
+}
 
 describe('createMessaging', () => {
-  it('creates a messaging state with stub provider', () => {
-    const config = {
-      kv: createMockKV(),
-      providers: [
-        {
-          id: 'stub',
-          config: {},
-          state: { kv: {} },
-        },
-      ],
-    };
+  it('sends through the registered provider and exposes the record via status', async () => {
+    const stub = stubSms('stub');
+    const messaging = createMessaging(newEnv(), {
+      templates,
+      providers: () => ({ sms: stub }),
+    });
 
-    const state = createMessaging(config);
+    const { id } = await messaging.send({ template: 'ping', to: '+14155550123', locale: 'en', input: undefined });
 
-    expect(state).toBeDefined();
-    expect(state.providers.size).toBe(1);
+    expect(stub.calls).toBe(1);
+    const record = await messaging.status(id);
+    expect(record!.chain.attempts[0]).toMatchObject({ provider: 'stub', providerId: 'stub-1', status: 'sent' });
   });
+});
 
-  it('registers the stub provider', () => {
-    const config = {
-      kv: createMockKV(),
-      providers: [
-        {
-          id: 'stub',
-          config: {},
-          state: { kv: {} },
+describe('createMessaging.handleWebhook', () => {
+  it('routes a provider status webhook to the record and reports it through onStatus', async () => {
+    const provider: Provider<RenderedSms> = {
+      name: 'hooked-sms',
+      channel: 'sms',
+      send: () => Promise.resolve({ ok: true, providerId: 'hooked-1' }),
+      webhook: {
+        parse: async (request) => {
+          const body = (await request.json()) as { id: string; status: 'delivered' };
+          return [{ providerId: body.id, status: body.status, at: '2026-09-20T00:00:00.000Z' }];
         },
-      ],
+      },
     };
+    const events: unknown[] = [];
+    const messaging = createMessaging(newEnv(), {
+      templates,
+      providers: () => ({ sms: provider }),
+      onStatus: (event) => {
+        events.push(event);
+      },
+    });
 
-    const state = createMessaging(config);
-    const provider = state.providers.get('stub');
+    const { id } = await messaging.send({ template: 'ping', to: '+14155550123', locale: 'en', input: undefined });
+    const response = await messaging.handleWebhook(
+      'hooked-sms',
+      new Request('https://worker.local/webhooks/hooked-sms', {
+        method: 'POST',
+        body: JSON.stringify({ id: 'hooked-1', status: 'delivered' }),
+      })
+    );
 
-    expect(provider).toBeDefined();
-    expect(provider?.id).toBe('stub');
-    expect(provider?.channel).toBe('whatsapp');
+    expect(response.status).toBe(200);
+    const record = await messaging.status(id);
+    expect(record!.chain.attempts[0]).toMatchObject({ providerId: 'hooked-1', status: 'delivered' });
+    expect(record!.status).toBe('delivered');
+    expect(events).toEqual([
+      { id, channel: 'sms', provider: 'hooked-sms', status: 'sent' },
+      { id, channel: 'sms', provider: 'hooked-sms', status: 'delivered' },
+    ]);
+    const unknown = await messaging.handleWebhook('nope', new Request('https://worker.local/x'));
+    expect(unknown.status).toBe(404);
+  });
+});
+
+describe('createMessaging.handleWebhook observer failures', () => {
+  it('logs a throwing onStatus per event, keeps applying the batch and still answers 200', async () => {
+    const provider: Provider<RenderedSms> = {
+      name: 'hooked-sms',
+      channel: 'sms',
+      send: () => Promise.resolve({ ok: true, providerId: 'hooked-2' }),
+      webhook: {
+        parse: () =>
+          Promise.resolve([
+            { providerId: 'hooked-2', status: 'delivered' as const, at: '2026-09-20T00:00:00.000Z' },
+            { providerId: 'hooked-2', status: 'read' as const, at: '2026-09-20T00:00:01.000Z' },
+          ]),
+      },
+    };
+    const seen: string[] = [];
+    const messaging = createMessaging(newEnv(), {
+      templates,
+      providers: () => ({ sms: provider }),
+      onStatus: (event) => {
+        seen.push(event.status);
+        if (event.status === 'delivered') {
+          throw new Error('observer exploded');
+        }
+      },
+    });
+    const captured = captureConsole(['warn']);
+
+    try {
+      const { id } = await messaging.send({ template: 'ping', to: '+14155550123', locale: 'en', input: undefined });
+      const response = await messaging.handleWebhook(
+        'hooked-sms',
+        new Request('https://worker.local/webhooks/hooked-sms', { method: 'POST' })
+      );
+
+      expect(response.status).toBe(200);
+      // Both events were applied and observed despite the first observer throwing.
+      expect(seen).toEqual(['sent', 'delivered', 'read']);
+      const record = await messaging.status(id);
+      expect(record!.chain.attempts[0].status).toBe('read');
+      expect(captured.logs.some((line) => line.includes(`onStatus failed id=${id}`))).toBe(true);
+    } finally {
+      captured.restore();
+    }
   });
 });
 

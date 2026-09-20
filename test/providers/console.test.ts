@@ -17,6 +17,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'bun:test';
 
 import { createMessaging } from '../../src/index.js';
+import { captureConsole, newEnv, pingTemplates } from '../helpers/messaging.js';
 import type {
   Channel,
   DeliveryStatus,
@@ -65,38 +66,6 @@ async function loadConsoleProvider(): Promise<
   } catch {
     return undefined;
   }
-}
-
-/**
- * Helper to intercept console outputs during send execution.
- */
-function captureConsole(): { logs: string[]; restore: () => void } {
-  const logs: string[] = [];
-  const originalLog = console.log;
-  const originalInfo = console.info;
-  const originalWarn = console.warn;
-  const originalError = console.error;
-
-  const intercept = (...args: unknown[]): void => {
-    logs.push(
-      args.map((a) => (typeof a === 'object' && a !== null ? JSON.stringify(a) : String(a))).join(' ')
-    );
-  };
-
-  console.log = intercept;
-  console.info = intercept;
-  console.warn = intercept;
-  console.error = intercept;
-
-  return {
-    logs,
-    restore: () => {
-      console.log = originalLog;
-      console.info = originalInfo;
-      console.warn = originalWarn;
-      console.error = originalError;
-    },
-  };
 }
 
 describe('Provider types and JSDoc documentation', () => {
@@ -270,6 +239,39 @@ describe('Console provider send test', () => {
       expect(allLogs).toContain('whatsapp');
       expect(allLogs).toContain('authTemplate');
       expect(allLogs).not.toContain(secretParam);
+    } finally {
+      capture.restore();
+    }
+  });
+
+  it('logs the Meta template name, never params or [object Object], when template is a config object', async () => {
+    const consoleProvider = await loadConsoleProvider();
+    expect(consoleProvider).toBeDefined();
+
+    const provider = consoleProvider ? consoleProvider({ channel: 'whatsapp' }) : null;
+    expect(provider).not.toBeNull();
+    if (!provider) return;
+
+    const capture = captureConsole();
+    try {
+      const code = '774411';
+      // What the send pipeline hands a WhatsApp provider for a template render: the rendered
+      // config occupies `template`, not the catalogue name.
+      const message = {
+        to: '+94775556666',
+        messageId: 'msg_wa_otp_004',
+        template: { name: 'auth_code', language: 'en_US', params: [code] },
+        kind: 'otp' as const,
+        locale: 'en',
+      } as unknown as Parameters<typeof provider.send>[0];
+
+      const result = await provider.send(message);
+      expect(result.ok).toBe(true);
+
+      const allLogs = capture.logs.join(' ');
+      expect(allLogs).toContain('template=auth_code');
+      expect(allLogs).not.toContain('[object Object]');
+      expect(allLogs).not.toContain(code);
     } finally {
       capture.restore();
     }
@@ -564,10 +566,13 @@ describe('Provider contract shape and optional methods', () => {
 });
 
 describe('Startup provider validation', () => {
+  const templates = pingTemplates;
+
   it('rejects duplicate provider names across configured providers with a bulleted error', () => {
     // If two providers share the same name (e.g. 'console'), startup validation must fail
     expect(() => {
-      createMessaging({
+      createMessaging(newEnv(), {
+        templates,
         providers: () => ({
           whatsapp: {
             name: 'console',
@@ -592,8 +597,10 @@ describe('Startup provider validation', () => {
 
   it('rejects a provider missing a required field (name, channel, send) with a bulleted error', () => {
     expect(() => {
-      createMessaging({
+      createMessaging(newEnv(), {
+        templates,
         providers: () => ({
+          // @ts-expect-error -- deliberately malformed provider
           sms: {
             // missing name and send
             channel: 'sms',
@@ -603,15 +610,55 @@ describe('Startup provider validation', () => {
     }).toThrow(/missing required/i);
   });
 
+  it('rejects a provider whose channel does not match the slot it is registered under', () => {
+    expect(() => {
+      createMessaging(newEnv(), {
+        templates,
+        providers: () => ({
+          sms: {
+            name: 'mislabelled',
+            channel: 'whatsapp' as 'sms',
+            send: async () => {
+              await Promise.resolve();
+              return { ok: true };
+            },
+          },
+        }),
+      });
+    }).toThrow(/"sms".*"whatsapp".*"sms"/);
+  });
+
+  it('rejects a provider registered under a slot that is not a channel', () => {
+    expect(() => {
+      createMessaging(newEnv(), {
+        templates,
+        providers: () =>
+          ({
+            push: {
+              name: 'push-thing',
+              channel: 'sms',
+              send: async () => {
+                await Promise.resolve();
+                return { ok: true };
+              },
+            },
+          }) as unknown as ReturnType<Parameters<typeof createMessaging>[1]['providers']>,
+      });
+    }).toThrow(/slot "push" is not a channel/);
+  });
+
   it('lists every validation problem at once in a bulleted error message', () => {
     let thrownError: Error | null = null;
     try {
-      createMessaging({
+      createMessaging(newEnv(), {
+        templates,
         providers: () => ({
+          // @ts-expect-error -- deliberately malformed provider
           whatsapp: {
             // missing channel and send
             name: 'dup-name',
           },
+          // @ts-expect-error -- deliberately malformed provider
           sms: {
             // duplicate name 'dup-name' and missing send
             name: 'dup-name',

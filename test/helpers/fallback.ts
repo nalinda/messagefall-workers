@@ -6,9 +6,10 @@
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 
+import type { MessagingOptions } from '../../src/core/messaging.js';
 import type { StatusStore } from '../../src/core/status.js';
 import type { Provider } from '../../src/providers/types.js';
-import type { MessagingConfig, MessagingEnv, TemplateDef } from '../../src/types.js';
+import type { MessagingEnv, TemplateDef } from '../../src/types.js';
 
 /**
  * Arguments for advancing the delivery fallback chain.
@@ -27,9 +28,10 @@ export interface AdvanceChainArgs<Env = MessagingEnv> {
    */
   env: Env;
   /**
-   * Messaging configuration options containing templates, providers, onStatus, etc.
+   * Messaging options containing templates, providers, onStatus, etc. The real
+   * `MessagingOptions` minus the fields the fallback tests supply in their own shape.
    */
-  options: MessagingConfig<Env> & {
+  options: Omit<Partial<MessagingOptions>, 'templates' | 'providers' | 'onStatus'> & {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     templates?: Record<string, TemplateDef<any>>;
     providers?: Record<string, Provider> | Provider[] | Map<string, Provider>;

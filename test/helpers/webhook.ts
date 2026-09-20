@@ -6,10 +6,12 @@
 
 import type { ExecutionContext, KVNamespace } from '@cloudflare/workers-types';
 
+import type { ProviderSet } from '../../src/core/messaging.js';
 import type { StatusStore } from '../../src/core/status.js';
 import { createMessaging } from '../../src/index.js';
 import type { Channel, Provider, StatusEvent } from '../../src/providers/types.js';
-import type { MessagingConfig } from '../../src/types.js';
+import type { MessagingEnv } from '../../src/types.js';
+import { pingTemplates } from './messaging.js';
 
 /**
  * Event emitted when a delivery status update is applied to an attempt.
@@ -118,13 +120,21 @@ export async function loadWebhookHandler(
     // webhook.js not yet implemented
   }
 
-  const messaging = createMessaging({
-    providers: options.providers as unknown as MessagingConfig['providers'],
+  // Fallback: the real createMessaging, whose providers are a per-channel set.
+  const list = Array.isArray(options.providers)
+    ? options.providers
+    : Object.values(options.providers ?? {});
+  const set: ProviderSet = {};
+  for (const provider of list) {
+    (set as Record<string, Provider>)[provider.channel] = provider;
+  }
+  const env: MessagingEnv = { ...options.env };
+  const messaging = createMessaging(env, {
+    templates: pingTemplates,
+    providers: () => set,
     kv: options.kv,
-    env: options.env,
-    onStatus: options.onStatus,
   });
 
-  return (providerName: string, request: Request, _ctx?: ExecutionContext) =>
-    messaging.handleWebhook(providerName, request);
+  return (providerName: string, request: Request, ctx?: ExecutionContext) =>
+    messaging.handleWebhook(providerName, request, ctx);
 }
