@@ -6,7 +6,7 @@
  * @module
  */
 
-import { formatHttpError, isRetryableStatus } from '../shared.js';
+import { formatHttpError, isRetryableStatus } from '../_shared/http.js';
 import type { OutboundMeta, Provider, RenderedSms, SendResult, StatusEvent } from '../types.js';
 
 /**
