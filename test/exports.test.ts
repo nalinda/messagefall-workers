@@ -42,6 +42,40 @@ function distFile(relative: string): string {
   return path.join(rootDir, relative);
 }
 
+// `from './x.js'` (static import/export) and `import('./x.js')` (dynamic).
+const STATIC_SPECIFIER = /\bfrom\s*['"]([^'"]+)['"]/g;
+const DYNAMIC_SPECIFIER = /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+
+/**
+ * Absolute paths of the relative modules `file` imports.
+ */
+function relativeImportsOf(file: string): string[] {
+  const source = fs.readFileSync(file, 'utf8');
+  const specifiers = [
+    ...source.matchAll(STATIC_SPECIFIER),
+    ...source.matchAll(DYNAMIC_SPECIFIER),
+  ].map((match) => match[1]);
+  return specifiers
+    .filter((specifier) => specifier.startsWith('.'))
+    .map((specifier) => path.resolve(path.dirname(file), specifier));
+}
+
+/**
+ * Walk the ESM import graph from the given absolute files, following only
+ * relative specifiers, and return every file reached (including the roots).
+ */
+function walkImportGraph(roots: string[]): Set<string> {
+  const seen = new Set<string>();
+  const queue = [...roots];
+  for (let file = queue.pop(); file !== undefined; file = queue.pop()) {
+    if (seen.has(file)) continue;
+    if (!fs.existsSync(file)) throw new Error(`import graph reached a missing file: ${file}`);
+    seen.add(file);
+    queue.push(...relativeImportsOf(file));
+  }
+  return seen;
+}
+
 async function loadExport(subpath: string): Promise<Record<string, unknown>> {
   if (subpath.startsWith('./providers/')) {
     const providerName = subpath.replace('./providers/', '');
@@ -186,18 +220,26 @@ describe('Entry points export documented functions', () => {
     expect(typeof provider.metaWhatsApp).toBe('function');
   });
 
-  it('keeps meta-whatsapp out of the root bundle: no root dist file imports it (Issue #4)', () => {
-    const rootFiles = [
-      './dist/index.js',
-      './dist/client/index.js',
-      './dist/durable/index.js',
-      './dist/providers/index.js',
+  it('keeps meta-whatsapp out of the root bundle: nothing reachable from another entry imports it (Issue #4)', () => {
+    const pkg = readPackageJson();
+    const providerTarget = exportTarget('./providers/*');
+    const providerDirs = fs
+      .readdirSync(distFile('./dist/providers'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name !== 'meta-whatsapp')
+      .map((entry) => entry.name);
+
+    const roots = [
+      ...Object.entries(pkg.exports)
+        .filter(([key]) => key !== './providers/*')
+        .map(([, target]) => target.import),
+      ...providerDirs.map((name) => providerTarget.import.replace('*', () => name)),
     ];
-    for (const file of rootFiles) {
-      const content = fs.readFileSync(distFile(file), 'utf8');
-      expect(content).not.toContain('meta-whatsapp');
-      expect(content).not.toContain('graph.facebook.com');
-    }
+
+    const reachable = walkImportGraph(roots.map((relative) => distFile(relative)));
+    const offenders = [...reachable].filter((file) =>
+      file.includes(path.join('providers', 'meta-whatsapp') + path.sep),
+    );
+    expect(offenders).toEqual([]);
   });
 });
 

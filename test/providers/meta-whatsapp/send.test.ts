@@ -6,7 +6,9 @@
  *   message body, 200 returns the id, 400 maps to non-retryable with the
  *   Graph message, 429 and 500 map to retryable.
  * - Graph error codes 130429 and 131056 are retryable regardless of HTTP status.
- * - The provider is not present in the root bundle when unused.
+ *
+ * The "not in the root bundle" criterion is covered in test/exports.test.ts
+ * against the built output.
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, spyOn } from 'bun:test';
@@ -31,6 +33,18 @@ function bodyOf(call: Captured | undefined): Record<string, unknown> {
   const raw = call?.init?.body;
   if (typeof raw !== 'string') throw new TypeError(`expected a string body, got ${typeof raw}`);
   return JSON.parse(raw) as Record<string, unknown>;
+}
+
+/**
+ * The issue does not fix the recipient format, so `to` is checked by its
+ * digits (with or without the leading `+`) and then removed so the rest of
+ * the body can be compared exactly.
+ */
+function withoutRecipient(body: Record<string, unknown>): Record<string, unknown> {
+  const { to, ...rest } = body;
+  expect(typeof to).toBe('string');
+  expect(String(to).replaceAll(/\D/g, '')).toBe('94771234567');
+  return rest;
 }
 
 type WhatsAppMessage = RenderedWhatsApp & OutboundMeta;
@@ -105,9 +119,8 @@ describe('metaWhatsApp provider: send', () => {
     expect(headers.get('authorization')).toBe('Bearer EAAB-test-token');
     expect(headers.get('content-type')).toBe('application/json');
 
-    expect(bodyOf(call)).toEqual({
+    expect(withoutRecipient(bodyOf(call))).toEqual({
       messaging_product: 'whatsapp',
-      to: '+94771234567',
       type: 'template',
       template: {
         name: 'otp_code',
@@ -145,9 +158,8 @@ describe('metaWhatsApp provider: send', () => {
     await provider.send(textMessage);
 
     expect(calls).toHaveLength(1);
-    expect(bodyOf(calls[0])).toEqual({
+    expect(withoutRecipient(bodyOf(calls[0]))).toEqual({
       messaging_product: 'whatsapp',
-      to: '+94771234567',
       type: 'text',
       text: { body: 'Your match is ready' },
     });
@@ -215,10 +227,5 @@ describe('metaWhatsApp provider: send', () => {
     if (result.ok) return;
     expect(result.retryable).toBe(true);
     expect(result.error).toContain('network down');
-  });
-
-  it('is not exported from the root entry point', async () => {
-    const root = (await import('../../../src/index.js')) as Record<string, unknown>;
-    expect(root.metaWhatsApp).toBeUndefined();
   });
 });
