@@ -6,7 +6,7 @@
  * @module
  */
 
-import type { Channel, TemplateCatalog } from '../types.js';
+import type { Channel, DeliveryOverride, TemplateCatalog } from '../types.js';
 
 /**
  * Client-side message status.
@@ -36,7 +36,7 @@ export interface ClientSendOptions<TInput = unknown> {
   to: string;
   locale?: string;
   input: TInput;
-  delivery?: 'all' | { fallback?: Channel[]; always?: Channel[] };
+  delivery?: DeliveryOverride;
 }
 
 /**

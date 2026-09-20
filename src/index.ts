@@ -9,7 +9,10 @@
 
 export * from './types.js';
 
+import { DEFAULT_POLICY } from './core/policy.js';
 import type {
+  DeliveryOverride,
+  DeliveryPolicy,
   MessagingConfig,
   MessagingEnv,
   MessagingState,
@@ -25,6 +28,13 @@ import type {
  */
 export function defineTemplates<T extends TemplateCatalog>(templates: T): T {
   return templates;
+}
+
+function resolveConfigPolicy(rawDelivery?: DeliveryOverride): DeliveryPolicy {
+  if (rawDelivery && rawDelivery !== 'all' && rawDelivery.fallback && rawDelivery.always) {
+    return { fallback: rawDelivery.fallback, always: rawDelivery.always };
+  }
+  return DEFAULT_POLICY;
 }
 
 /**
@@ -43,13 +53,13 @@ export function createMessaging<Env = MessagingEnv>(
   handleWebhook: (provider: string, request: Request) => Promise<Response>;
 } {
   const mergedConfig = (options ?? config ?? {}) as MessagingConfig<Env>;
+  const policy = resolveConfigPolicy(mergedConfig.delivery ?? mergedConfig.deliveryPolicy);
   const state: MessagingState = {
     templates: new Map(),
     queue: new Map(),
     store: new Map(),
     providers: new Map(),
-    policy: mergedConfig.delivery ??
-      mergedConfig.deliveryPolicy ?? { fallback: ['whatsapp', 'sms'] },
+    policy,
     fallbackTimeout: mergedConfig.fallbackTimeoutMs ?? 10_000,
   };
 

@@ -139,6 +139,13 @@ describe('Entry points export documented functions', () => {
     expect(typeof root.route).toBe('function');
   });
 
+  it('exports resolveDelivery, PolicyError, and DEFAULT_POLICY from the built . entry point', async () => {
+    const root = await loadExport('.');
+    expect(typeof root.resolveDelivery).toBe('function');
+    expect(typeof root.PolicyError).toBe('function');
+    expect(root.DEFAULT_POLICY).toEqual({ fallback: ['whatsapp', 'sms'], always: [] });
+  });
+
   it('exports createMessagingClient as a function from the built ./client entry point', async () => {
     const client = await loadExport('./client');
     expect(typeof client.createMessagingClient).toBe('function');

@@ -15,7 +15,7 @@ import type {
   TemplateDefinition,
 } from '../../src/types.js';
 
-const defaultPolicy: DeliveryPolicy = { fallbackChain: false, alwaysOnChannels: [] };
+const defaultPolicy: DeliveryPolicy = { fallback: ['whatsapp', 'sms'], always: [] };
 
 /**
  * Create a test messaging state.
@@ -30,8 +30,8 @@ export function createTestState(): MessagingState {
     store: new Map(),
     providers: new Map(),
     policy: {
-      fallbackChain: false,
-      alwaysOnChannels: [],
+      fallback: ['whatsapp', 'sms'],
+      always: [],
     },
     fallbackTimeout: 10_000,
   };

@@ -73,25 +73,10 @@ export interface TemplateRendering {
   html?: (input: unknown, locale?: string) => string;
 }
 
-/**
- * Delivery policy defining fallback chain and always-on channels.
- */
-export interface DeliveryPolicy {
-  fallback?: Channel[];
-  always?: Channel[];
-  fallbackChain?: boolean;
-  alwaysOnChannels?: Channel[];
-  timeout?: {
-    otp?: number;
-    notification?: number;
-  };
-  fallbacks?: {
-    from: Channel;
-    to: Channel;
-    timeoutMs: number;
-    thresholdStatuses?: DeliveryStatus[];
-  }[];
-}
+import type { DeliveryOverride, DeliveryPolicy } from './core/policy.js';
+
+export type { DeliveryOverride, DeliveryPolicy, ResolveDeliveryArgs } from './core/policy.js';
+export { DEFAULT_POLICY, PolicyError, resolveDelivery } from './core/policy.js';
 
 /**
  * Template definition in a template catalog.
@@ -113,7 +98,7 @@ export interface TemplateDefinition<TInput = never> {
     text?: (input: TInput, locale?: string) => string;
     html?: (input: TInput, locale?: string) => string;
   };
-  delivery?: DeliveryPolicy | 'all';
+  delivery?: DeliveryOverride;
   renderings?: TemplateRendering[];
 }
 
@@ -215,8 +200,8 @@ export interface MessagingConfig<Env = MessagingEnv> {
         config: Record<string, unknown>;
         state?: unknown;
       }[];
-  delivery?: DeliveryPolicy;
-  deliveryPolicy?: DeliveryPolicy;
+  delivery?: DeliveryOverride;
+  deliveryPolicy?: DeliveryOverride;
   fallbackTimeoutMs?: number;
   statusTtl?: number;
   onStatus?: (event: unknown) => void | Promise<void>;
