@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "noEmit": false
+  },
+  "include": [
+    "src/index.ts",
+    "src/client/index.ts",
+    "src/durable/index.ts",
+    "src/providers/*/index.ts"
+  ],
+  "exclude": ["test/**/*.ts"]
+}

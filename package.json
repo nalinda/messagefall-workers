@@ -1,0 +1,82 @@
+{
+  "name": "messagefall-workers",
+  "version": "0.1.0",
+  "description": "Outbound messaging for Cloudflare Workers: WhatsApp first with SMS fallback, email, typed templates, delivery-status webhooks, and a client for Worker-to-Worker sends",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nalinda/messagefall-workers.git"
+  },
+  "homepage": "https://github.com/nalinda/messagefall-workers#readme",
+  "bugs": {
+    "url": "https://github.com/nalinda/messagefall-workers/issues"
+  },
+  "packageManager": "bun@1.4.0",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js",
+      "default": "./dist/client.js"
+    },
+    "./durable": {
+      "types": "./dist/durable.d.ts",
+      "import": "./dist/durable.js",
+      "default": "./dist/durable.js"
+    },
+    "./providers/*": {
+      "types": "./dist/providers/*.d.ts",
+      "import": "./dist/providers/*.js",
+      "default": "./dist/providers/*.js"
+    }
+  },
+  "files": [
+    "dist",
+    "*.md",
+    "LICENSE",
+    ".gitignore"
+  ],
+  "scripts": {
+    "build": "bun build src/index.ts src/client/index.ts src/durable/index.ts 'src/providers/*/index.ts' --outdir dist --target bun --esm && tsc -p tsconfig.build.json",
+    "lint": "eslint . --cache --cache-location .eslintcache --cache-strategy content",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "ts-check": "tsc --noEmit",
+    "test": "bun test",
+    "test:exports": "bun test test/exports.test.ts",
+    "prepare": "husky"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": ">=4.0.0",
+    "hono": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@cloudflare/workers-types": {
+      "optional": true
+    },
+    "hono": {
+      "optional": true
+    }
+  },
+  "prettier": "@serendibyte-co/prettier-config",
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260917.1",
+    "@serendibyte-co/eslint-config": "git+https://github.com/serendibyte-co/eslint-config.git#v1.4.1",
+    "@serendibyte-co/prettier-config": "git+https://github.com/serendibyte-co/prettier-config.git#v1.0.2",
+    "@types/bun": "^1.4.0",
+    "eslint": "^10.8.1",
+    "hono": "^4.0.0",
+    "husky": "^9.1.7",
+    "prettier": "^3.9.6",
+    "typescript": "~6.0.2",
+    "wrangler": "^4.0.0"
+  },
+  "trustedDependencies": [
+    "unrs-resolver"
+  ]
+}

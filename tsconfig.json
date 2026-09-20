@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2025",
+    "lib": ["ES2025"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["bun", "@cloudflare/workers-types"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "incremental": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "paths": {
+      "messagefall-workers": ["./src/index.ts"],
+      "messagefall-workers/client": ["./src/client/index.ts"],
+      "messagefall-workers/durable": ["./src/durable/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}
