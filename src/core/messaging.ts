@@ -239,6 +239,9 @@ export function createMessaging<T extends Templates<any>>(
           store,
           defaults,
           onStatus: options.onStatus,
+          kv,
+          timer: (options.timer ?? env.FALLBACK_TIMER) as FallbackTimerClient | undefined,
+          timeout: options.delivery?.timeout,
         },
         {
           templateName,

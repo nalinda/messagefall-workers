@@ -5,6 +5,8 @@
  * @module
  */
 
+import type { KVNamespace } from '@cloudflare/workers-types';
+
 import type {
   Channel,
   OutboundMeta,
@@ -28,6 +30,7 @@ import { scrubError } from './redact.js';
 import {
   type Attempt,
   deriveOverallStatus,
+  type FallbackTimerClient,
   type MessageRecord,
   MessageRecordNotFoundError,
   type StatusStore,
@@ -93,6 +96,9 @@ export interface SendDeps {
   store: StatusStore;
   defaults: DeliveryPolicy;
   onStatus?: (event: StatusCallbackEvent) => void | Promise<void>;
+  kv?: KVNamespace;
+  timer?: FallbackTimerClient;
+  timeout?: { otp?: number; notification?: number };
 }
 
 /**
@@ -439,6 +445,38 @@ export function attemptRecorder(
   };
 }
 
+async function cleanupExhaustedChain(
+  deps: SendDeps,
+  id: string,
+  policy: DeliveryPolicy,
+  results: PromiseSettledResult<Attempt[] | void>[]
+): Promise<void> {
+  if (policy.fallback.length === 0) {
+    return;
+  }
+  const chainResult = results[0];
+  if (chainResult.status !== 'fulfilled') {
+    return;
+  }
+  const chainAttempts = chainResult.value;
+  if (!Array.isArray(chainAttempts)) {
+    return;
+  }
+  const lastAttempt = chainAttempts.at(-1);
+  if (lastAttempt?.status === 'failed' && chainAttempts.length >= policy.fallback.length) {
+    try {
+      await deps.kv?.delete(`in:${id}`);
+    } catch {
+      // ignore
+    }
+    try {
+      deps.timer?.cancel?.(id);
+    } catch {
+      // ignore
+    }
+  }
+}
+
 async function deliver(
   deps: SendDeps,
   req: ValidatedSendRequest,
@@ -458,6 +496,8 @@ async function deliver(
   // Every attempt is persisted and observed the moment it settles; this only waits for all of
   // them, then surfaces the first persistence failure (provider failures never reject).
   const results = await Promise.allSettled([chainTask, ...alwaysTasks]);
+  await cleanupExhaustedChain(deps, id, policy, results);
+
   const rejected = results.find((r) => r.status === 'rejected');
   if (rejected) {
     throw rejected.reason;
@@ -557,6 +597,11 @@ function resolveEffectivePolicy(
   return { policy, hasSkippedEmail };
 }
 
+const DEFAULT_CHAIN_TIMEOUT_MS: Record<MessageRecord['kind'], number> = {
+  otp: 30_000,
+  notification: 300_000,
+};
+
 /**
  * Runs the send pipeline for one message.
  *
@@ -604,6 +649,30 @@ export async function runSend(
     createdAt: now,
     updatedAt: now,
   });
+
+  if (policy.fallback.length > 0) {
+    const timeoutMs =
+      deps.timeout?.[req.template.kind] ?? DEFAULT_CHAIN_TIMEOUT_MS[req.template.kind];
+    const inputPayload = {
+      input: req.input,
+      to: req.to,
+      ...(req.email !== undefined && { email: req.email }),
+      locale: req.locale,
+    };
+    if (deps.kv) {
+      const ttlSeconds = Math.max(60, Math.ceil(timeoutMs / 1000));
+      await deps.kv.put(`in:${id}`, JSON.stringify(inputPayload), {
+        expirationTtl: ttlSeconds,
+      });
+    }
+    if (typeof deps.timer?.setState === 'function') {
+      try {
+        deps.timer.setState(id, timeoutMs, inputPayload);
+      } catch {
+        // Best effort
+      }
+    }
+  }
 
   if (ctx && req.template.kind === 'otp') {
     ctx.waitUntil(deliverGuarded(deps, validated, id, policy));

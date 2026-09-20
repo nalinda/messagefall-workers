@@ -124,9 +124,11 @@ function flakyEnv(shouldFail: (put: number) => boolean): MessagingEnv {
   const originalPut = kv.put.bind(kv);
   let puts = 0;
   kv.put = ((key: string, value: string) => {
-    puts += 1;
-    if (shouldFail(puts)) {
-      return Promise.reject(new Error('kv unavailable'));
+    if (key.startsWith('msg:')) {
+      puts += 1;
+      if (shouldFail(puts)) {
+        return Promise.reject(new Error('kv unavailable'));
+      }
     }
     return originalPut(key, value);
   }) as typeof kv.put;
@@ -1625,4 +1627,101 @@ describe('Issue #3: createMessaging send pipeline', () => {
       expect(built[1].calls.map((c) => c.text)).toEqual(['two']);
     });
   });
+
+  describe('input stashing in:<id> for async fallback (#7)', () => {
+    it('writes in:<id> with { input, to, email, locale } and TTL when a fallback chain is present', async () => {
+      const env = newEnv();
+      const kv = env.MESSAGES_KV as ReturnType<typeof memoryKV>;
+      const puts: Array<{ key: string; value: string; options?: { expirationTtl?: number } }> = [];
+      const originalPut = kv.put.bind(kv);
+      kv.put = ((key: string, value: string, options?: { expirationTtl?: number }) => {
+        puts.push({ key, value, options });
+        return originalPut(key, value);
+      }) as typeof kv.put;
+
+      const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'rec-wa');
+      const sms = recordingProvider<RenderedSms>('sms', 'rec-sms');
+      const messaging = createMessaging(env, {
+        templates,
+        providers: () => ({ whatsapp: wa, sms }),
+        delivery: { fallback: ['whatsapp', 'sms'], always: [] },
+      });
+
+      const { id } = await messaging.send({
+        template: 'orderUpdate',
+        to: TO,
+        email: 'customer@example.com',
+        locale: 'fr',
+        input: INPUT,
+      });
+
+      const inPut = puts.find((p) => p.key === `in:${id}`);
+      expect(inPut).toBeDefined();
+      expect(JSON.parse(inPut!.value)).toEqual({
+        input: INPUT,
+        to: TO,
+        email: 'customer@example.com',
+        locale: 'fr',
+      });
+      // notification kind default: 300_000ms -> 300s TTL
+      expect(inPut!.options?.expirationTtl).toBe(300);
+    });
+
+    it('does not write in:<id> when policy has no fallback chain (always-only)', async () => {
+      const env = newEnv();
+      const kv = env.MESSAGES_KV as ReturnType<typeof memoryKV>;
+      const puts: string[] = [];
+      const originalPut = kv.put.bind(kv);
+      kv.put = ((key: string, value: string) => {
+        puts.push(key);
+        return originalPut(key, value);
+      }) as typeof kv.put;
+
+      const sms = recordingProvider<RenderedSms>('sms', 'rec-sms');
+      const messaging = createMessaging(env, {
+        templates,
+        providers: () => ({ sms }),
+        delivery: { fallback: [], always: ['sms'] },
+      });
+
+      const { id } = await messaging.send({
+        template: 'smsOnly',
+        to: TO,
+        locale: 'en',
+        input: { body: 'hello' },
+      });
+
+      expect(puts.includes(`in:${id}`)).toBe(false);
+    });
+
+    it('uses 60s minimum TTL for OTP kind (30s timeout)', async () => {
+      const env = newEnv();
+      const kv = env.MESSAGES_KV as ReturnType<typeof memoryKV>;
+      const puts: Array<{ key: string; options?: { expirationTtl?: number } }> = [];
+      const originalPut = kv.put.bind(kv);
+      kv.put = ((key: string, value: string, options?: { expirationTtl?: number }) => {
+        puts.push({ key, options });
+        return originalPut(key, value);
+      }) as typeof kv.put;
+
+      const sms = recordingProvider<RenderedSms>('sms', 'rec-sms');
+      const messaging = createMessaging(env, {
+        templates,
+        providers: () => ({ sms }),
+        delivery: { fallback: ['sms'], always: [] },
+      });
+
+      const { id } = await messaging.send({
+        template: 'loginCode',
+        to: TO,
+        locale: 'en',
+        input: { code: '123456' },
+      });
+
+      const inPut = puts.find((p) => p.key === `in:${id}`);
+      expect(inPut).toBeDefined();
+      expect(inPut!.options?.expirationTtl).toBe(60);
+    });
+  });
 });
+
