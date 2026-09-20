@@ -463,10 +463,25 @@ async function observe(deps: SendDeps, id: string, attempt: Attempt): Promise<vo
       console.warn(`[messagefall] indexProviderId failed id=${id} channel=${channel}`);
     }
   }
+  await notifyStatus(deps.onStatus, { id, channel, provider, status });
+}
+
+/**
+ * Calls the caller's `onStatus` observer for one event. The observer is never allowed to fail
+ * the work that produced the event: an error is logged without message content and swallowed.
+ * Shared by the send path and the webhook bridge in `createMessaging`.
+ *
+ * @param onStatus - The configured observer, if any.
+ * @param event - The event to report.
+ */
+export async function notifyStatus(
+  onStatus: SendDeps['onStatus'],
+  event: StatusCallbackEvent
+): Promise<void> {
   try {
-    await deps.onStatus?.({ id, channel, provider, status });
+    await onStatus?.(event);
   } catch {
-    console.warn(`[messagefall] onStatus failed id=${id} channel=${channel}`);
+    console.warn(`[messagefall] onStatus failed id=${event.id} channel=${event.channel}`);
   }
 }
 

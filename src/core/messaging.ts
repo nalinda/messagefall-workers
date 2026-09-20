@@ -10,7 +10,13 @@ import type { Provider, StatusEvent } from '../providers/types.js';
 import type { InputOf, TemplateDef, Templates } from '../templates.js';
 import { CHANNELS, type MessagingEnv } from '../types.js';
 import { DEFAULT_POLICY, type DeliveryOverride, type DeliveryPolicy } from './policy.js';
-import { type ProviderSet, runSend, type SendContext, type StatusCallbackEvent } from './send.js';
+import {
+  notifyStatus,
+  type ProviderSet,
+  runSend,
+  type SendContext,
+  type StatusCallbackEvent,
+} from './send.js';
 import {
   DEFAULT_STATUS_TTL,
   kvStatusStore,
@@ -234,16 +240,10 @@ export function createMessaging<T extends Templates<any>>(
     // As on the send path, a throwing observer is logged (without content) and never fails the
     // batch or the webhook response.
     onStatus: options.onStatus
-      ? async (raw, ref) => {
-          if (!ref) {
-            return;
-          }
-          try {
-            await options.onStatus?.({ ...ref, status: (raw as StatusEvent).status });
-          } catch {
-            console.warn(`[messagefall] onStatus failed id=${ref.id} channel=${ref.channel}`);
-          }
-        }
+      ? (raw, ref) =>
+          ref
+            ? notifyStatus(options.onStatus, { ...ref, status: (raw as StatusEvent).status })
+            : undefined
       : undefined,
     onStatusApplied: options.onStatusApplied,
   });
