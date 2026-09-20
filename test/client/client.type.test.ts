@@ -8,6 +8,7 @@
  * - Bun-test-executable file with real runtime expect() calls tied to actual behavior.
  */
 
+import type { Fetcher } from '@cloudflare/workers-types';
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
 
@@ -16,6 +17,7 @@ import type { InputOf } from '../../src/templates.js';
 import { defineTemplates } from '../../src/templates.js';
 import {
   type ClientSendResult,
+  type CreateMessagingClientOptions,
   createMockFetcher,
   type DeliveryOverrideFor,
   loadCreateMessagingClient,
@@ -298,5 +300,29 @@ describe('createMessagingClient type-level specifications (Issue #12)', () => {
     const client = createMessagingClient<Catalog>({ binding: fetcher });
     const record = await client.status('msg_any');
     expect(record).toBeNull();
+  });
+
+  it('verifies client options interface requires Fetcher binding and accepts optional basePath', async () => {
+    type ExpectedOptions = { binding: Fetcher; basePath?: string };
+    type TestOptionsCompiles = Expect<
+      Extends<ExpectedOptions, CreateMessagingClientOptions>
+    >;
+    assertType<TestOptionsCompiles>(true);
+
+    const createMessagingClient = await loadCreateMessagingClient();
+    const fetcher = createMockFetcher(() => {
+      return Response.json({ id: 'msg_01J8OPT' }, { status: 200 });
+    });
+
+    const client = createMessagingClient<Catalog>({
+      binding: fetcher,
+      basePath: '/custom',
+    });
+    const result = await client.send('loginCode', {
+      to: '+94770000001',
+      locale: 'en',
+      input: { code: '123456' },
+    });
+    expect(result).toEqual({ ok: true, id: 'msg_01J8OPT' });
   });
 });
