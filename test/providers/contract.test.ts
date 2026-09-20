@@ -8,6 +8,7 @@
 
 import { describe, expect, it } from 'bun:test';
 
+import { createMessaging } from '../../src/index.js';
 import type {
   DeliveryStatus,
   OutboundMeta,
@@ -75,6 +76,12 @@ describe('Provider contract type-level specification', () => {
       Extends<typeof customSmsProvider, Provider<RenderedSms>>
     >;
     assertType<TestAssignableToSmsSlot>(true);
+
+    // Runtime assertion: Register custom SMS provider with createMessaging
+    const messaging = createMessaging({
+      providers: providersFactory,
+    });
+    expect(messaging.providers.get('my-custom-sms')).toBeDefined();
   });
 
   it('allows Provider<RenderedWhatsApp> and Provider<RenderedEmail> in their respective slots', () => {
@@ -133,6 +140,13 @@ describe('Provider contract type-level specification', () => {
 
     assertType<TestWaAssignable>(true);
     assertType<TestEmailAssignable>(true);
+
+    // Runtime assertion: Register custom WhatsApp & Email providers with createMessaging
+    const messaging = createMessaging({
+      providers: providersFactory,
+    });
+    expect(messaging.providers.get('meta-whatsapp-direct')).toBeDefined();
+    expect(messaging.providers.get('direct-smtp-email')).toBeDefined();
   });
 
   it('verifies SendResult discriminant shape and StatusEvent fields', () => {
