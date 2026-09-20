@@ -1,5 +1,5 @@
 /**
- * Loader and shared fixtures for the meta-whatsapp provider tests (Issue #4).
+ * Shared fixtures and helpers for the meta-whatsapp provider tests (Issue #4).
  */
 
 import type { MetaWhatsAppConfig } from '../../../src/providers/meta-whatsapp/index.js';

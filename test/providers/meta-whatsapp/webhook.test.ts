@@ -12,7 +12,7 @@ import { describe, expect, it } from 'bun:test';
 
 import { metaWhatsApp } from '../../../src/providers/meta-whatsapp/index.js';
 import type { Provider, RenderedWhatsApp } from '../../../src/providers/types.js';
-import { rejectionOf, signBody, testConfig } from './load.js';
+import { rejectionOf, signBody, testConfig } from './fixtures.js';
 
 const WEBHOOK_URL = 'https://example.com/webhooks/meta-whatsapp';
 

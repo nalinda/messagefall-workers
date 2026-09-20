@@ -68,14 +68,14 @@ export const myProviderFactory: ProviderFactory = {
 ## Built-in Providers
 
 - `meta-whatsapp`: Meta WhatsApp Cloud API (template and text sends, signed status webhook)
+- `http-sms`: Generic HTTP SMS gateway skeleton
+- `console`: Development mode, logs to console
 
 ## Built-in Providers (to be implemented)
 
 - `twilio-sms`: Twilio SMS
 - `vonage-sms`: Vonage SMS
 - `gmail`: Gmail API (send with OAuth refresh token)
-- `http-sms`: Generic HTTP SMS gateway skeleton
-- `console`: Development mode, logs to console
 
 ## Adding a New Provider
 

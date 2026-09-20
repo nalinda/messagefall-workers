@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 
 import { metaWhatsApp } from '../../../src/providers/meta-whatsapp/index.js';
 import type { OutboundMeta, RenderedWhatsApp } from '../../../src/providers/types.js';
-import { testConfig } from './load.js';
+import { testConfig } from './fixtures.js';
 
 interface Captured {
   url: string;
