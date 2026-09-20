@@ -64,7 +64,7 @@ export interface AdvanceChainArgs<Env = MessagingEnv> {
    * Messaging options containing templates, providers, onStatus, etc.
    */
   options: Omit<Partial<MessagingOptions>, 'templates' | 'providers' | 'onStatus' | 'timer'> & {
-    templates?: Record<string, TemplateDef<unknown>> | Map<string, TemplateDef<unknown>>;
+    templates?: MessagingOptions['templates'] | Map<string, TemplateDef<unknown>>;
     providers?: ProviderSource<MessagingEnv>;
     onStatus?: (event: StatusCallbackEvent) => void | Promise<void>;
     fallbackTimeoutMs?: number;
@@ -143,7 +143,9 @@ function resolveTemplate(
     return templates.get(templateName);
   }
   if (templates && typeof templates === 'object') {
-    return Reflect.get(templates, templateName);
+    // The catalogue is keyed by name with each entry's own input type; the walk only ever
+    // renders through `validateInput`, which takes the erased `TemplateDef<unknown>`.
+    return Reflect.get(templates, templateName) as TemplateDef<unknown> | undefined;
   }
   return undefined;
 }

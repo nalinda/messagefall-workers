@@ -16,6 +16,7 @@
 import type { DurableObjectNamespace, KVNamespace } from '@cloudflare/workers-types';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
+import { advanceChain, type AdvanceChainArgs } from '../../src/core/fallback.js';
 import type { DeliveryPolicy } from '../../src/core/policy.js';
 import {
   kvStatusStore,
@@ -33,10 +34,7 @@ import type {
 } from '../../src/providers/types.js';
 import { defineTemplates } from '../../src/templates.js';
 import {
-  type AdvanceChainArgs,
-  type AdvanceChainFn,
   createMockFallbackTimer,
-  loadAdvanceChain,
   type MockFallbackTimer,
 } from '../helpers/fallback.js';
 import { createMiniflareKV } from '../helpers/status.js';
@@ -102,7 +100,6 @@ describe('Issue #7: Fallback on failed delivery status', () => {
   let kv: KVNamespace;
   let disposeKv: () => Promise<void>;
   let store: StatusStore;
-  let advanceChain: AdvanceChainFn;
   let mockTimer: MockFallbackTimer;
 
   beforeEach(async () => {
@@ -110,7 +107,6 @@ describe('Issue #7: Fallback on failed delivery status', () => {
     kv = miniflareEnv.kv;
     disposeKv = miniflareEnv.dispose;
     store = kvStatusStore(kv);
-    advanceChain = await loadAdvanceChain();
     mockTimer = createMockFallbackTimer();
   });
 
