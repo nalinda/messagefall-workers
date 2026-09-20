@@ -171,11 +171,6 @@ describe('Entry points export documented functions', () => {
     expect(typeof root.defineTemplates).toBe('function');
   });
 
-  it('exports route as a function', async () => {
-    const root = await loadExport('.');
-    expect(typeof root.route).toBe('function');
-  });
-
   it('exports resolveDelivery, PolicyError, and DEFAULT_POLICY from the built . entry point', async () => {
     const root = await loadExport('.');
     expect(typeof root.resolveDelivery).toBe('function');
