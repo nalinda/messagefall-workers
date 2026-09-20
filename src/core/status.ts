@@ -8,6 +8,7 @@ import type { KVNamespace } from '@cloudflare/workers-types';
 
 import type { Channel, DeliveryStatus } from '../providers/types.js';
 import type { DeliveryPolicy } from './policy.js';
+import type { RenderInput } from './render-input.js';
 
 /**
  * The fallback timer as the delivery pipeline uses it.
@@ -19,14 +20,16 @@ import type { DeliveryPolicy } from './policy.js';
  */
 export interface FallbackTimerClient {
   /**
-   * Reads the armed timer for a message, including any render input stashed with it.
+   * Reads the armed timer for a message, including any render input stashed with it. The
+   * stashed value is whatever was written, so callers coerce it with `asRenderInput` rather
+   * than trusting it to be a {@link RenderInput} envelope.
    */
   getState?(messageId: string): { input?: unknown } | null;
   /**
    * Arms (or re-arms) the timer for a message, optionally carrying the render input the
    * fallback path will need when it fires.
    */
-  setState?(messageId: string, timeoutMs: number, input?: unknown): void;
+  setState?(messageId: string, timeoutMs: number, input?: RenderInput): void;
   /**
    * Disarms the timer for a message; called once the chain reaches a terminal state.
    */

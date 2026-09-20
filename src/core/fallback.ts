@@ -21,6 +21,12 @@ import type { Channel, Provider } from '../providers/types.js';
 import { type AnyRendered, type TemplateDef, validateInput } from '../templates.js';
 import type { MessagingOptions } from './messaging.js';
 import {
+  asRenderInput,
+  readRenderInput,
+  type RenderInput,
+  renderInputKey,
+} from './render-input.js';
+import {
   attemptRecorder,
   notifyStatus,
   type ProviderSet,
@@ -83,13 +89,6 @@ export interface AdvanceChainArgs<Env = MessagingEnv> {
  */
 export type AdvanceChainFn = (args: AdvanceChainArgs) => Promise<void>;
 
-interface InputPayload {
-  input: unknown;
-  to?: string;
-  email?: string;
-  locale?: string;
-}
-
 function asTimer(env: MessagingEnv, optionsTimer: unknown): FallbackTimerClient | undefined {
   const raw = optionsTimer ?? env.FALLBACK_TIMER;
   return raw && typeof raw === 'object' ? raw : undefined;
@@ -108,7 +107,7 @@ function rearmTimer(
   optionsTimer: unknown,
   id: string,
   timeoutMs: number,
-  inputPayload?: unknown
+  inputPayload?: RenderInput
 ): void {
   try {
     asTimer(env, optionsTimer)?.setState?.(id, timeoutMs, inputPayload);
@@ -119,7 +118,7 @@ function rearmTimer(
 
 async function deleteKVInput(kv: KVNamespace | undefined, id: string): Promise<void> {
   try {
-    await kv?.delete(`in:${id}`);
+    await kv?.delete(renderInputKey(id));
   } catch {
     // Best-effort deletion
   }
@@ -189,7 +188,7 @@ function toProviderSet(
 function extractFromTimer(
   timer: FallbackTimerClient | undefined,
   id: string
-): InputPayload | undefined {
+): RenderInput | undefined {
   if (typeof timer?.getState !== 'function') {
     return undefined;
   }
@@ -197,43 +196,15 @@ function extractFromTimer(
   if (!state?.input) {
     return undefined;
   }
-  if (typeof state.input === 'object' && 'input' in state.input) {
-    return state.input;
-  }
-  return { input: state.input };
-}
-
-async function extractFromKV(
-  kv: KVNamespace | undefined,
-  id: string
-): Promise<InputPayload | undefined> {
-  if (!kv || typeof kv.get !== 'function') {
-    return undefined;
-  }
-  const raw = await kv.get(`in:${id}`);
-  if (!raw) {
-    return undefined;
-  }
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === 'object' && 'input' in parsed) {
-      return parsed;
-    }
-    return { input: parsed };
-  } catch {
-    return undefined;
-  }
+  return asRenderInput(state.input);
 }
 
 async function resolveInputPayload(
   args: AdvanceChainArgs,
   kv: KVNamespace | undefined
-): Promise<InputPayload> {
+): Promise<RenderInput> {
   if (args.input !== undefined && args.input !== null) {
-    if (typeof args.input === 'object' && 'input' in args.input) {
-      return args.input;
-    }
-    return { input: args.input };
+    return asRenderInput(args.input);
   }
 
   const fromTimer = extractFromTimer(asTimer(args.env, args.options.timer), args.id);
@@ -241,7 +212,7 @@ async function resolveInputPayload(
     return fromTimer;
   }
 
-  const fromKV = await extractFromKV(kv, args.id);
+  const fromKV = await readRenderInput(kv, args.id);
   if (fromKV) {
     return fromKV;
   }
@@ -343,7 +314,7 @@ function missingTemplate(kind: MessageRecord['kind']): TemplateDef<unknown> {
 function rebuildRequest(
   record: MessageRecord,
   template: TemplateDef<unknown> | undefined,
-  payload: InputPayload
+  payload: RenderInput
 ): ValidatedSendRequest {
   const locale = payload.locale ?? 'en';
   return {

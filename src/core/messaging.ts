@@ -12,6 +12,7 @@ import type { InputOf, TemplateDef, Templates } from '../templates.js';
 import { advanceChain } from './fallback.js';
 import { DEFAULT_POLICY, type DeliveryOverride, type DeliveryPolicy } from './policy.js';
 import { validateProviderSet } from './provider-set.js';
+import { renderInputKey } from './render-input.js';
 import {
   notifyStatus,
   type ProviderSet,
@@ -170,7 +171,7 @@ async function handleChainStatusApplied<T extends Templates<Record<string, Templ
       // ignore
     }
     try {
-      await kv.delete(`in:${id}`);
+      await kv.delete(renderInputKey(id));
     } catch {
       // ignore
     }
