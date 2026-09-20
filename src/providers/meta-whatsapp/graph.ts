@@ -4,7 +4,7 @@
  * @module
  */
 
-import { formatHttpError, isRetryableStatus } from '../shared.js';
+import { formatHttpError, isRetryableStatus } from '../_shared/http.js';
 import type { OutboundMeta, RenderedWhatsApp, SendResult } from '../types.js';
 
 /**

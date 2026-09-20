@@ -17,7 +17,6 @@ import path from 'node:path';
 import { describe, expect, it } from 'bun:test';
 
 import { createMessaging } from '../../src/index.js';
-import { captureConsole, newEnv, pingTemplates } from '../helpers/messaging.js';
 import type {
   Channel,
   DeliveryStatus,
@@ -27,7 +26,8 @@ import type {
   RenderedSms,
   RenderedWhatsApp,
   StatusEvent,
-} from './types.js';
+} from '../../src/providers/types.js';
+import { captureConsole, newEnv, pingTemplates } from '../helpers/messaging.js';
 
 const rootDir = path.resolve(import.meta.dir, '../..');
 
@@ -485,7 +485,8 @@ describe('Provider contract shape and optional methods', () => {
     };
 
     expect(typeof customProvider.status).toBe('function');
-    const statusResult = await customProvider.status('msg_123');
+    // Provider.status is declared as Promise<unknown>: the shape is the provider's own.
+    const statusResult = (await customProvider.status('msg_123')) as { status: DeliveryStatus };
     expect(statusResult.status).toBe('delivered');
   });
 

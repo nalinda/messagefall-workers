@@ -8,49 +8,53 @@ import type { KVNamespace } from '@cloudflare/workers-types';
 
 import type { Channel, DeliveryStatus } from '../providers/types.js';
 import type { DeliveryPolicy } from './policy.js';
+import type { RenderInput } from './render-input.js';
 
-interface PatchableProxy {
-  __mfPatched?: boolean;
+/**
+ * The fallback timer as the delivery pipeline uses it.
+ *
+ * The timer itself is a Durable Object (`src/durable/`); this is the boundary the send and
+ * fallback paths talk to, so neither has to know whether it holds a real Durable Object stub, a
+ * namespace binding or a test double. Every member is optional because a deployment may run with
+ * no `FALLBACK_TIMER` binding at all, in which case timer handling is simply skipped.
+ */
+export interface FallbackTimerClient {
+  /**
+   * Reads the armed timer for a message, including any render input stashed with it. The
+   * stashed value is whatever was written, so callers coerce it with `asRenderInput` rather
+   * than trusting it to be a {@link RenderInput} envelope.
+   */
+  getState?(messageId: string): { input?: unknown } | null;
+  /**
+   * Arms (or re-arms) the timer for a message, optionally carrying the render input the
+   * fallback path will need when it fires.
+   */
+  setState?(messageId: string, timeoutMs: number, input?: RenderInput): void;
+  /**
+   * Disarms the timer for a message; called once the chain reaches a terminal state.
+   */
+  cancel?(messageId: string): void;
 }
 
-function wrapHandler(handler: ProxyHandler<Record<string | symbol, unknown>>): void {
-  if (typeof handler.get !== 'function') {
-    return;
-  }
-  const origGet = handler.get.bind(handler);
-  handler.get = (target, key, receiver) => {
-    if (Object.prototype.hasOwnProperty.call(target, key)) {
-      return target[key as string];
-    }
-    return origGet(target, key, receiver) as unknown;
-  };
+/**
+ * Resolves the fallback timer a call should use: an explicit override wins, otherwise the
+ * `FALLBACK_TIMER` binding on the env. Both are typed loosely on purpose — a deployment passes
+ * a `DurableObjectNamespace`, a test passes a double — so the one runtime check lives here and
+ * callers get a {@link FallbackTimerClient} back without casting at their own boundary. A
+ * non-object (or absent) binding yields `undefined`, which every timer path treats as "no
+ * timer configured".
+ *
+ * @param env - Worker bindings, possibly carrying `FALLBACK_TIMER`.
+ * @param override - A timer supplied by the caller, taking precedence over the binding.
+ * @returns The timer to use, or undefined when there is none.
+ */
+export function resolveTimer(
+  env: { FALLBACK_TIMER?: unknown } | undefined,
+  override?: unknown
+): FallbackTimerClient | undefined {
+  const raw = override ?? env?.FALLBACK_TIMER;
+  return raw && typeof raw === 'object' ? raw : undefined;
 }
-
-function patchMiniflareProxy(): void {
-  const OriginalProxy = Proxy;
-  const patchable = OriginalProxy as unknown as PatchableProxy;
-  if (patchable.__mfPatched) {
-    return;
-  }
-
-  const PatchedProxy = new OriginalProxy(OriginalProxy, {
-    construct(target, constructorArgs, newTarget) {
-      const [, handler] = constructorArgs as [
-        Record<string | symbol, unknown>,
-        ProxyHandler<Record<string | symbol, unknown>>,
-      ];
-      wrapHandler(handler);
-      return Reflect.construct(target, constructorArgs, newTarget) as object;
-    },
-  });
-
-  (PatchedProxy as unknown as PatchableProxy).__mfPatched = true;
-  // eslint-disable-next-line unicorn/no-global-object-property-assignment
-  (globalThis as unknown as { Proxy: unknown }).Proxy = PatchedProxy;
-}
-
-// eslint-disable-next-line unicorn/no-top-level-side-effects
-patchMiniflareProxy();
 
 /**
  * Single delivery attempt on a channel.

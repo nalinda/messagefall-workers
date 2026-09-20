@@ -6,11 +6,13 @@
 
 import type { DurableObjectNamespace, KVNamespace } from '@cloudflare/workers-types';
 
+import type { MessagingEnv } from '../env.js';
 import type { Provider, StatusEvent } from '../providers/types.js';
 import type { InputOf, TemplateDef, Templates } from '../templates.js';
-import { CHANNELS, type MessagingEnv } from '../types.js';
 import { advanceChain } from './fallback.js';
 import { DEFAULT_POLICY, type DeliveryOverride, type DeliveryPolicy } from './policy.js';
+import { validateProviderSet } from './provider-set.js';
+import { releaseChain } from './render-input.js';
 import {
   notifyStatus,
   type ProviderSet,
@@ -22,10 +24,12 @@ import {
   DEFAULT_STATUS_TTL,
   kvStatusStore,
   type MessageRecord,
+  resolveTimer,
   type StatusStore,
 } from './status.js';
 import { createWebhookHandler } from './webhook.js';
 
+export { ProviderConfigError } from './provider-set.js';
 export type { ProviderSet, SendContext, StatusCallbackEvent } from './send.js';
 export { E164, RecipientError } from './send.js';
 
@@ -98,74 +102,6 @@ type ProviderFactory = (env: MessagingEnv) => ProviderSet;
 const providerCache = new WeakMap<MessagingEnv, ProviderSet>();
 
 /**
- * Thrown by createMessaging when the provider set built from env is invalid.
- */
-export class ProviderConfigError extends Error {
-  readonly problems: string[];
-
-  constructor(problems: string[]) {
-    const bullets = problems.map((problem) => `- ${problem}`).join('\n');
-    super(`Provider configuration validation failed:\n${bullets}`);
-    this.name = 'ProviderConfigError';
-    this.problems = problems;
-  }
-}
-
-function missingProviderFields(p: Partial<Provider>): string[] {
-  const missing: string[] = [];
-  if (!p.name) missing.push('name');
-  if (!p.channel) missing.push('channel');
-  if (typeof p.send !== 'function') missing.push('send');
-  return missing;
-}
-
-const KNOWN_SLOTS: ReadonlySet<string> = new Set(CHANNELS);
-
-/**
- * Problems with one provider in isolation: unknown slot, missing fields, channel/slot mismatch.
- */
-function slotProblems(slot: string, p: Partial<Provider>): string[] {
-  const problems: string[] = [];
-  if (!KNOWN_SLOTS.has(slot)) {
-    // Same union `providerFor` switches on; anything else could never be sent through.
-    problems.push(
-      `Provider slot "${slot}" is not a channel (expected one of ${CHANNELS.join(', ')})`
-    );
-  }
-  const missing = missingProviderFields(p);
-  if (missing.length > 0) {
-    problems.push(`Provider "${slot}" is missing required field(s): ${missing.join(', ')}`);
-  }
-  if (p.channel && p.channel !== slot) {
-    problems.push(
-      `Provider "${slot}" declares channel "${p.channel}" but is registered under the "${slot}" slot`
-    );
-  }
-  return problems;
-}
-
-function validateProviderSet(set: ProviderSet): void {
-  const problems: string[] = [];
-  const seen = new Set<string>();
-  for (const [slot, candidate] of Object.entries(set)) {
-    const p = candidate as Partial<Provider> | undefined;
-    if (!p) {
-      continue;
-    }
-    problems.push(...slotProblems(slot, p));
-    if (p.name && seen.has(p.name)) {
-      problems.push(`Duplicate provider name "${p.name}" configured across multiple providers`);
-    }
-    if (p.name) {
-      seen.add(p.name);
-    }
-  }
-  if (problems.length > 0) {
-    throw new ProviderConfigError(problems);
-  }
-}
-
-/**
  * Deliberately keyed on the KV namespace (then TTL), not on `env`: `options.kv` may differ from
  * `env.MESSAGES_KV`, and two envs sharing a namespace should share the store. Reuse this cache;
  * do not add an `env`-keyed one.
@@ -220,7 +156,7 @@ async function handleChainStatusApplied<T extends Templates<Record<string, Templ
         onStatus: options.onStatus,
         fallbackTimeoutMs: options.delivery?.timeout?.notification,
         kv,
-        timer: options.timer,
+        timer: resolveTimer(env, options.timer),
       },
       store,
     });
@@ -228,18 +164,8 @@ async function handleChainStatusApplied<T extends Templates<Record<string, Templ
   }
 
   if (event.status === 'delivered' || event.status === 'read') {
-    const timer = (options.timer ?? env.FALLBACK_TIMER) as
-      { cancel?: (timerId: string) => void } | undefined;
-    try {
-      timer?.cancel?.(id);
-    } catch {
-      // ignore
-    }
-    try {
-      await kv.delete(`in:${id}`);
-    } catch {
-      // ignore
-    }
+    // The chain is terminal: nothing is left to fall back to, so drop the timer and the input.
+    await releaseChain(resolveTimer(env, options.timer), kv, id);
   }
 }
 
@@ -305,6 +231,9 @@ export function createMessaging<T extends Templates<any>>(
           store,
           defaults,
           onStatus: options.onStatus,
+          kv,
+          timer: resolveTimer(env, options.timer),
+          timeout: options.delivery?.timeout,
         },
         {
           templateName,

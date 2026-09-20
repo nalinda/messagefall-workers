@@ -12,17 +12,17 @@ import type { Fetcher } from '@cloudflare/workers-types';
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
 
+import {
+  type ClientSendResult,
+  createMessagingClient,
+  type CreateMessagingClientOptions,
+  type DeliveryOverrideFor,
+  type MessagingClient,
+} from '../../src/client/index.js';
 import type { MessageRecord } from '../../src/core/status.js';
 import type { InputOf } from '../../src/templates.js';
 import { defineTemplates } from '../../src/templates.js';
-import {
-  type ClientSendResult,
-  type CreateMessagingClientOptions,
-  createMockFetcher,
-  type DeliveryOverrideFor,
-  loadCreateMessagingClient,
-  type MessagingClient,
-} from '../helpers/client.js';
+import { createMockFetcher } from '../helpers/client.js';
 
 // Type assertion helpers matching test/templates.type.test.ts
 type Extends<A, B> = A extends B ? true : false;
@@ -102,7 +102,6 @@ describe('createMessagingClient type-level specifications (Issue #12)', () => {
     assertType<TestValidSendType>(true);
 
     // Runtime assertion tied to client send
-    const createMessagingClient = await loadCreateMessagingClient();
     const fetcher = createMockFetcher(() => {
       return Response.json({ id: 'msg_01J8TYPE001' }, { status: 200 });
     });
@@ -124,7 +123,6 @@ describe('createMessagingClient type-level specifications (Issue #12)', () => {
     assertType<TestUnknownTemplateRejected>(true);
 
     // Runtime assertion
-    const createMessagingClient = await loadCreateMessagingClient();
     const fetcher = createMockFetcher(() => {
       return Response.json({ error: 'Unknown template "nonExistentTemplate"' }, { status: 404 });
     });
@@ -160,7 +158,6 @@ describe('createMessagingClient type-level specifications (Issue #12)', () => {
     assertType<TestWrongTypeRejected>(true);
 
     // Runtime assertion
-    const createMessagingClient = await loadCreateMessagingClient();
     const fetcher = createMockFetcher(() => {
       return Response.json(
         { error: 'Template input validation failed: code must be a string' },
@@ -228,7 +225,6 @@ describe('createMessagingClient type-level specifications (Issue #12)', () => {
     assertType<TestBadOrderSmsFallbackRejected>(true);
 
     // Runtime assertion
-    const createMessagingClient = await loadCreateMessagingClient();
     const fetcher = createMockFetcher(() => {
       return Response.json({ id: 'msg_01J8OVERRIDE001' }, { status: 200 });
     });
@@ -262,7 +258,6 @@ describe('createMessagingClient type-level specifications (Issue #12)', () => {
     assertType<TestMultiAll>(true);
 
     // Runtime assertion
-    const createMessagingClient = await loadCreateMessagingClient();
     const fetcher = createMockFetcher(() => {
       return Response.json({ id: 'msg_01J8ALL001' }, { status: 200 });
     });
@@ -292,7 +287,6 @@ describe('createMessagingClient type-level specifications (Issue #12)', () => {
     assertType<TestStatusReturnType>(true);
 
     // Runtime assertion
-    const createMessagingClient = await loadCreateMessagingClient();
     const fetcher = createMockFetcher(() => {
       return Response.json({ error: 'not found' }, { status: 404 });
     });
@@ -309,7 +303,6 @@ describe('createMessagingClient type-level specifications (Issue #12)', () => {
     >;
     assertType<TestOptionsCompiles>(true);
 
-    const createMessagingClient = await loadCreateMessagingClient();
     const fetcher = createMockFetcher(() => {
       return Response.json({ id: 'msg_01J8OPT' }, { status: 200 });
     });

@@ -24,8 +24,9 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 
 import { createMessaging, defineTemplates } from '../../src/index.js';
+import { gmail, type GmailConfig } from '../../src/providers/gmail/index.js';
 import type { OutboundMeta, RenderedEmail } from '../../src/providers/types.js';
-import { decodeBase64Url, decodeRfc2047, type GmailConfig, loadGmail } from '../helpers/gmail.js';
+import { decodeBase64Url, decodeRfc2047 } from '../helpers/gmail.js';
 import { memoryKV, newEnv } from '../helpers/messaging.js';
 
 interface CapturedRequest {
@@ -104,8 +105,7 @@ describe('Gmail provider (Issue #20)', () => {
     return calls;
   }
 
-  it('implements the Provider contract with channel email, default name, and no webhook', async () => {
-    const gmail = await loadGmail();
+  it('implements the Provider contract with channel email, default name, and no webhook', () => {
     const provider = gmail(testConfig);
 
     expect(provider.name).toBe('gmail');
@@ -119,7 +119,6 @@ describe('Gmail provider (Issue #20)', () => {
   });
 
   it('exchanges refresh token for access token on first send and reuses it for subsequent send within TTL', async () => {
-    const gmail = await loadGmail();
     const provider = gmail(testConfig);
 
     let tokenExchangeCount = 0;
@@ -180,7 +179,6 @@ describe('Gmail provider (Issue #20)', () => {
   });
 
   it('reads cached token from tokenCache KV in a simulated fresh isolate without exchanging token', async () => {
-    const gmail = await loadGmail();
     const sharedKV = memoryKV();
 
     let tokenExchangeCount = 0;
@@ -231,7 +229,6 @@ describe('Gmail provider (Issue #20)', () => {
   });
 
   it('encodes text-only email as base64url MIME with required headers and CRLF line endings', async () => {
-    const gmail = await loadGmail();
     const provider = gmail(testConfig);
 
     let capturedSendBody: { raw?: string } | undefined;
@@ -287,7 +284,6 @@ describe('Gmail provider (Issue #20)', () => {
   });
 
   it('encodes multipart/alternative email with text before html when html is present', async () => {
-    const gmail = await loadGmail();
     const provider = gmail(testConfig);
 
     let capturedSendBody: { raw?: string } | undefined;
@@ -341,7 +337,6 @@ describe('Gmail provider (Issue #20)', () => {
   });
 
   it('correctly encodes non-ASCII Subject with RFC 2047 in the raw MIME payload', async () => {
-    const gmail = await loadGmail();
     const provider = gmail(testConfig);
 
     let capturedSendBody: { raw?: string } | undefined;
@@ -383,7 +378,6 @@ describe('Gmail provider (Issue #20)', () => {
   });
 
   it('refreshes token on 401 response and retries once; returns success if retry succeeds', async () => {
-    const gmail = await loadGmail();
     const provider = gmail(testConfig);
 
     let tokenExchangeCount = 0;
@@ -442,7 +436,6 @@ describe('Gmail provider (Issue #20)', () => {
   });
 
   it('fails with retryable: false on a second 401 after retry (no infinite refresh loop)', async () => {
-    const gmail = await loadGmail();
     const provider = gmail(testConfig);
 
     let tokenExchangeCount = 0;
@@ -496,7 +489,6 @@ describe('Gmail provider (Issue #20)', () => {
     [503, 'Service Unavailable', true],
     [504, 'Gateway Timeout', true],
   ])('maps HTTP %d on messages/send to retryable: true', async (status, message, expectedRetryable) => {
-    const gmail = await loadGmail();
     const provider = gmail(testConfig);
 
     mockFetchHandler((url) => {
@@ -529,7 +521,6 @@ describe('Gmail provider (Issue #20)', () => {
     [400, 'Invalid recipient address', false],
     [403, 'Insufficient Permission: scope missing', false],
   ])('maps HTTP %d to non-retryable with Google error message', async (status, message, expectedRetryable) => {
-    const gmail = await loadGmail();
     const provider = gmail(testConfig);
 
     mockFetchHandler((url) => {
@@ -559,7 +550,6 @@ describe('Gmail provider (Issue #20)', () => {
   });
 
   it('maps network errors (thrown fetch) to retryable: true', async () => {
-    const gmail = await loadGmail();
     const provider = gmail(testConfig);
 
     fetchSpy.mockImplementation(((url: RequestInfo | URL) => {
@@ -579,7 +569,6 @@ describe('Gmail provider (Issue #20)', () => {
   });
 
   it('integrates with createMessaging and records sent attempt status', async () => {
-    const gmail = await loadGmail();
     const provider = gmail(testConfig);
 
     mockFetchHandler((url) => {

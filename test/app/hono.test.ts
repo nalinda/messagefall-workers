@@ -19,11 +19,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
+import { createMessagingApp } from '../../src/app/hono.js';
+import type { Attempt, MessageRecord } from '../../src/core/status.js';
+import type { MessagingEnv } from '../../src/env.js';
 import type { Channel, Provider, RenderedEmail, RenderedSms, RenderedWhatsApp, SendResult } from '../../src/providers/types.js';
 import { defineTemplates } from '../../src/templates.js';
-import { loadCreateMessagingApp } from '../helpers/app.js';
-import type { MessagingEnv } from '../helpers/env.js';
-import { type Attempt, createMiniflareKV, type MessageRecord } from '../helpers/status.js';
+import { createMiniflareKV } from '../helpers/status.js';
 import { createMockExecutionContext } from '../helpers/webhook.js';
 
 function createRecordingProvider<R>(
@@ -93,8 +94,6 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
   });
 
   it('serves all three routes in a worker built from README quick start under miniflare', async () => {
-    const createMessagingApp = await loadCreateMessagingApp();
-
     const waProvider = createRecordingProvider<RenderedWhatsApp>('meta-whatsapp', 'whatsapp');
     const smsProvider = createRecordingProvider<RenderedSms>('http-sms', 'sms');
     const emailProvider = createRecordingProvider<RenderedEmail>('gmail', 'email');
@@ -197,8 +196,6 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
   });
 
   it('POST /send with delivery: "all" produces parallel attempts in the record', async () => {
-    const createMessagingApp = await loadCreateMessagingApp();
-
     const waProvider = createRecordingProvider<RenderedWhatsApp>('meta-whatsapp', 'whatsapp');
     const smsProvider = createRecordingProvider<RenderedSms>('http-sms', 'sms');
     const emailProvider = createRecordingProvider<RenderedEmail>('gmail', 'email');
@@ -251,8 +248,6 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
   });
 
   it('POST /send passes c.executionCtx to the send execution context', async () => {
-    const createMessagingApp = await loadCreateMessagingApp();
-
     const smsProvider = createRecordingProvider<RenderedSms>('http-sms', 'sms');
     const app = createMessagingApp({
       templates: testTemplates,
@@ -283,8 +278,6 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
   });
 
   it('POST /send returns 400 on input validation, missing fields, or invalid phone number', async () => {
-    const createMessagingApp = await loadCreateMessagingApp();
-
     const smsProvider = createRecordingProvider<RenderedSms>('http-sms', 'sms');
     const app = createMessagingApp({
       templates: testTemplates,
@@ -353,8 +346,6 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
   });
 
   it('POST /send returns 404 for unknown template', async () => {
-    const createMessagingApp = await loadCreateMessagingApp();
-
     const smsProvider = createRecordingProvider<RenderedSms>('http-sms', 'sms');
     const app = createMessagingApp({
       templates: testTemplates,
@@ -381,8 +372,6 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
   });
 
   it('POST /send returns 422 for policy error (delivery names channel template does not define)', async () => {
-    const createMessagingApp = await loadCreateMessagingApp();
-
     const smsProvider = createRecordingProvider<RenderedSms>('http-sms', 'sms');
     const app = createMessagingApp({
       templates: testTemplates,
@@ -410,8 +399,6 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
   });
 
   it('GET /status/:id returns the MessageRecord shape exported by #6 verbatim', async () => {
-    const createMessagingApp = await loadCreateMessagingApp();
-
     const smsProvider = createRecordingProvider<RenderedSms>('http-sms', 'sms');
     const app = createMessagingApp({
       templates: testTemplates,
@@ -474,8 +461,6 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
   });
 
   it('GET /status/:id returns 404 when record does not exist', async () => {
-    const createMessagingApp = await loadCreateMessagingApp();
-
     const smsProvider = createRecordingProvider<RenderedSms>('http-sms', 'sms');
     const app = createMessagingApp({
       templates: testTemplates,
@@ -492,8 +477,6 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
   });
 
   it('GET, POST /webhooks/:provider dispatches to handleWebhook and returns 404 for unknown provider', async () => {
-    const createMessagingApp = await loadCreateMessagingApp();
-
     const waProvider = createRecordingProvider<RenderedWhatsApp>('meta-whatsapp', 'whatsapp');
     waProvider.webhook = {
       parse: async (req: Request) => {
@@ -533,8 +516,6 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
   });
 
   it('normalises basePath so "/messaging" and "/messaging/" behave identically', async () => {
-    const createMessagingApp = await loadCreateMessagingApp();
-
     const smsProvider = createRecordingProvider<RenderedSms>('http-sms', 'sms');
 
     // 1. basePath without trailing slash
@@ -602,8 +583,6 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
   });
 
   it('runs startup validation on first request per isolate and reports configuration errors', async () => {
-    const createMessagingApp = await loadCreateMessagingApp();
-
     const duplicateProvider: Provider = {
       name: 'same-name',
       channel: 'sms',

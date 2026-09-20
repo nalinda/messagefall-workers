@@ -18,9 +18,10 @@ import path from 'node:path';
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { z } from 'zod';
 
+import { createMessagingClient } from '../../src/client/index.js';
 import type { MessageRecord } from '../../src/core/status.js';
 import { defineTemplates } from '../../src/templates.js';
-import { createMockFetcher, loadCreateMessagingClient, rejection } from '../helpers/client.js';
+import { createMockFetcher, rejection } from '../helpers/client.js';
 
 const rootDir = path.resolve(import.meta.dir, '../..');
 
@@ -92,8 +93,6 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
   describe('send request path and basePath normalization', () => {
     it('posts to https://messaging/send by default when basePath is omitted', async () => {
       expect(testTemplates).toBeDefined();
-      const createMessagingClient = await loadCreateMessagingClient();
-
       const fetcher = createMockFetcher((req) => {
         expect(req.method).toBe('POST');
         expect(req.url).toBe('https://messaging/send');
@@ -113,8 +112,6 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
     });
 
     it('normalizes basePath when specified with leading or trailing slashes', async () => {
-      const createMessagingClient = await loadCreateMessagingClient();
-
       const testCases = [
         { basePath: '/api/v1', expectedPath: 'https://messaging/api/v1/send' },
         { basePath: '/api/v1/', expectedPath: 'https://messaging/api/v1/send' },
@@ -146,8 +143,6 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
 
   describe('send request JSON body shape', () => {
     it('sends correct JSON payload without delivery override', async () => {
-      const createMessagingClient = await loadCreateMessagingClient();
-
       let receivedBody: unknown;
       const fetcher = createMockFetcher(async (req) => {
         receivedBody = await req.json();
@@ -170,8 +165,6 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
     });
 
     it('sends correct JSON payload with delivery override and email', async () => {
-      const createMessagingClient = await loadCreateMessagingClient();
-
       let receivedBody: unknown;
       const fetcher = createMockFetcher(async (req) => {
         receivedBody = await req.json();
@@ -204,8 +197,6 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
     });
 
     it('sends correct JSON payload with delivery: all', async () => {
-      const createMessagingClient = await loadCreateMessagingClient();
-
       let receivedBody: unknown;
       const fetcher = createMockFetcher(async (req) => {
         receivedBody = await req.json();
@@ -232,8 +223,6 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
 
   describe('send HTTP response status handling', () => {
     it('handles 200 response mapping to { ok: true, id }', async () => {
-      const createMessagingClient = await loadCreateMessagingClient();
-
       const fetcher = createMockFetcher(() => {
         return Response.json({ id: 'msg_01J8OK200' }, { status: 200 });
       });
@@ -249,8 +238,6 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
     });
 
     it('handles 400 validation error response mapping to { ok: false, status: 400, error } without throwing', async () => {
-      const createMessagingClient = await loadCreateMessagingClient();
-
       const fetcher = createMockFetcher(() => {
         return Response.json(
           { error: 'Template input validation failed: code must be 6 characters' },
@@ -273,8 +260,6 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
     });
 
     it('handles 404 unknown template error response mapping to { ok: false, status: 404, error } without throwing', async () => {
-      const createMessagingClient = await loadCreateMessagingClient();
-
       const fetcher = createMockFetcher(() => {
         return Response.json({ error: 'Unknown template "nonExistent"' }, { status: 404 });
       });
@@ -295,8 +280,6 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
     });
 
     it('handles 422 policy error response mapping to { ok: false, status: 422, error } without throwing', async () => {
-      const createMessagingClient = await loadCreateMessagingClient();
-
       const fetcher = createMockFetcher(() => {
         return Response.json(
           { error: 'No delivery channels available for template "smsOnly"' },
@@ -319,8 +302,6 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
     });
 
     it('handles 500 server error response mapping to { ok: false, status: 500, error } without throwing', async () => {
-      const createMessagingClient = await loadCreateMessagingClient();
-
       const fetcher = createMockFetcher(() => {
         return Response.json({ error: 'Internal Server Error' }, { status: 500 });
       });
@@ -340,8 +321,6 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
     });
 
     it('handles non-JSON error response body gracefully without throwing', async () => {
-      const createMessagingClient = await loadCreateMessagingClient();
-
       const fetcher = createMockFetcher(() => {
         return new Response('502 Bad Gateway', {
           status: 502,
@@ -366,8 +345,6 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
     });
 
     it('re-throws network/transport errors from binding fetch without swallowing into ok: false', async () => {
-      const createMessagingClient = await loadCreateMessagingClient();
-
       const fetcher = createMockFetcher(() => {
         throw new TypeError('Failed to fetch: connection refused');
       });
@@ -387,8 +364,6 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
 
   describe('status(id) behavior', () => {
     it('calls GET https://messaging/status/:id for default basePath and returns MessageRecord', async () => {
-      const createMessagingClient = await loadCreateMessagingClient();
-
       const mockRecord: MessageRecord = {
         id: 'msg_01J8STATUS001',
         template: 'loginCode',
@@ -424,8 +399,6 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
     });
 
     it('calls GET https://messaging/api/v1/status/:id when custom basePath is configured', async () => {
-      const createMessagingClient = await loadCreateMessagingClient();
-
       const mockRecord: MessageRecord = {
         id: 'msg_01J8STATUS002',
         template: 'matchFound',
@@ -453,8 +426,6 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
     });
 
     it('returns null when status endpoint returns 404 (not found)', async () => {
-      const createMessagingClient = await loadCreateMessagingClient();
-
       const fetcher = createMockFetcher((req) => {
         expect(req.url).toBe('https://messaging/status/msg_unknown_id');
         return Response.json({ error: 'Message record not found: msg_unknown_id' }, { status: 404 });
@@ -467,8 +438,6 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
     });
 
     it('re-throws network errors during status lookup', async () => {
-      const createMessagingClient = await loadCreateMessagingClient();
-
       const fetcher = createMockFetcher(() => {
         throw new Error('Service binding timeout');
       });

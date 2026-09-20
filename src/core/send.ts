@@ -5,6 +5,8 @@
  * @module
  */
 
+import type { KVNamespace } from '@cloudflare/workers-types';
+
 import type {
   Channel,
   OutboundMeta,
@@ -16,16 +18,20 @@ import type {
 } from '../providers/types.js';
 import {
   type AnyRendered,
+  assertNoOtpWhatsAppText,
   definedChannels,
   renderValidated,
   type TemplateDef,
   validateInput,
 } from '../templates.js';
-import { createLogger, scrubError } from './logger.js';
+import { createLogger } from './logger.js';
 import { type DeliveryOverride, type DeliveryPolicy, resolveDelivery } from './policy.js';
+import { scrubError } from './redact.js';
+import { releaseChain, type RenderInput, renderInputKey } from './render-input.js';
 import {
   type Attempt,
   deriveOverallStatus,
+  type FallbackTimerClient,
   type MessageRecord,
   MessageRecordNotFoundError,
   type StatusStore,
@@ -91,6 +97,9 @@ export interface SendDeps {
   store: StatusStore;
   defaults: DeliveryPolicy;
   onStatus?: (event: StatusCallbackEvent) => void | Promise<void>;
+  kv?: KVNamespace;
+  timer?: FallbackTimerClient;
+  timeout?: { otp?: number; notification?: number };
 }
 
 /**
@@ -251,18 +260,22 @@ export interface AttemptRecorder {
  * the last are `failed`).
  *
  * This is THE chain-advance logic; do not write a second one. It only sees failures the
- * provider reports synchronously. The asynchronous path (#7: a `failed` delivery status from a
- * webhook; #8: the fallback timer firing) must reuse it by calling `runChain` again with the
- * remaining channels, `policy.fallback.slice(record.chain.attempts.length)`, and a recorder
- * built with `attemptRecorder` (which appends the attempt, recomputes `chainStatus` and
- * `deriveOverallStatus`, indexes the providerId and notifies `onStatus`).
+ * provider reports synchronously. The asynchronous path (a `failed` delivery status from a
+ * webhook, or the fallback timer firing) reuses it: `advanceChain` calls `runChain` again with
+ * the channels left after the one the last attempt used, and a recorder built with
+ * `attemptRecorder` (which appends the attempt, recomputes `chainStatus` and
+ * `deriveOverallStatus`, indexes the providerId and notifies `onStatus`). It finds that
+ * remainder from the last attempt's own channel — `fallback.indexOf(last.channel)`, then
+ * `slice(index + 1)` — not from `record.chain.attempts.length`: a lost attempt write makes the
+ * attempt count diverge from the position in the chain, and only the channel says where the
+ * walk actually got to.
  *
  * Inputs for that async path: `runChain` needs a `ValidatedSendRequest` (to, locale, validated
- * input). The `MessageRecord` deliberately carries none of them. Per #7's own acceptance
- * criterion they live in a separate KV key, `in:<id>`, written on send with a TTL matching the
- * chain timeout and deleted once the chain reaches a terminal state; #7's fallback path reads
- * it (or takes a synchronous `input` pass-through) to rebuild the render with `validateInput` +
- * `renderValidated`. The `in:<id>` write is part of #7's scope and is not done here yet.
+ * input). The `MessageRecord` deliberately carries none of them, so they live in a separate KV
+ * key, `in:<id>`, written by `runSend` below with a TTL matching the chain timeout and stashed
+ * with the fallback timer too. The fallback path reads whichever of the two it finds (or takes
+ * a synchronous `input` pass-through) to rebuild the render with `validateInput` +
+ * `renderValidated`, and drops the key once the chain reaches a terminal state.
  */
 export async function runChain(
   req: ValidatedSendRequest,
@@ -437,6 +450,29 @@ export function attemptRecorder(
   };
 }
 
+async function cleanupExhaustedChain(
+  deps: SendDeps,
+  id: string,
+  policy: DeliveryPolicy,
+  results: PromiseSettledResult<Attempt[] | void>[]
+): Promise<void> {
+  if (policy.fallback.length === 0) {
+    return;
+  }
+  const chainResult = results[0];
+  if (chainResult.status !== 'fulfilled') {
+    return;
+  }
+  const chainAttempts = chainResult.value;
+  if (!Array.isArray(chainAttempts)) {
+    return;
+  }
+  const lastAttempt = chainAttempts.at(-1);
+  if (lastAttempt?.status === 'failed' && chainAttempts.length >= policy.fallback.length) {
+    await releaseChain(deps.timer, deps.kv, id);
+  }
+}
+
 async function deliver(
   deps: SendDeps,
   req: ValidatedSendRequest,
@@ -456,6 +492,8 @@ async function deliver(
   // Every attempt is persisted and observed the moment it settles; this only waits for all of
   // them, then surfaces the first persistence failure (provider failures never reject).
   const results = await Promise.allSettled([chainTask, ...alwaysTasks]);
+  await cleanupExhaustedChain(deps, id, policy, results);
+
   const rejected = results.find((r) => r.status === 'rejected');
   if (rejected) {
     throw rejected.reason;
@@ -525,16 +563,7 @@ function validateSendRequest(req: SendRequest): void {
   if (!E164.test(req.to)) {
     throw new RecipientError(req.to);
   }
-  if (
-    req.template.kind === 'otp' &&
-    req.template.whatsapp &&
-    'text' in req.template.whatsapp &&
-    typeof req.template.whatsapp.text === 'function'
-  ) {
-    throw new Error(
-      `Template "${req.templateName}" of kind "otp" must not use whatsapp.text (Meta requires an authentication template for codes)`
-    );
-  }
+  assertNoOtpWhatsAppText(req.templateName, req.template);
 }
 
 function resolveEffectivePolicy(
@@ -563,6 +592,11 @@ function resolveEffectivePolicy(
 
   return { policy, hasSkippedEmail };
 }
+
+const DEFAULT_CHAIN_TIMEOUT_MS: Record<MessageRecord['kind'], number> = {
+  otp: 30_000,
+  notification: 300_000,
+};
 
 /**
  * Runs the send pipeline for one message.
@@ -611,6 +645,30 @@ export async function runSend(
     createdAt: now,
     updatedAt: now,
   });
+
+  if (policy.fallback.length > 0) {
+    const timeoutMs =
+      deps.timeout?.[req.template.kind] ?? DEFAULT_CHAIN_TIMEOUT_MS[req.template.kind];
+    const inputPayload: RenderInput = {
+      input: req.input,
+      to: req.to,
+      ...(req.email !== undefined && { email: req.email }),
+      locale: req.locale,
+    };
+    if (deps.kv) {
+      const ttlSeconds = Math.max(60, Math.ceil(timeoutMs / 1000));
+      await deps.kv.put(renderInputKey(id), JSON.stringify(inputPayload), {
+        expirationTtl: ttlSeconds,
+      });
+    }
+    if (typeof deps.timer?.setState === 'function') {
+      try {
+        deps.timer.setState(id, timeoutMs, inputPayload);
+      } catch {
+        // Best effort
+      }
+    }
+  }
 
   if (ctx && req.template.kind === 'otp') {
     ctx.waitUntil(deliverGuarded(deps, validated, id, policy));

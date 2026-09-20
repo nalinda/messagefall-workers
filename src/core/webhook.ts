@@ -8,7 +8,9 @@
 import type { ExecutionContext, KVNamespace } from '@cloudflare/workers-types';
 
 import type { Channel, Provider, StatusEvent } from '../providers/types.js';
-import { createLogger, extractTemplateSensitiveStrings, scrubError } from './logger.js';
+import { createLogger } from './logger.js';
+import { extractTemplateSensitiveStrings, scrubError } from './redact.js';
+import { renderInputKey } from './render-input.js';
 import {
   type Attempt,
   deriveOverallStatus,
@@ -209,7 +211,7 @@ async function resolveWebhookSensitive(
   const kv = options.kv ?? (options.env?.MESSAGES_KV as KVNamespace | undefined);
   if (kv) {
     try {
-      const rawInput = await kv.get(`in:${refId}`);
+      const rawInput = await kv.get(renderInputKey(refId));
       if (rawInput) {
         sensitive.push(JSON.parse(rawInput));
       }

@@ -7,10 +7,9 @@
 import type { DurableObjectNamespace, KVNamespace } from '@cloudflare/workers-types';
 
 import type { MessagingOptions } from './core/messaging.js';
-import type { Channel, Provider } from './providers/types.js';
-import { definedChannels, type TemplateDef } from './templates.js';
-
-const VALID_CHANNELS: readonly Channel[] = ['whatsapp', 'sms', 'email'] as const;
+import { providerSetProblems } from './core/provider-set.js';
+import { type Channel, CHANNELS } from './providers/types.js';
+import { type TemplateDef, validateTemplateDef } from './templates.js';
 
 /**
  * Base environment bindings for messaging (Issue #13 interface).
@@ -64,7 +63,7 @@ function checkChannelList(channels: unknown, name: 'fallback' | 'always'): strin
   }
   const problems: string[] = [];
   for (const ch of channels) {
-    if (!VALID_CHANNELS.includes(ch as Channel)) {
+    if (!CHANNELS.includes(ch as Channel)) {
       problems.push(`Malformed default delivery policy: invalid ${name} channel "${String(ch)}"`);
     }
   }
@@ -110,82 +109,6 @@ function validateDeliveryPolicy(delivery: unknown): string[] {
   return problems;
 }
 
-function checkTemplateDelivery(
-  templateName: string,
-  def: TemplateDef<unknown>,
-  channels: readonly Channel[]
-): void {
-  if (!def.delivery || def.delivery === 'all') {
-    return;
-  }
-  const listToCheck = [...(def.delivery.fallback ?? []), ...(def.delivery.always ?? [])];
-  for (const ch of listToCheck) {
-    if (!channels.includes(ch)) {
-      throw new Error(`Template "${templateName}" delivery references undefined channel "${ch}"`);
-    }
-  }
-}
-
-function validateTemplateDefinition(templateName: string, def: TemplateDef<unknown>): void {
-  const channels = definedChannels(def);
-  if (channels.length === 0) {
-    throw new Error(`Template "${templateName}" must define at least one channel rendering`);
-  }
-  if (
-    def.kind === 'otp' &&
-    def.whatsapp &&
-    'text' in def.whatsapp &&
-    typeof def.whatsapp.text === 'function'
-  ) {
-    throw new Error(
-      `Template "${templateName}" of kind "otp" must not use whatsapp.text (Meta requires an authentication template for codes)`
-    );
-  }
-  checkTemplateDelivery(templateName, def, channels);
-}
-
-function validateProviderSlot(slot: string, p: Partial<Provider>): string[] {
-  const problems: string[] = [];
-  const knownSlots = new Set<string>(VALID_CHANNELS);
-  if (!knownSlots.has(slot)) {
-    problems.push(
-      `Provider slot "${slot}" is not a channel (expected one of ${VALID_CHANNELS.join(', ')})`
-    );
-  }
-  const missing: string[] = [];
-  if (!p.name || typeof p.name !== 'string') missing.push('name');
-  if (!p.channel || typeof p.channel !== 'string') missing.push('channel');
-  if (typeof p.send !== 'function') missing.push('send');
-  if (missing.length > 0) {
-    problems.push(`Provider "${slot}" is missing required field(s): ${missing.join(', ')}`);
-  }
-  if (p.channel && p.channel !== slot) {
-    problems.push(
-      `Provider "${slot}" declares channel "${p.channel}" but is registered under the "${slot}" slot`
-    );
-  }
-  return problems;
-}
-
-function validateProviderSlots(set: Record<string, unknown>): string[] {
-  const problems: string[] = [];
-  const seenNames = new Set<string>();
-
-  for (const [slot, candidate] of Object.entries(set)) {
-    if (!candidate) continue;
-    const p = candidate as Partial<Provider>;
-    problems.push(...validateProviderSlot(slot, p));
-    if (p.name && typeof p.name === 'string') {
-      if (seenNames.has(p.name)) {
-        problems.push(`Duplicate provider name "${p.name}" configured across multiple providers`);
-      } else {
-        seenNames.add(p.name);
-      }
-    }
-  }
-  return problems;
-}
-
 function validateProviders(env: unknown, providersFn: unknown): string[] {
   if (typeof providersFn !== 'function') {
     return ['providers option must be a function'];
@@ -205,7 +128,7 @@ function validateProviders(env: unknown, providersFn: unknown): string[] {
     return ['providers function must return an object'];
   }
 
-  return validateProviderSlots(set);
+  return providerSetProblems(set);
 }
 
 function validateTemplates(templates: unknown): string[] {
@@ -215,7 +138,7 @@ function validateTemplates(templates: unknown): string[] {
   const problems: string[] = [];
   for (const [templateName, def] of Object.entries(templates)) {
     try {
-      validateTemplateDefinition(templateName, def as TemplateDef<unknown>);
+      validateTemplateDef(templateName, def as TemplateDef<unknown>);
     } catch (err: unknown) {
       problems.push(err instanceof Error ? err.message : String(err));
     }

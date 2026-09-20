@@ -9,7 +9,6 @@
 import { describe, expect, it, spyOn } from 'bun:test';
 
 import { createMessaging, defineTemplates } from '../../src/index.js';
-import { newEnv, pingTemplates as templates } from '../helpers/messaging.js';
 import type {
   DeliveryStatus,
   OutboundMeta,
@@ -19,7 +18,8 @@ import type {
   RenderedWhatsApp,
   SendResult,
   StatusEvent,
-} from './types.js';
+} from '../../src/providers/types.js';
+import { newEnv, pingTemplates as templates } from '../helpers/messaging.js';
 
 // Type-level assertion helpers
 type Extends<A, B> = A extends B ? true : false;

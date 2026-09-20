@@ -9,8 +9,8 @@
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 
+import { formatHttpError, isRetryableStatus } from '../_shared/http.js';
 import { buildMimeMessage } from '../_shared/mime.js';
-import { formatHttpError, isRetryableStatus } from '../shared.js';
 import type { OutboundMeta, Provider, RenderedEmail, SendResult } from '../types.js';
 import { createGmailTokenManager, type GmailTokenManager } from './oauth.js';
 

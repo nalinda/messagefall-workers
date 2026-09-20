@@ -17,7 +17,8 @@ import type {
   StatusEvent,
 } from '../types.js';
 
-export type AnyRendered = RenderedSms | RenderedWhatsApp | RenderedEmail | Record<string, unknown>;
+export type ConsoleRendered =
+  RenderedSms | RenderedWhatsApp | RenderedEmail | Record<string, unknown>;
 
 /**
  * Loggable name for `message.template`, which may be a string or a WhatsApp config (#28).
@@ -68,7 +69,7 @@ export interface ConsoleProviderOptions {
  * @param options - Console provider configuration options.
  * @returns A Provider instance for console logging.
  */
-export function consoleProvider<R = AnyRendered>(
+export function consoleProvider<R = ConsoleRendered>(
   options: ConsoleProviderOptions
 ): Provider<R> & {
   onSimulatedStatus?: (event: StatusEvent) => void;

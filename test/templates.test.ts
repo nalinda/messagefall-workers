@@ -20,8 +20,8 @@ import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
 
 import type { Channel } from '../src/providers/types.js';
+import { definedChannels, defineTemplates, render, type TemplateDef } from '../src/templates.js';
 import type { StandardSchemaV1 } from '../src/types.js';
-import { loadTemplatesApi, type TemplateDef } from './helpers/templates.js';
 
 interface UserScore {
   username: string;
@@ -37,9 +37,7 @@ function isUserScore(val: unknown): val is UserScore {
 }
 
 describe('defineTemplates: Definition-time validation', () => {
-  it('throws naming the template when no channel rendering is defined', async () => {
-    const { defineTemplates } = await loadTemplatesApi();
-
+  it('throws naming the template when no channel rendering is defined', () => {
     const emptyTemplateCatalog = {
       emptyNotification: {
         input: z.object({ userId: z.string() }),
@@ -53,9 +51,7 @@ describe('defineTemplates: Definition-time validation', () => {
     );
   });
 
-  it('throws naming the template when kind: "otp" uses whatsapp.text', async () => {
-    const { defineTemplates } = await loadTemplatesApi();
-
+  it('throws naming the template when kind: "otp" uses whatsapp.text', () => {
     const invalidOtpCatalog = {
       loginCode: {
         input: z.object({ code: z.string().length(6) }),
@@ -72,9 +68,7 @@ describe('defineTemplates: Definition-time validation', () => {
     );
   });
 
-  it('allows kind: "otp" with whatsapp.template (Meta authentication template)', async () => {
-    const { defineTemplates } = await loadTemplatesApi();
-
+  it('allows kind: "otp" with whatsapp.template (Meta authentication template)', () => {
     const validOtpCatalog = {
       loginCode: {
         input: z.object({ code: z.string().length(6) }),
@@ -93,9 +87,7 @@ describe('defineTemplates: Definition-time validation', () => {
     expect(templates.loginCode).toBeDefined();
   });
 
-  it('allows kind: "notification" with whatsapp.text', async () => {
-    const { defineTemplates } = await loadTemplatesApi();
-
+  it('allows kind: "notification" with whatsapp.text', () => {
     const validNotificationCatalog = {
       orderAlert: {
         input: z.object({ orderId: z.string() }),
@@ -111,9 +103,7 @@ describe('defineTemplates: Definition-time validation', () => {
     expect(templates.orderAlert).toBeDefined();
   });
 
-  it('throws naming the template when delivery.fallback names an undefined channel', async () => {
-    const { defineTemplates } = await loadTemplatesApi();
-
+  it('throws naming the template when delivery.fallback names an undefined channel', () => {
     const invalidDeliveryFallback = {
       smsOnlyOtp: {
         input: z.object({ code: z.string().length(6) }),
@@ -129,9 +119,7 @@ describe('defineTemplates: Definition-time validation', () => {
     ).toThrow(/smsOnlyOtp/);
   });
 
-  it('throws naming the template when delivery.always names an undefined channel', async () => {
-    const { defineTemplates } = await loadTemplatesApi();
-
+  it('throws naming the template when delivery.always names an undefined channel', () => {
     const invalidDeliveryAlways = {
       smsOnlyAlert: {
         input: z.object({ msg: z.string() }),
@@ -147,9 +135,7 @@ describe('defineTemplates: Definition-time validation', () => {
     ).toThrow(/smsOnlyAlert/);
   });
 
-  it('allows delivery: "all" shorthand for any defined channels', async () => {
-    const { defineTemplates } = await loadTemplatesApi();
-
+  it('allows delivery: "all" shorthand for any defined channels', () => {
     const validAllDeliveryCatalog = {
       smsOnlyBroadcast: {
         input: z.object({ msg: z.string() }),
@@ -163,9 +149,7 @@ describe('defineTemplates: Definition-time validation', () => {
     expect(templates.smsOnlyBroadcast).toBeDefined();
   });
 
-  it('allows delivery override naming only defined channels', async () => {
-    const { defineTemplates } = await loadTemplatesApi();
-
+  it('allows delivery override naming only defined channels', () => {
     const validOverrideCatalog = {
       multiChannelMessage: {
         input: z.object({ title: z.string(), body: z.string() }),
@@ -191,9 +175,7 @@ describe('defineTemplates: Definition-time validation', () => {
 });
 
 describe('Locale resolution of language for WhatsApp templates', () => {
-  it('resolves exact locale match from language record', async () => {
-    const { render } = await loadTemplatesApi();
-
+  it('resolves exact locale match from language record', () => {
     const template: TemplateDef<{ code: string }> = {
       input: z.object({ code: z.string() }),
       kind: 'otp',
@@ -214,9 +196,7 @@ describe('Locale resolution of language for WhatsApp templates', () => {
     });
   });
 
-  it('falls back to "default" key when locale is not in record', async () => {
-    const { render } = await loadTemplatesApi();
-
+  it('falls back to "default" key when locale is not in record', () => {
     const template: TemplateDef<{ code: string }> = {
       input: z.object({ code: z.string() }),
       kind: 'otp',
@@ -237,9 +217,7 @@ describe('Locale resolution of language for WhatsApp templates', () => {
     });
   });
 
-  it('throws render-time error when locale is missing and no "default" key is present', async () => {
-    const { render } = await loadTemplatesApi();
-
+  it('throws render-time error when locale is missing and no "default" key is present', () => {
     const template: TemplateDef<{ code: string }> = {
       input: z.object({ code: z.string() }),
       kind: 'otp',
@@ -255,9 +233,7 @@ describe('Locale resolution of language for WhatsApp templates', () => {
     );
   });
 
-  it('uses static string language for any locale', async () => {
-    const { render } = await loadTemplatesApi();
-
+  it('uses static string language for any locale', () => {
     const template: TemplateDef<{ alertId: string }> = {
       input: z.object({ alertId: z.string() }),
       kind: 'notification',
@@ -280,9 +256,7 @@ describe('Locale resolution of language for WhatsApp templates', () => {
 });
 
 describe('render() returns exact shapes from #18 and never mutates input', () => {
-  it('returns RenderedWhatsApp with template shape', async () => {
-    const { render } = await loadTemplatesApi();
-
+  it('returns RenderedWhatsApp with template shape', () => {
     const template: TemplateDef<{ code: string }> = {
       input: z.object({ code: z.string() }),
       kind: 'otp',
@@ -303,9 +277,7 @@ describe('render() returns exact shapes from #18 and never mutates input', () =>
     });
   });
 
-  it('returns RenderedWhatsApp with text shape', async () => {
-    const { render } = await loadTemplatesApi();
-
+  it('returns RenderedWhatsApp with text shape', () => {
     const template: TemplateDef<{ message: string }> = {
       input: z.object({ message: z.string() }),
       kind: 'notification',
@@ -320,9 +292,7 @@ describe('render() returns exact shapes from #18 and never mutates input', () =>
     });
   });
 
-  it('returns RenderedSms shape', async () => {
-    const { render } = await loadTemplatesApi();
-
+  it('returns RenderedSms shape', () => {
     const template: TemplateDef<{ code: string }> = {
       input: z.object({ code: z.string() }),
       kind: 'otp',
@@ -340,9 +310,7 @@ describe('render() returns exact shapes from #18 and never mutates input', () =>
     });
   });
 
-  it('returns RenderedEmail shape with subject, text, and optional html', async () => {
-    const { render } = await loadTemplatesApi();
-
+  it('returns RenderedEmail shape with subject, text, and optional html', () => {
     const template: TemplateDef<{ title: string; url: string }> = {
       input: z.object({ title: z.string(), url: z.string() }),
       kind: 'notification',
@@ -366,9 +334,7 @@ describe('render() returns exact shapes from #18 and never mutates input', () =>
     });
   });
 
-  it('never mutates input passed to render()', async () => {
-    const { render } = await loadTemplatesApi();
-
+  it('never mutates input passed to render()', () => {
     const template: TemplateDef<{ code: string; details: { attempts: number } }> = {
       input: z.object({
         code: z.string(),
@@ -391,9 +357,7 @@ describe('render() returns exact shapes from #18 and never mutates input', () =>
     });
   });
 
-  it('throws when rendering a channel that the template does not define', async () => {
-    const { render } = await loadTemplatesApi();
-
+  it('throws when rendering a channel that the template does not define', () => {
     const smsOnlyTemplate: TemplateDef<{ code: string }> = {
       input: z.object({ code: z.string() }),
       kind: 'otp',
@@ -407,9 +371,7 @@ describe('render() returns exact shapes from #18 and never mutates input', () =>
 });
 
 describe('Standard Schema validation during render()', () => {
-  it('validates input with Standard Schema and transforms/surfaces values', async () => {
-    const { render } = await loadTemplatesApi();
-
+  it('validates input with Standard Schema and transforms/surfaces values', () => {
     const template: TemplateDef<{ count: number }> = {
       input: z.object({ count: z.coerce.number() }),
       kind: 'notification',
@@ -420,9 +382,7 @@ describe('Standard Schema validation during render()', () => {
     expect(result).toEqual({ text: 'Count: 42' });
   });
 
-  it('throws a typed validation error when input fails schema validation', async () => {
-    const { render } = await loadTemplatesApi();
-
+  it('throws a typed validation error when input fails schema validation', () => {
     const template: TemplateDef<{ code: string }> = {
       input: z.object({ code: z.string().length(6) }),
       kind: 'otp',
@@ -434,9 +394,7 @@ describe('Standard Schema validation during render()', () => {
 });
 
 describe('Zod and Valibot interoperability via Standard Schema only', () => {
-  it('works with Zod schemas via Standard Schema (~standard)', async () => {
-    const { defineTemplates, render } = await loadTemplatesApi();
-
+  it('works with Zod schemas via Standard Schema (~standard)', () => {
     const zodCatalog = defineTemplates({
       zodOtp: {
         input: z.object({ code: z.string().length(6) }),
@@ -450,9 +408,7 @@ describe('Zod and Valibot interoperability via Standard Schema only', () => {
     expect(() => render(zodCatalog.zodOtp, 'sms', { code: 'too_short' }, 'en')).toThrow();
   });
 
-  it('works with Valibot schemas via Standard Schema (~standard) without direct dependency', async () => {
-    const { defineTemplates, render } = await loadTemplatesApi();
-
+  it('works with Valibot schemas via Standard Schema (~standard) without direct dependency', () => {
     // Pure Standard Schema compliant validator simulating Valibot
     const valibotStandardSchema: StandardSchemaV1<unknown, UserScore> = {
       '~standard': {
@@ -502,9 +458,7 @@ describe('Zod and Valibot interoperability via Standard Schema only', () => {
 });
 
 describe('definedChannels helper', () => {
-  it('returns array of channels defined on the template', async () => {
-    const { definedChannels } = await loadTemplatesApi();
-
+  it('returns array of channels defined on the template', () => {
     const waAndSms: TemplateDef<{ code: string }> = {
       input: z.object({ code: z.string() }),
       kind: 'otp',

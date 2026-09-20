@@ -139,11 +139,18 @@ function validateDeliveryChannels(
   }
 }
 
-function validateTemplateDef(templateName: string, def: TemplateDef<unknown>): void {
-  const channels = definedChannels(def);
-  if (channels.length === 0) {
-    throw new Error(`Template "${templateName}" must define at least one channel rendering`);
-  }
+/**
+ * Meta requires an authentication template for one-time codes, so an `otp` template may not
+ * render WhatsApp through free-form `whatsapp.text`.
+ *
+ * The rule is enforced both at catalogue definition time ({@link defineTemplates}, `validateEnv`)
+ * and again per send, so this is the one statement of it.
+ *
+ * @param templateName - Template name, for the error message.
+ * @param def - The template definition to check.
+ * @throws {Error} If an `otp` template defines `whatsapp.text`.
+ */
+export function assertNoOtpWhatsAppText(templateName: string, def: TemplateDef<unknown>): void {
   if (
     def.kind === 'otp' &&
     def.whatsapp &&
@@ -154,6 +161,22 @@ function validateTemplateDef(templateName: string, def: TemplateDef<unknown>): v
       `Template "${templateName}" of kind "otp" must not use whatsapp.text (Meta requires an authentication template for codes)`
     );
   }
+}
+
+/**
+ * Validates one template definition: it renders at least one channel, an `otp` template does not
+ * use `whatsapp.text`, and any `delivery` override only names channels the template defines.
+ *
+ * @param templateName - Template name, for the error messages.
+ * @param def - The template definition to validate.
+ * @throws {Error} On the first problem found.
+ */
+export function validateTemplateDef(templateName: string, def: TemplateDef<unknown>): void {
+  const channels = definedChannels(def);
+  if (channels.length === 0) {
+    throw new Error(`Template "${templateName}" must define at least one channel rendering`);
+  }
+  assertNoOtpWhatsAppText(templateName, def);
   if (def.delivery) {
     validateDeliveryChannels(templateName, def.delivery, channels);
   }

@@ -1,65 +1,12 @@
 /**
- * Test helpers and type mirrors for Webhook dispatch specifications (Issue #5).
+ * Test helpers for Webhook dispatch specifications (Issue #5).
+ *
+ * The dispatch options, handler signature and StatusApplied event are imported
+ * directly from src/core/webhook.js by the tests; only the ExecutionContext
+ * double lives here.
  *
  * @module
  */
-
-import type { ExecutionContext, KVNamespace } from '@cloudflare/workers-types';
-
-import type { ProviderSet } from '../../src/core/messaging.js';
-import type { StatusStore } from '../../src/core/status.js';
-import { createMessaging } from '../../src/index.js';
-import type { Channel, Provider, StatusEvent } from '../../src/providers/types.js';
-import type { MessagingEnv } from '../../src/types.js';
-import { memoryKV, pingTemplates } from './messaging.js';
-
-/**
- * Event emitted when a delivery status update is applied to an attempt.
- * Consumed by fallback handler (#7) and timer cancel path (#8).
- */
-export interface StatusApplied {
-  /**
-   * Internal message identifier.
-   */
-  id: string;
-  /**
-   * Delivery channel of the attempt.
-   */
-  channel: Channel;
-  /**
-   * Name of the provider handling the attempt.
-   */
-  provider: string;
-  /**
-   * Part of the delivery policy ('chain' for fallback chain, 'always' for parallel always-on).
-   */
-  part: 'chain' | 'always';
-  /**
-   * Parsed delivery status event.
-   */
-  event: StatusEvent;
-}
-
-/**
- * Webhook dispatch options for testing.
- */
-export interface WebhookDispatchOptions {
-  providers?: Record<string, Provider> | Provider[];
-  kv?: KVNamespace;
-  store?: StatusStore;
-  onStatus?: (event: unknown) => void | Promise<void>;
-  onStatusApplied?: (event: StatusApplied) => void | Promise<void>;
-  env?: Record<string, unknown>;
-}
-
-/**
- * Webhook handler function signature.
- */
-export type WebhookHandler = (
-  providerName: string,
-  request: Request,
-  ctx?: ExecutionContext
-) => Promise<Response>;
 
 /**
  * Mock ExecutionContext for verifying ctx.waitUntil usage.
@@ -88,53 +35,4 @@ export function createMockExecutionContext(): MockExecutionContext {
       await Promise.all(promises);
     },
   };
-}
-
-/**
- * Loads the webhook handler from src/core/webhook.js if implemented, or falls back to
- * createMessaging so tests execute real assertions and fail for the right reason.
- */
-export async function loadWebhookHandler(
-  options: WebhookDispatchOptions
-): Promise<WebhookHandler> {
-  try {
-    const webhookEntry = '../../src/core/webhook.js';
-    const mod = (await import(webhookEntry)) as unknown as {
-      createWebhookHandler?: (opts: WebhookDispatchOptions) => WebhookHandler;
-      handleWebhook?: (
-        providerName: string,
-        request: Request,
-        ctx?: ExecutionContext,
-        opts?: WebhookDispatchOptions
-      ) => Promise<Response>;
-    };
-
-    if (mod.createWebhookHandler) {
-      return mod.createWebhookHandler(options);
-    }
-    if (mod.handleWebhook) {
-      return (providerName, request, ctx) =>
-        mod.handleWebhook!(providerName, request, ctx, options);
-    }
-  } catch {
-    // webhook.js not yet implemented
-  }
-
-  // Fallback: the real createMessaging, whose providers are a per-channel set.
-  const list = Array.isArray(options.providers)
-    ? options.providers
-    : Object.values(options.providers ?? {});
-  const set: ProviderSet = {};
-  for (const provider of list) {
-    (set as Record<string, Provider>)[provider.channel] = provider;
-  }
-  const env = { MESSAGES_KV: options.kv ?? memoryKV(), ...options.env } as MessagingEnv;
-  const messaging = createMessaging(env, {
-    templates: pingTemplates,
-    providers: () => set,
-    kv: options.kv,
-  });
-
-  return (providerName: string, request: Request, ctx?: ExecutionContext) =>
-    messaging.handleWebhook(providerName, request, ctx);
 }

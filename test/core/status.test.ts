@@ -16,25 +16,22 @@ import type { KVNamespace, KVNamespacePutOptions } from '@cloudflare/workers-typ
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
 import type { DeliveryPolicy } from '../../src/core/policy.js';
-import type { Channel, DeliveryStatus } from '../../src/providers/types.js';
-import { render } from '../../src/templates.js';
 import {
   type Attempt,
-  createMiniflareKV,
-  loadStatusApi,
+  kvStatusStore,
   type MessageRecord,
   type ProviderRef,
-  type StatusApi,
   type StatusStore,
-} from '../helpers/status.js';
+} from '../../src/core/status.js';
+import type { Channel, DeliveryStatus } from '../../src/providers/types.js';
+import { render } from '../../src/templates.js';
+import { createMiniflareKV } from '../helpers/status.js';
 
 describe('Issue #6: Delivery-status store in KV', () => {
-  let api: StatusApi;
   let kv: KVNamespace;
   let disposeKv: () => Promise<void>;
 
   beforeEach(async () => {
-    api = await loadStatusApi();
     const miniflareEnv = await createMiniflareKV();
     kv = miniflareEnv.kv;
     disposeKv = miniflareEnv.dispose;
@@ -46,7 +43,7 @@ describe('Issue #6: Delivery-status store in KV', () => {
 
   describe('kvStatusStore CRUD and Key Mapping', () => {
     it('creates and retrieves a MessageRecord round-trip with msg:<id> key mapping', async () => {
-      const store: StatusStore = api.kvStatusStore(kv);
+      const store: StatusStore = kvStatusStore(kv);
 
       const record: MessageRecord = {
         id: 'msg_01J9TEST000000000000000001',
@@ -81,7 +78,7 @@ describe('Issue #6: Delivery-status store in KV', () => {
     });
 
     it('performs idempotent read-modify-write updates on MessageRecord', async () => {
-      const store: StatusStore = api.kvStatusStore(kv);
+      const store: StatusStore = kvStatusStore(kv);
 
       const initialRecord: MessageRecord = {
         id: 'msg_01J9TEST000000000000000002',
@@ -149,7 +146,7 @@ describe('Issue #6: Delivery-status store in KV', () => {
     });
 
     it('throws when attempting to update a non-existent record', async () => {
-      const store: StatusStore = api.kvStatusStore(kv);
+      const store: StatusStore = kvStatusStore(kv);
 
       let thrownError: Error | undefined;
       try {
@@ -162,7 +159,7 @@ describe('Issue #6: Delivery-status store in KV', () => {
     });
 
     it('indexes and looks up providerId round-trip with pid:<providerId> key mapping', async () => {
-      const store: StatusStore = api.kvStatusStore(kv);
+      const store: StatusStore = kvStatusStore(kv);
 
       const providerId = 'wamid.HBgL9876543210';
       const ref: ProviderRef = {
@@ -203,7 +200,7 @@ describe('Issue #6: Delivery-status store in KV', () => {
         return originalPut(key, value as string, options);
       }) as unknown as typeof kv.put;
 
-      const store: StatusStore = api.kvStatusStore(kv);
+      const store: StatusStore = kvStatusStore(kv);
 
       const record: MessageRecord = {
         id: 'msg_01J9TEST000000000000000004',
@@ -248,7 +245,7 @@ describe('Issue #6: Delivery-status store in KV', () => {
       }) as unknown as typeof kv.put;
 
       const customTtl = 86_400; // 1 day
-      const store: StatusStore = api.kvStatusStore(kv, { ttlSeconds: customTtl });
+      const store: StatusStore = kvStatusStore(kv, { ttlSeconds: customTtl });
 
       const record: MessageRecord = {
         id: 'msg_01J9TEST000000000000000005',
@@ -284,7 +281,7 @@ describe('Issue #6: Delivery-status store in KV', () => {
 
     describe('Chain-present policy', () => {
       it('derives pending when no attempts have been recorded', async () => {
-        const store = api.kvStatusStore(kv);
+        const store = kvStatusStore(kv);
         const record: MessageRecord = {
           id: 'msg_chain_pending',
           template: 'otp',
@@ -302,7 +299,7 @@ describe('Issue #6: Delivery-status store in KV', () => {
       });
 
       it('derives overall status directly from chain status regardless of always attempts', async () => {
-        const store = api.kvStatusStore(kv);
+        const store = kvStatusStore(kv);
 
         const statuses: DeliveryStatus[] = ['sent', 'delivered', 'read', 'failed'];
 
@@ -346,7 +343,7 @@ describe('Issue #6: Delivery-status store in KV', () => {
 
     describe('Chain-absent policy', () => {
       it('derives pending when always attempts array is empty', async () => {
-        const store = api.kvStatusStore(kv);
+        const store = kvStatusStore(kv);
         const record: MessageRecord = {
           id: 'msg_no_chain_pending',
           template: 'broadcast',
@@ -364,7 +361,7 @@ describe('Issue #6: Delivery-status store in KV', () => {
       });
 
       it('derives worst status across always attempts using failed < sent < delivered < read ordering', async () => {
-        const store = api.kvStatusStore(kv);
+        const store = kvStatusStore(kv);
 
         const testCases: Array<{
           attempts: DeliveryStatus[];
@@ -439,7 +436,7 @@ describe('Issue #6: Delivery-status store in KV', () => {
       const renderedText = (renderedSms as { text: string }).text;
       expect(renderedText).toContain(secretCode);
 
-      const store = api.kvStatusStore(kv);
+      const store = kvStatusStore(kv);
 
       // Create initial message record for dispatch
       const messageId = 'msg_01J9SECRET0000000000000001';

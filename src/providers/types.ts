@@ -8,9 +8,14 @@
  */
 
 /**
+ * Every supported message delivery channel, in the canonical order.
+ */
+export const CHANNELS = ['whatsapp', 'sms', 'email'] as const;
+
+/**
  * Supported message delivery channels.
  */
-export type Channel = 'whatsapp' | 'sms' | 'email';
+export type Channel = (typeof CHANNELS)[number];
 
 /**
  * Message delivery status reported by providers or webhooks.
