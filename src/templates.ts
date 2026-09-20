@@ -183,18 +183,22 @@ function formatIssuePath(path?: StandardSchemaIssue['path']): string {
 }
 
 /**
- * Validate a raw input payload against a template's schema without rendering.
+ * Validate a raw input payload against a template's schema (and the OTP code length rule)
+ * without rendering. Returns the schema's output so callers can hand the transformed value to
+ * {@link renderValidated} exactly once.
  *
  * @param def - Template definition.
  * @param input - Input payload before validation.
  * @returns The validated (and possibly transformed) input.
  * @throws {TemplateValidationError} If the input fails the schema.
  */
-export function validateTemplateInput<In>(def: TemplateDef<In>, input: unknown): In {
-  return validateInput(def, input);
+export function validateInput<In>(def: TemplateDef<In>, input: unknown): In {
+  const validated = validateSchema(def, input);
+  validateOtpCode(def.kind, validated);
+  return validated;
 }
 
-function validateInput<In>(def: TemplateDef<In>, input: unknown): In {
+function validateSchema<In>(def: TemplateDef<In>, input: unknown): In {
   if (!def.input || !('~standard' in def.input)) {
     return input as In;
   }
@@ -318,13 +322,29 @@ export function render<In = unknown>(
   input: unknown,
   locale: Locale
 ): RenderedWhatsApp | RenderedSms | RenderedEmail {
+  return renderValidated(def, channel, validateInput(def, input), locale);
+}
+
+/**
+ * Render a template for a specific channel from input that {@link validateInput} has already
+ * accepted. Skips validation so a transforming schema is applied exactly once per send.
+ *
+ * @param def - Template definition.
+ * @param channel - Channel to render for.
+ * @param validatedInput - Output of {@link validateInput} for this template.
+ * @param locale - Target locale identifier.
+ * @returns Rendered channel payload.
+ */
+export function renderValidated<In = unknown>(
+  def: TemplateDef<In>,
+  channel: Channel,
+  validatedInput: In,
+  locale: Locale
+): RenderedWhatsApp | RenderedSms | RenderedEmail {
   const channels = definedChannels(def as TemplateDef<unknown>);
   if (!channels.includes(channel)) {
     throw new Error(`Channel "${channel}" is not defined on this template`);
   }
-
-  const validatedInput = validateInput(def, input);
-  validateOtpCode(def.kind, validatedInput);
 
   switch (channel) {
     case 'whatsapp': {

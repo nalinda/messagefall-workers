@@ -276,6 +276,39 @@ describe('Console provider send test', () => {
     }
   });
 
+  it('logs the Meta template name, never params or [object Object], when template is a config object', async () => {
+    const consoleProvider = await loadConsoleProvider();
+    expect(consoleProvider).toBeDefined();
+
+    const provider = consoleProvider ? consoleProvider({ channel: 'whatsapp' }) : null;
+    expect(provider).not.toBeNull();
+    if (!provider) return;
+
+    const capture = captureConsole();
+    try {
+      const code = '774411';
+      // What the send pipeline hands a WhatsApp provider for a template render: the rendered
+      // config occupies `template`, not the catalogue name.
+      const message = {
+        to: '+94775556666',
+        messageId: 'msg_wa_otp_004',
+        template: { name: 'auth_code', language: 'en_US', params: [code] },
+        kind: 'otp' as const,
+        locale: 'en',
+      } as unknown as Parameters<typeof provider.send>[0];
+
+      const result = await provider.send(message);
+      expect(result.ok).toBe(true);
+
+      const allLogs = capture.logs.join(' ');
+      expect(allLogs).toContain('template=auth_code');
+      expect(allLogs).not.toContain('[object Object]');
+      expect(allLogs).not.toContain(code);
+    } finally {
+      capture.restore();
+    }
+  });
+
   it('never logs email subject, text, or html when kind is otp', async () => {
     const consoleProvider = await loadConsoleProvider();
     expect(consoleProvider).toBeDefined();

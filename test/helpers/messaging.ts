@@ -6,64 +6,15 @@
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 
-import type { DeliveryOverride, DeliveryPolicy } from '../../src/core/policy.js';
-import type { MessageRecord } from '../../src/core/status.js';
-import type {
-  Channel,
-  DeliveryStatus,
-  OutboundMeta,
-  Provider,
-  RenderedEmail,
-  RenderedSms,
-  RenderedWhatsApp,
-  SendResult,
-} from '../../src/providers/types.js';
-import type { Templates } from '../../src/templates.js';
-import type { MessagingEnv } from '../../src/types.js';
+import { createMessaging } from '../../src/core/messaging.js';
+import type { Channel, OutboundMeta, Provider, SendResult } from '../../src/providers/types.js';
 
-/**
- * Provider set built from env, one provider per channel at most.
- */
-export interface ProviderSet {
-  whatsapp?: Provider<RenderedWhatsApp>;
-  sms?: Provider<RenderedSms>;
-  email?: Provider<RenderedEmail>;
-}
-
-/**
- * Status event delivered to `onStatus`.
- */
-export interface StatusCallbackEvent {
-  id: string;
-  channel: Channel;
-  provider: string;
-  status: DeliveryStatus;
-}
-
-/**
- * Options accepted by createMessaging.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export interface MessagingOptions<T extends Templates<any> = Templates<any>> {
-  templates: T;
-  providers: (env: MessagingEnv) => ProviderSet;
-  delivery?: Partial<DeliveryPolicy> & { timeout?: { otp?: number; notification?: number } };
-  kv?: KVNamespace;
-  timer?: unknown;
-  statusTtl?: number;
-  onStatus?: (event: StatusCallbackEvent) => void | Promise<void>;
-}
-
-/**
- * Arguments to Messaging#send.
- */
-export interface SendArgs {
-  template: string;
-  to: string;
-  locale: string;
-  input: unknown;
-  delivery?: DeliveryOverride;
-}
+export type {
+  Messaging,
+  MessagingOptions,
+  ProviderSet,
+  StatusCallbackEvent,
+} from '../../src/core/messaging.js';
 
 /**
  * Minimal ExecutionContext shape.
@@ -74,50 +25,18 @@ export interface TestExecutionContext {
 }
 
 /**
- * Messaging instance returned by createMessaging.
- */
-export interface Messaging {
-  send(args: SendArgs, ctx?: TestExecutionContext): Promise<{ id: string }>;
-  status(id: string): Promise<MessageRecord | null>;
-  handleWebhook?(provider: string, request: Request, ctx?: TestExecutionContext): Promise<Response>;
-}
-
-/**
- * Messaging module API interface.
+ * Messaging module API as the send tests consume it: the real createMessaging, typed with an
+ * open template catalogue so tests can deliberately pass invalid input.
  */
 export interface MessagingApi {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  createMessaging: (env: MessagingEnv, options: MessagingOptions<any>) => Messaging;
+  createMessaging: typeof createMessaging;
 }
 
 /**
- * Loads createMessaging from src/core/messaging.js if implemented, falling back to
- * src/index.js and then to an inert stub so tests execute real assertions and fail
- * for the right reason (an assertion, not a missing import).
+ * Loads the createMessaging API from src/core/messaging.js.
  */
-export async function loadMessagingApi(): Promise<MessagingApi> {
-  try {
-    const messagingEntry = '../../src/core/messaging.js';
-    const mod = (await import(messagingEntry)) as unknown as Partial<MessagingApi>;
-    if (mod.createMessaging) {
-      return mod as MessagingApi;
-    }
-  } catch {
-    // messaging.js not yet implemented
-  }
-
-  const root = (await import('../../src/index.js')) as unknown as Partial<MessagingApi>;
-  if (root.createMessaging) {
-    return root as MessagingApi;
-  }
-
-  return {
-    createMessaging: (): Messaging => ({
-      send: () => Promise.resolve({ id: '' }),
-      status: () => Promise.resolve(null),
-      handleWebhook: () => Promise.resolve(new Response(null, { status: 501 })),
-    }),
-  };
+export function loadMessagingApi(): Promise<MessagingApi> {
+  return Promise.resolve({ createMessaging });
 }
 
 /**

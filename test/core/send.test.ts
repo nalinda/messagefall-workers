@@ -15,6 +15,7 @@
 import { beforeAll, describe, expect, it, spyOn } from 'bun:test';
 import { z } from 'zod';
 
+import { MessagingConfigError } from '../../src/core/messaging.js';
 import { PolicyError } from '../../src/core/policy.js';
 import { kvStatusStore } from '../../src/core/status.js';
 import { consoleProvider } from '../../src/providers/console/index.js';
@@ -79,6 +80,12 @@ const templates = defineTemplates({
       params: ({ code }: { code: string }) => [code],
     },
     sms: ({ code }: { code: string }) => `Your code is ${code}`,
+  },
+  shout: {
+    // A non-idempotent transform: applying it twice is visible in the rendered text.
+    input: z.object({ body: z.string().transform((b) => `${b}!`) }),
+    kind: 'notification' as const,
+    sms: ({ body }: { body: string }) => body,
   },
   emailFirst: {
     input: orderInput,
@@ -202,6 +209,9 @@ async function rejection(promise: Promise<unknown>): Promise<unknown> {
     const email = recordingProvider<RenderedEmail>('email', 'rec-email');
     return { wa, sms, email, set: { whatsapp: wa, sms, email } };
   }
+
+const firstFactory = (): ProviderSet => ({ sms: recordingProvider<RenderedSms>('sms', 'one') });
+const secondFactory = (): ProviderSet => ({ sms: recordingProvider<RenderedSms>('sms', 'two') });
 
 describe('Issue #3: createMessaging send pipeline', () => {
   let api: MessagingApi;
@@ -630,6 +640,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
           template: 'orderUpdate',
           to: TO,
           locale: 'en',
+          // @ts-expect-error -- deliberately wrong field type; the runtime check is under test
           input: { name: 42, orderId: 'A-100' },
         })
       );
@@ -637,6 +648,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       expect((wrongType as Error).name).toBe('TemplateValidationError');
 
       const missingField = await rejection(
+        // @ts-expect-error -- deliberately missing field; the runtime check is under test
         messaging.send({ template: 'orderUpdate', to: TO, locale: 'en', input: { name: 'Ann' } })
       );
       expect(missingField).toBeInstanceOf(TemplateValidationError);
@@ -644,6 +656,77 @@ describe('Issue #3: createMessaging send pipeline', () => {
       expect(wa.calls).toHaveLength(0);
       expect(sms.calls).toHaveLength(0);
       expect(email.calls).toHaveLength(0);
+    });
+  });
+
+  describe('input is validated exactly once', () => {
+    it('applies a transforming schema once and renders from its output', async () => {
+      const sms = recordingProvider<RenderedSms>('sms', 'rec-sms');
+      const messaging = api.createMessaging(newEnv(), {
+        templates,
+        providers: () => ({ sms }),
+        delivery: { fallback: ['sms'], always: [] },
+      });
+
+      const { id } = await messaging.send({
+        template: 'shout',
+        to: TO,
+        locale: 'en',
+        input: { body: 'quiet' },
+      });
+
+      expect(sms.calls).toHaveLength(1);
+      expect(sms.calls[0].text).toBe('quiet!');
+      const record = await messaging.status(id);
+      expect(record!.chain.attempts[0]).toMatchObject({ channel: 'sms', status: 'sent' });
+    });
+  });
+
+  describe('delivery failure after providers were called', () => {
+    it('marks the record failed instead of leaving it pending when the status update throws', async () => {
+      const env = newEnv();
+      const kv = env.MESSAGES_KV as ReturnType<typeof memoryKV>;
+      const sms = recordingProvider<RenderedSms>('sms', 'rec-sms');
+      const originalPut = kv.put.bind(kv);
+      let puts = 0;
+      // The first put creates the record; the second (the attempt update) blows up.
+      kv.put = ((key: string, value: string) => {
+        puts += 1;
+        if (puts === 2) {
+          return Promise.reject(new Error('kv unavailable'));
+        }
+        return originalPut(key, value);
+      }) as typeof kv.put;
+      const errors: string[] = [];
+      const originalError = console.error;
+      console.error = (...args: unknown[]): void => {
+        errors.push(args.map(String).join(' '));
+      };
+
+      try {
+        const messaging = api.createMessaging(env, {
+          templates,
+          providers: () => ({ sms }),
+          delivery: { fallback: ['sms'], always: [] },
+        });
+
+        const { id } = await messaging.send({
+          template: 'smsOnly',
+          to: TO,
+          locale: 'en',
+          input: { body: 'hello' },
+        });
+
+        expect(sms.calls).toHaveLength(1);
+        const record = await messaging.status(id);
+        expect(record).not.toBeNull();
+        expect(record!.status).toBe('failed');
+        expect(record!.chain.status).toBe('failed');
+        expect(errors.some((line) => line.includes(id))).toBe(true);
+        expect(errors.some((line) => line.includes('hello'))).toBe(false);
+      } finally {
+        console.error = originalError;
+      }
     });
   });
 
@@ -1103,6 +1186,15 @@ describe('Issue #3: createMessaging send pipeline', () => {
       await b.send({ template: 'smsOnly', to: TO, locale: 'en', input: { body: 'two' } });
 
       expect(builds).toBe(1);
+    });
+
+    it('rejects a different providers factory for an env whose providers are memoised', () => {
+      const env = newEnv();
+
+      api.createMessaging(env, { templates, providers: firstFactory });
+      expect(() => api.createMessaging(env, { templates, providers: secondFactory })).toThrow(
+        MessagingConfigError
+      );
     });
 
     it('builds providers again for a different env object', async () => {

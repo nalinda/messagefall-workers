@@ -17,9 +17,9 @@ import type {
 import {
   type AnyRendered,
   definedChannels,
-  render,
+  renderValidated,
   type TemplateDef,
-  validateTemplateInput,
+  validateInput,
 } from '../templates.js';
 import { type DeliveryOverride, type DeliveryPolicy, resolveDelivery } from './policy.js';
 import {
@@ -84,7 +84,8 @@ export interface SendDeps {
 }
 
 /**
- * Per-send arguments.
+ * Per-send arguments. `input` is the raw payload; the pipeline validates it once and renders
+ * from the validated value.
  */
 export interface SendRequest {
   templateName: string;
@@ -93,6 +94,13 @@ export interface SendRequest {
   locale: string;
   input: unknown;
   delivery?: DeliveryOverride;
+}
+
+/**
+ * A send request whose `input` has already passed {@link validateInput}.
+ */
+export interface ValidatedSendRequest extends SendRequest {
+  validatedInput: unknown;
 }
 
 function newMessageId(): string {
@@ -132,7 +140,7 @@ async function callProvider(
  * Renders and sends one channel, retrying a retryable failure exactly once.
  */
 async function attemptChannel(
-  req: SendRequest,
+  req: ValidatedSendRequest,
   id: string,
   providers: ProviderSet,
   channel: Channel
@@ -150,7 +158,12 @@ async function attemptChannel(
   const base = { channel, provider: provider.name };
   let payload: AnyRendered & OutboundMeta;
   try {
-    const rendered: AnyRendered = render(req.template, channel, req.input, req.locale);
+    const rendered: AnyRendered = renderValidated(
+      req.template,
+      channel,
+      req.validatedInput,
+      req.locale
+    );
     const meta: OutboundMeta = {
       to: req.to,
       messageId: id,
@@ -177,15 +190,20 @@ async function attemptChannel(
 }
 
 /**
- * Walks the fallback chain in order until one channel accepts the message.
+ * Walks `fallback` in order, one attempt per channel, until a channel accepts the message.
+ * Returns every attempt made (all but the last are `failed`).
  *
- * Seam for #7: this covers only failures the provider reports synchronously. The async
- * path (a `failed` delivery status arriving by webhook, or a timer expiry from #8) resumes
- * from `record.chain.attempts.length` as the index into `policy.fallback` and reuses
- * `attemptChannel` + `chainStatus` to advance and re-derive the record.
+ * This is THE chain-advance logic; do not write a second one. It only sees failures the
+ * provider reports synchronously. The asynchronous path (#7: a `failed` delivery status from a
+ * webhook; #8: the fallback timer firing) must reuse it by calling `runChain` again with the
+ * remaining channels, `policy.fallback.slice(record.chain.attempts.length)`, then appending the
+ * returned attempts, recomputing `chainStatus(...)` and `deriveOverallStatus(...)` on the
+ * record, and calling `observe` for each new attempt — exactly as `deliver` does below. The
+ * rendered payload is rebuilt from the stored template/input via `validateInput` +
+ * `renderValidated`, the same helpers `attemptChannel` uses.
  */
-async function runChain(
-  req: SendRequest,
+export async function runChain(
+  req: ValidatedSendRequest,
   id: string,
   providers: ProviderSet,
   fallback: Channel[]
@@ -212,7 +230,22 @@ function chainStatus(attempts: Attempt[], fallback: Channel[]): MessageRecord['c
   return attempts.at(-1)!.status;
 }
 
-async function deliver(deps: SendDeps, req: SendRequest, id: string, policy: DeliveryPolicy) {
+/**
+ * Mutable progress marker so a failure after providers were called can be told apart from one
+ * before any message went out.
+ */
+interface DeliveryProgress {
+  dispatched: boolean;
+}
+
+async function deliver(
+  deps: SendDeps,
+  req: ValidatedSendRequest,
+  id: string,
+  policy: DeliveryPolicy,
+  progress: DeliveryProgress
+): Promise<void> {
+  progress.dispatched = true;
   const chainTask =
     policy.fallback.length > 0 ? runChain(req, id, deps.providers, policy.fallback) : null;
   const alwaysTasks = policy.always.map((channel) =>
@@ -251,6 +284,63 @@ async function deliver(deps: SendDeps, req: SendRequest, id: string, policy: Del
 
   for (const attempt of [...chainAttempts, ...alwaysAttempts]) {
     await observe(deps, id, attempt);
+  }
+}
+
+/**
+ * Marks a record failed after delivery blew up part-way (providers were already called). Best
+ * effort: a second store failure is logged and swallowed.
+ */
+async function markFailed(deps: SendDeps, id: string): Promise<void> {
+  try {
+    await deps.store.update(id, (record) => ({
+      ...record,
+      chain: { ...record.chain, status: 'failed' },
+      status: 'failed',
+      updatedAt: new Date().toISOString(),
+    }));
+  } catch {
+    console.error(`[messagefall] could not mark record failed id=${id}`);
+  }
+}
+
+/**
+ * Runs `deliver` and contains its failure. Before any provider was called the error is
+ * rethrown (nothing went out, the caller may retry); afterwards the record is marked failed so
+ * it never sits `pending` forever, and the error is logged without message content.
+ */
+async function deliverGuarded(
+  deps: SendDeps,
+  req: ValidatedSendRequest,
+  id: string,
+  policy: DeliveryPolicy
+): Promise<void> {
+  const progress: DeliveryProgress = { dispatched: false };
+  try {
+    await deliver(deps, req, id, policy, progress);
+  } catch (error) {
+    console.error(`[messagefall] delivery failed id=${id}: ${errorMessage(error)}`);
+    if (!progress.dispatched) {
+      throw error;
+    }
+    await markFailed(deps, id);
+  }
+}
+
+/**
+ * `deliverGuarded` for the `ctx.waitUntil` path, where nothing can observe a rejection: the
+ * error has already been logged, so it is swallowed here.
+ */
+async function deliverDetached(
+  deps: SendDeps,
+  req: ValidatedSendRequest,
+  id: string,
+  policy: DeliveryPolicy
+): Promise<void> {
+  try {
+    await deliverGuarded(deps, req, id, policy);
+  } catch {
+    // logged by deliverGuarded
   }
 }
 
@@ -295,8 +385,10 @@ export async function runSend(
   if (!E164.test(req.to)) {
     throw new RecipientError(req.to);
   }
-  const input = validateTemplateInput(req.template, req.input);
-  const validated: SendRequest = { ...req, input };
+  const validated: ValidatedSendRequest = {
+    ...req,
+    validatedInput: validateInput(req.template, req.input),
+  };
 
   const policy = resolveDelivery({
     defaults: deps.defaults,
@@ -319,11 +411,10 @@ export async function runSend(
     updatedAt: now,
   });
 
-  const work = deliver(deps, validated, id, policy);
   if (ctx && req.template.kind === 'otp') {
-    ctx.waitUntil(work);
+    ctx.waitUntil(deliverDetached(deps, validated, id, policy));
   } else {
-    await work;
+    await deliverGuarded(deps, validated, id, policy);
   }
   return { id };
 }
