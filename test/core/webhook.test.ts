@@ -1,0 +1,975 @@
+/**
+ * Failing tests for Webhook dispatch: /webhooks/:provider routed to the provider's handler (GitHub Issue #5).
+ *
+ * Acceptance criteria:
+ * - Tests: unknown provider; provider without webhook; `verify` returning a response short-circuits;
+ *   a parsed `delivered` event updates the correct attempt and overall status; `parse` throwing returns `401`;
+ *   an unknown provider id is acknowledged with `200`.
+ * - `StatusApplied` is emitted only for chain attempts.
+ * - The dev bypass works on a `localhost` URL and is refused on any other host.
+ */
+
+import type { ExecutionContext, KVNamespace } from '@cloudflare/workers-types';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
+import { kvStatusStore, type MessageRecord } from '../../src/core/status.js';
+import type { DeliveryStatus, Provider, StatusEvent } from '../../src/providers/types.js';
+import { createMiniflareKV } from '../helpers/status.js';
+import {
+  createMockExecutionContext,
+  loadWebhookHandler,
+  type MockExecutionContext,
+  type StatusApplied,
+  type WebhookHandler,
+} from '../helpers/webhook.js';
+
+function createSignedProvider(): Provider {
+  return {
+    name: 'meta-wa',
+    channel: 'whatsapp',
+    send: () => Promise.resolve({ ok: true }),
+    webhook: {
+      parse: async (
+        req: Request,
+        parseOpts?: { devUnsigned?: boolean; unsigned?: boolean; allowUnsigned?: boolean }
+      ): Promise<StatusEvent[]> => {
+        const isBypassActive =
+          parseOpts?.devUnsigned === true ||
+          parseOpts?.unsigned === true ||
+          parseOpts?.allowUnsigned === true;
+
+        const sig = req.headers.get('x-hub-signature-256');
+        if (!isBypassActive && sig !== 'sha256=valid_test_signature') {
+          throw new Error('Signature validation failed');
+        }
+
+        const body = (await req.json()) as { id: string; status: DeliveryStatus };
+        return [
+          {
+            providerId: body.id,
+            status: body.status,
+            at: '2026-09-20T12:00:00.000Z',
+          },
+        ];
+      },
+    },
+  };
+}
+
+describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider handler', () => {
+  let kv: KVNamespace;
+  let disposeKv: () => Promise<void>;
+
+  beforeEach(async () => {
+    const miniflareEnv = await createMiniflareKV();
+    kv = miniflareEnv.kv;
+    disposeKv = miniflareEnv.dispose;
+  });
+
+  afterEach(async () => {
+    await disposeKv();
+  });
+
+  describe('Provider Lookup and Routing', () => {
+    it('returns 404 when provider name is unknown across configured channels', async () => {
+      const provider: Provider = {
+        name: 'meta-wa',
+        channel: 'whatsapp',
+        send: () => Promise.resolve({ ok: true }),
+        webhook: {
+          parse: () => Promise.resolve([]),
+        },
+      };
+
+      const handleWebhook: WebhookHandler = await loadWebhookHandler({
+        providers: { whatsapp: provider },
+        kv,
+      });
+
+      const request = new Request('http://localhost/webhooks/unknown-provider', {
+        method: 'POST',
+        body: JSON.stringify({ event: 'delivered' }),
+        headers: { 'content-type': 'application/json' },
+      });
+
+      const response = await handleWebhook('unknown-provider', request);
+      expect(response.status).toBe(404);
+    });
+
+    it('returns 404 when provider is configured but does not define a webhook property', async () => {
+      const providerWithoutWebhook: Provider = {
+        name: 'console-sms',
+        channel: 'sms',
+        send: () => Promise.resolve({ ok: true }),
+      };
+
+      const handleWebhook: WebhookHandler = await loadWebhookHandler({
+        providers: { sms: providerWithoutWebhook },
+        kv,
+      });
+
+      const request = new Request('http://localhost/webhooks/console-sms', {
+        method: 'POST',
+        body: JSON.stringify({ event: 'delivered' }),
+        headers: { 'content-type': 'application/json' },
+      });
+
+      const response = await handleWebhook('console-sms', request);
+      expect(response.status).toBe(404);
+    });
+  });
+
+  describe('Webhook Verification Handshake (webhook.verify)', () => {
+    it('returns verify Response as-is and short-circuits without calling parse when verify returns non-null', async () => {
+      let wasParseCalled = false;
+
+      const providerWithVerify: Provider = {
+        name: 'meta-wa',
+        channel: 'whatsapp',
+        send: () => Promise.resolve({ ok: true }),
+        webhook: {
+          verify: (req: Request): Promise<Response | null> => {
+            const url = new URL(req.url);
+            if (url.searchParams.get('hub.mode') === 'subscribe') {
+              const challenge = url.searchParams.get('hub.challenge') ?? 'verified';
+              return Promise.resolve(
+                new Response(challenge, {
+                  status: 200,
+                  headers: { 'content-type': 'text/plain; charset=utf-8' },
+                })
+              );
+            }
+            return Promise.resolve(null);
+          },
+          parse: (): Promise<StatusEvent[]> => {
+            wasParseCalled = true;
+            return Promise.resolve([]);
+          },
+        },
+      };
+
+      const handleWebhook = await loadWebhookHandler({
+        providers: { whatsapp: providerWithVerify },
+        kv,
+      });
+
+      const challengeRequest = new Request(
+        'http://localhost/webhooks/meta-wa?hub.mode=subscribe&hub.challenge=challenge_token_abc123'
+      );
+
+      const response = await handleWebhook('meta-wa', challengeRequest);
+      expect(response.status).toBe(200);
+      const text = await response.text();
+      expect(text).toBe('challenge_token_abc123');
+      expect(wasParseCalled).toBe(false);
+    });
+
+    it('proceeds to parse when webhook.verify returns null', async () => {
+      let wasParseCalled = false;
+
+      const provider: Provider = {
+        name: 'meta-wa',
+        channel: 'whatsapp',
+        send: () => Promise.resolve({ ok: true }),
+        webhook: {
+          verify: (): Promise<Response | null> => {
+            return Promise.resolve(null);
+          },
+          parse: (): Promise<StatusEvent[]> => {
+            wasParseCalled = true;
+            return Promise.resolve([]);
+          },
+        },
+      };
+
+      const handleWebhook = await loadWebhookHandler({
+        providers: { whatsapp: provider },
+        kv,
+      });
+
+      const postRequest = new Request('http://localhost/webhooks/meta-wa', {
+        method: 'POST',
+        body: JSON.stringify({ id: 'wamid_1' }),
+        headers: { 'content-type': 'application/json' },
+      });
+
+      const response = await handleWebhook('meta-wa', postRequest);
+      expect(response.status).toBe(200);
+      expect(wasParseCalled).toBe(true);
+    });
+  });
+
+  describe('Payload Parsing and Error Handling (webhook.parse)', () => {
+    it('returns 401 with no body detail when webhook.parse throws an error', async () => {
+      const secretKey = 'super_secret_signing_key_99999';
+      const provider: Provider = {
+        name: 'meta-wa',
+        channel: 'whatsapp',
+        send: () => Promise.resolve({ ok: true }),
+        webhook: {
+          parse: (): Promise<StatusEvent[]> => {
+            throw new Error(`Signature mismatch against secret ${secretKey}`);
+          },
+        },
+      };
+
+      const handleWebhook = await loadWebhookHandler({
+        providers: { whatsapp: provider },
+        kv,
+      });
+
+      const invalidRequest = new Request('http://localhost/webhooks/meta-wa', {
+        method: 'POST',
+        body: JSON.stringify({ invalid: true }),
+        headers: { 'content-type': 'application/json' },
+      });
+
+      const response = await handleWebhook('meta-wa', invalidRequest);
+      expect(response.status).toBe(401);
+
+      const bodyText = await response.text();
+      // Must not leak internal error message or secrets in the 401 body
+      expect(bodyText).not.toContain(secretKey);
+      expect(bodyText).not.toContain('Signature mismatch');
+      expect(bodyText.length).toBeLessThanOrEqual(50);
+    });
+
+    it('returns 401 when webhook.parse throws non-Error values', async () => {
+      const provider: Provider = {
+        name: 'meta-wa',
+        channel: 'whatsapp',
+        send: () => Promise.resolve({ ok: true }),
+        webhook: {
+          parse: (): Promise<StatusEvent[]> => {
+            // eslint-disable-next-line @typescript-eslint/only-throw-error
+            throw 'Unauthorized payload';
+          },
+        },
+      };
+
+      const handleWebhook = await loadWebhookHandler({
+        providers: { whatsapp: provider },
+        kv,
+      });
+
+      const invalidRequest = new Request('http://localhost/webhooks/meta-wa', {
+        method: 'POST',
+        body: 'invalid',
+      });
+
+      const response = await handleWebhook('meta-wa', invalidRequest);
+      expect(response.status).toBe(401);
+    });
+  });
+
+  describe('Status Store Updates for Known Provider IDs', () => {
+    it('updates attempt status/error/at, recomputes chain and overall status, and calls onStatus for delivered event', async () => {
+      const store = kvStatusStore(kv);
+
+      const messageId = 'msg_01J9DISPATCH000000000001';
+      const providerId = 'wamid.HBgL_01J9TEST_DELIVERED';
+      const eventTimestamp = '2026-09-20T12:00:05.000Z';
+
+      const initialRecord: MessageRecord = {
+        id: messageId,
+        template: 'otpVerification',
+        kind: 'otp',
+        policy: { fallback: ['whatsapp', 'sms'], always: ['email'] },
+        chain: {
+          status: 'sent',
+          attempts: [
+            {
+              channel: 'whatsapp',
+              provider: 'meta-wa',
+              providerId,
+              status: 'sent',
+              at: '2026-09-20T12:00:00.000Z',
+            },
+          ],
+        },
+        always: [
+          {
+            channel: 'email',
+            provider: 'resend',
+            providerId: 'email_msg_always_1',
+            status: 'sent',
+            at: '2026-09-20T12:00:00.000Z',
+          },
+        ],
+        status: 'sent',
+        createdAt: '2026-09-20T12:00:00.000Z',
+        updatedAt: '2026-09-20T12:00:00.000Z',
+      };
+
+      await store.create(initialRecord);
+      await store.indexProviderId(providerId, {
+        id: messageId,
+        channel: 'whatsapp',
+        provider: 'meta-wa',
+      });
+
+      const deliveredEvent: StatusEvent = {
+        providerId,
+        status: 'delivered',
+        at: eventTimestamp,
+      };
+
+      const provider: Provider = {
+        name: 'meta-wa',
+        channel: 'whatsapp',
+        send: () => Promise.resolve({ ok: true }),
+        webhook: {
+          parse: () => Promise.resolve([deliveredEvent]),
+        },
+      };
+
+      let onStatusCalledWith: unknown = null;
+
+      const handleWebhook = await loadWebhookHandler({
+        providers: { whatsapp: provider },
+        kv,
+        onStatus: (event) => {
+          onStatusCalledWith = event;
+        },
+      });
+
+      const request = new Request('http://localhost/webhooks/meta-wa', {
+        method: 'POST',
+        body: JSON.stringify({ id: providerId, status: 'delivered' }),
+        headers: { 'content-type': 'application/json' },
+      });
+
+      const response = await handleWebhook('meta-wa', request);
+      expect(response.status).toBe(200);
+
+      // Verify status store updated
+      const updatedRecord = await store.get(messageId);
+      expect(updatedRecord).not.toBeNull();
+      expect(updatedRecord?.chain.attempts[0]?.status).toBe('delivered');
+      expect(updatedRecord?.chain.attempts[0]?.at).toBe(eventTimestamp);
+      expect(updatedRecord?.chain.status).toBe('delivered');
+      expect(updatedRecord?.status).toBe('delivered');
+
+      // Verify onStatus called
+      expect(onStatusCalledWith).toBeDefined();
+      expect(onStatusCalledWith).not.toBeNull();
+    });
+
+    it('updates attempt status to failed with error description and timestamp at', async () => {
+      const store = kvStatusStore(kv);
+
+      const messageId = 'msg_01J9DISPATCH000000000002';
+      const providerId = 'wamid.HBgL_01J9TEST_FAILED';
+      const eventTimestamp = '2026-09-20T12:00:10.000Z';
+      const failureReason = 'Destination unreachable: user does not exist on WhatsApp';
+
+      const initialRecord: MessageRecord = {
+        id: messageId,
+        template: 'securityAlert',
+        kind: 'notification',
+        policy: { fallback: ['whatsapp', 'sms'], always: [] },
+        chain: {
+          status: 'sent',
+          attempts: [
+            {
+              channel: 'whatsapp',
+              provider: 'meta-wa',
+              providerId,
+              status: 'sent',
+              at: '2026-09-20T12:00:00.000Z',
+            },
+          ],
+        },
+        always: [],
+        status: 'sent',
+        createdAt: '2026-09-20T12:00:00.000Z',
+        updatedAt: '2026-09-20T12:00:00.000Z',
+      };
+
+      await store.create(initialRecord);
+      await store.indexProviderId(providerId, {
+        id: messageId,
+        channel: 'whatsapp',
+        provider: 'meta-wa',
+      });
+
+      const failedEvent: StatusEvent = {
+        providerId,
+        status: 'failed',
+        error: failureReason,
+        at: eventTimestamp,
+      };
+
+      const provider: Provider = {
+        name: 'meta-wa',
+        channel: 'whatsapp',
+        send: () => Promise.resolve({ ok: true }),
+        webhook: {
+          parse: () => Promise.resolve([failedEvent]),
+        },
+      };
+
+      const handleWebhook = await loadWebhookHandler({
+        providers: { whatsapp: provider },
+        kv,
+      });
+
+      const request = new Request('http://localhost/webhooks/meta-wa', {
+        method: 'POST',
+        body: JSON.stringify({ id: providerId, status: 'failed', error: failureReason }),
+        headers: { 'content-type': 'application/json' },
+      });
+
+      const response = await handleWebhook('meta-wa', request);
+      expect(response.status).toBe(200);
+
+      const updatedRecord = await store.get(messageId);
+      expect(updatedRecord).not.toBeNull();
+      expect(updatedRecord?.chain.attempts[0]?.status).toBe('failed');
+      expect(updatedRecord?.chain.attempts[0]?.error).toBe(failureReason);
+      expect(updatedRecord?.chain.attempts[0]?.at).toBe(eventTimestamp);
+      expect(updatedRecord?.chain.status).toBe('failed');
+      expect(updatedRecord?.status).toBe('failed');
+    });
+  });
+
+  describe('Unknown Provider ID Handling', () => {
+    it('acknowledges with 200 when providerId is unknown, skipping without error', async () => {
+      let wasParseCalled = false;
+      const unknownId = 'wamid.unknown_vendor_msg_999999';
+
+      const provider: Provider = {
+        name: 'meta-wa',
+        channel: 'whatsapp',
+        send: () => Promise.resolve({ ok: true }),
+        webhook: {
+          parse: () => {
+            wasParseCalled = true;
+            return Promise.resolve([
+              {
+                providerId: unknownId,
+                status: 'delivered',
+                at: '2026-09-20T12:00:00.000Z',
+              },
+            ]);
+          },
+        },
+      };
+
+      const handleWebhook = await loadWebhookHandler({
+        providers: { whatsapp: provider },
+        kv,
+      });
+
+      const request = new Request('http://localhost/webhooks/meta-wa', {
+        method: 'POST',
+        body: JSON.stringify({ id: unknownId }),
+        headers: { 'content-type': 'application/json' },
+      });
+
+      const response = await handleWebhook('meta-wa', request);
+      expect(response.status).toBe(200);
+      expect(wasParseCalled).toBe(true);
+    });
+
+    it('returns 200 when every event in a batch payload has an unknown providerId', async () => {
+      let wasParseCalled = false;
+      const unknownEvents: StatusEvent[] = [
+        { providerId: 'unknown_id_1', status: 'delivered', at: '2026-09-20T12:00:01.000Z' },
+        { providerId: 'unknown_id_2', status: 'read', at: '2026-09-20T12:00:02.000Z' },
+        { providerId: 'unknown_id_3', status: 'failed', at: '2026-09-20T12:00:03.000Z' },
+      ];
+
+      const provider: Provider = {
+        name: 'meta-wa',
+        channel: 'whatsapp',
+        send: () => Promise.resolve({ ok: true }),
+        webhook: {
+          parse: () => {
+            wasParseCalled = true;
+            return Promise.resolve(unknownEvents);
+          },
+        },
+      };
+
+      const handleWebhook = await loadWebhookHandler({
+        providers: { whatsapp: provider },
+        kv,
+      });
+
+      const request = new Request('http://localhost/webhooks/meta-wa', {
+        method: 'POST',
+        body: JSON.stringify({ events: unknownEvents }),
+        headers: { 'content-type': 'application/json' },
+      });
+
+      // Vendors retry on non-2xx; must always 200 after successful parse even if all IDs unknown
+      const response = await handleWebhook('meta-wa', request);
+      expect(response.status).toBe(200);
+      expect(wasParseCalled).toBe(true);
+    });
+
+    it('updates known attempts and skips unknown ones in a mixed batch, returning 200', async () => {
+      const store = kvStatusStore(kv);
+
+      const knownMsgId = 'msg_01J9DISPATCH000000000003';
+      const knownProviderId = 'wamid.known_123';
+
+      const initialRecord: MessageRecord = {
+        id: knownMsgId,
+        template: 'broadcast',
+        kind: 'notification',
+        policy: { fallback: ['whatsapp'], always: [] },
+        chain: {
+          status: 'sent',
+          attempts: [
+            {
+              channel: 'whatsapp',
+              provider: 'meta-wa',
+              providerId: knownProviderId,
+              status: 'sent',
+              at: '2026-09-20T12:00:00.000Z',
+            },
+          ],
+        },
+        always: [],
+        status: 'sent',
+        createdAt: '2026-09-20T12:00:00.000Z',
+        updatedAt: '2026-09-20T12:00:00.000Z',
+      };
+
+      await store.create(initialRecord);
+      await store.indexProviderId(knownProviderId, {
+        id: knownMsgId,
+        channel: 'whatsapp',
+        provider: 'meta-wa',
+      });
+
+      const mixedEvents: StatusEvent[] = [
+        { providerId: 'wamid.unknown_xyz', status: 'failed', at: '2026-09-20T12:00:02.000Z' },
+        { providerId: knownProviderId, status: 'delivered', at: '2026-09-20T12:00:05.000Z' },
+      ];
+
+      const provider: Provider = {
+        name: 'meta-wa',
+        channel: 'whatsapp',
+        send: () => Promise.resolve({ ok: true }),
+        webhook: {
+          parse: () => Promise.resolve(mixedEvents),
+        },
+      };
+
+      const handleWebhook = await loadWebhookHandler({
+        providers: { whatsapp: provider },
+        kv,
+      });
+
+      const request = new Request('http://localhost/webhooks/meta-wa', {
+        method: 'POST',
+        body: JSON.stringify({ events: mixedEvents }),
+        headers: { 'content-type': 'application/json' },
+      });
+
+      const response = await handleWebhook('meta-wa', request);
+      expect(response.status).toBe(200);
+
+      const updatedRecord = await store.get(knownMsgId);
+      expect(updatedRecord?.chain.attempts[0]?.status).toBe('delivered');
+    });
+  });
+
+  describe('StatusApplied Emission and ExecutionContext', () => {
+    it('emits StatusApplied with part=chain for chain attempts', async () => {
+      const store = kvStatusStore(kv);
+
+      const messageId = 'msg_01J9CHAIN00000000000001';
+      const providerId = 'wamid.chain_attempt_123';
+      const eventTimestamp = '2026-09-20T12:00:08.000Z';
+
+      const initialRecord: MessageRecord = {
+        id: messageId,
+        template: 'otp',
+        kind: 'otp',
+        policy: { fallback: ['whatsapp', 'sms'], always: [] },
+        chain: {
+          status: 'sent',
+          attempts: [
+            {
+              channel: 'whatsapp',
+              provider: 'meta-wa',
+              providerId,
+              status: 'sent',
+              at: '2026-09-20T12:00:00.000Z',
+            },
+          ],
+        },
+        always: [],
+        status: 'sent',
+        createdAt: '2026-09-20T12:00:00.000Z',
+        updatedAt: '2026-09-20T12:00:00.000Z',
+      };
+
+      await store.create(initialRecord);
+      await store.indexProviderId(providerId, {
+        id: messageId,
+        channel: 'whatsapp',
+        provider: 'meta-wa',
+      });
+
+      const appliedEvents: StatusApplied[] = [];
+
+      const statusEvent: StatusEvent = {
+        providerId,
+        status: 'delivered',
+        at: eventTimestamp,
+      };
+
+      const provider: Provider = {
+        name: 'meta-wa',
+        channel: 'whatsapp',
+        send: () => Promise.resolve({ ok: true }),
+        webhook: {
+          parse: () => Promise.resolve([statusEvent]),
+        },
+      };
+
+      const handleWebhook = await loadWebhookHandler({
+        providers: { whatsapp: provider },
+        kv,
+        onStatusApplied: (applied) => {
+          appliedEvents.push(applied);
+        },
+      });
+
+      const request = new Request('http://localhost/webhooks/meta-wa', {
+        method: 'POST',
+        body: JSON.stringify({ id: providerId, status: 'delivered' }),
+        headers: { 'content-type': 'application/json' },
+      });
+
+      const response = await handleWebhook('meta-wa', request);
+      expect(response.status).toBe(200);
+
+      expect(appliedEvents).toHaveLength(1);
+      const emitted = appliedEvents[0];
+      expect(emitted.id).toBe(messageId);
+      expect(emitted.channel).toBe('whatsapp');
+      expect(emitted.provider).toBe('meta-wa');
+      expect(emitted.part).toBe('chain');
+      expect(emitted.event).toEqual(statusEvent);
+    });
+
+    it('does NOT emit StatusApplied for always attempts', async () => {
+      const store = kvStatusStore(kv);
+
+      const messageId = 'msg_01J9ALWAYS00000000000001';
+      const providerId = 'resend_always_attempt_456';
+      const eventTimestamp = '2026-09-20T12:00:09.000Z';
+
+      const initialRecord: MessageRecord = {
+        id: messageId,
+        template: 'orderReceipt',
+        kind: 'notification',
+        policy: { fallback: ['whatsapp'], always: ['email'] },
+        chain: {
+          status: 'sent',
+          attempts: [
+            {
+              channel: 'whatsapp',
+              provider: 'meta-wa',
+              providerId: 'wamid_wa_1',
+              status: 'sent',
+              at: '2026-09-20T12:00:00.000Z',
+            },
+          ],
+        },
+        always: [
+          {
+            channel: 'email',
+            provider: 'resend-email',
+            providerId,
+            status: 'sent',
+            at: '2026-09-20T12:00:00.000Z',
+          },
+        ],
+        status: 'sent',
+        createdAt: '2026-09-20T12:00:00.000Z',
+        updatedAt: '2026-09-20T12:00:00.000Z',
+      };
+
+      await store.create(initialRecord);
+      await store.indexProviderId(providerId, {
+        id: messageId,
+        channel: 'email',
+        provider: 'resend-email',
+      });
+
+      const appliedEvents: StatusApplied[] = [];
+
+      const statusEvent: StatusEvent = {
+        providerId,
+        status: 'delivered',
+        at: eventTimestamp,
+      };
+
+      const emailProvider: Provider = {
+        name: 'resend-email',
+        channel: 'email',
+        send: () => Promise.resolve({ ok: true }),
+        webhook: {
+          parse: () => Promise.resolve([statusEvent]),
+        },
+      };
+
+      const handleWebhook = await loadWebhookHandler({
+        providers: { email: emailProvider },
+        kv,
+        onStatusApplied: (applied) => {
+          appliedEvents.push(applied);
+        },
+      });
+
+      const request = new Request('http://localhost/webhooks/resend-email', {
+        method: 'POST',
+        body: JSON.stringify({ id: providerId, status: 'delivered' }),
+        headers: { 'content-type': 'application/json' },
+      });
+
+      const response = await handleWebhook('resend-email', request);
+      expect(response.status).toBe(200);
+
+      // StatusApplied must be emitted ONLY for chain attempts, NEVER for always attempts
+      expect(appliedEvents).toHaveLength(0);
+
+      // But the record itself is updated
+      const updatedRecord = await store.get(messageId);
+      expect(updatedRecord?.always[0]?.status).toBe('delivered');
+    });
+
+    it('runs background processing under ctx.waitUntil when ctx is provided', async () => {
+      const store = kvStatusStore(kv);
+
+      const messageId = 'msg_01J9CTX00000000000000001';
+      const providerId = 'wamid.ctx_attempt_789';
+
+      const initialRecord: MessageRecord = {
+        id: messageId,
+        template: 'otp',
+        kind: 'otp',
+        policy: { fallback: ['whatsapp'], always: [] },
+        chain: {
+          status: 'sent',
+          attempts: [
+            {
+              channel: 'whatsapp',
+              provider: 'meta-wa',
+              providerId,
+              status: 'sent',
+              at: '2026-09-20T12:00:00.000Z',
+            },
+          ],
+        },
+        always: [],
+        status: 'sent',
+        createdAt: '2026-09-20T12:00:00.000Z',
+        updatedAt: '2026-09-20T12:00:00.000Z',
+      };
+
+      await store.create(initialRecord);
+      await store.indexProviderId(providerId, {
+        id: messageId,
+        channel: 'whatsapp',
+        provider: 'meta-wa',
+      });
+
+      const provider: Provider = {
+        name: 'meta-wa',
+        channel: 'whatsapp',
+        send: () => Promise.resolve({ ok: true }),
+        webhook: {
+          parse: () =>
+            Promise.resolve([{ providerId, status: 'delivered', at: '2026-09-20T12:00:05.000Z' }]),
+        },
+      };
+
+      const handleWebhook = await loadWebhookHandler({
+        providers: { whatsapp: provider },
+        kv,
+      });
+
+      const mockCtx: MockExecutionContext = createMockExecutionContext();
+
+      const request = new Request('http://localhost/webhooks/meta-wa', {
+        method: 'POST',
+        body: JSON.stringify({ id: providerId, status: 'delivered' }),
+        headers: { 'content-type': 'application/json' },
+      });
+
+      const response = await handleWebhook('meta-wa', request, mockCtx as unknown as ExecutionContext);
+      expect(response.status).toBe(200);
+
+      // Verify ctx.waitUntil was called
+      expect(mockCtx.promises.length).toBeGreaterThan(0);
+
+      // Flush background promises
+      await mockCtx.flush();
+
+      const updatedRecord = await store.get(messageId);
+      expect(updatedRecord?.chain.attempts[0]?.status).toBe('delivered');
+    });
+  });
+
+  describe('Development Bypass (MESSAGING_DEV_UNSIGNED)', () => {
+    it('allows dev bypass on localhost URL when MESSAGING_DEV_UNSIGNED is "true"', async () => {
+      const store = kvStatusStore(kv);
+      const messageId = 'msg_01J9DEV000000000000000001';
+      const providerId = 'wamid_dev_01';
+
+      await store.create({
+        id: messageId,
+        template: 'otp',
+        kind: 'otp',
+        policy: { fallback: ['whatsapp'], always: [] },
+        chain: {
+          status: 'sent',
+          attempts: [
+            {
+              channel: 'whatsapp',
+              provider: 'meta-wa',
+              providerId,
+              status: 'sent',
+              at: '2026-09-20T12:00:00.000Z',
+            },
+          ],
+        },
+        always: [],
+        status: 'sent',
+        createdAt: '2026-09-20T12:00:00.000Z',
+        updatedAt: '2026-09-20T12:00:00.000Z',
+      });
+      await store.indexProviderId(providerId, {
+        id: messageId,
+        channel: 'whatsapp',
+        provider: 'meta-wa',
+      });
+
+      const provider = createSignedProvider();
+
+      const handleWebhook = await loadWebhookHandler({
+        providers: { whatsapp: provider },
+        kv,
+        env: { MESSAGING_DEV_UNSIGNED: 'true' },
+      });
+
+      // Request without signature header sent to localhost URL
+      const unsignedLocalhostRequest = new Request('http://localhost:8787/webhooks/meta-wa', {
+        method: 'POST',
+        body: JSON.stringify({ id: providerId, status: 'delivered' }),
+        headers: { 'content-type': 'application/json' },
+      });
+
+      const response = await handleWebhook('meta-wa', unsignedLocalhostRequest);
+      expect(response.status).toBe(200);
+
+      const updatedRecord = await store.get(messageId);
+      expect(updatedRecord?.chain.attempts[0]?.status).toBe('delivered');
+    });
+
+    it('allows dev bypass on 127.0.0.1 URL when MESSAGING_DEV_UNSIGNED is "true"', async () => {
+      const store = kvStatusStore(kv);
+      const messageId = 'msg_01J9DEV000000000000000002';
+      const providerId = 'wamid_dev_02';
+
+      await store.create({
+        id: messageId,
+        template: 'otp',
+        kind: 'otp',
+        policy: { fallback: ['whatsapp'], always: [] },
+        chain: {
+          status: 'sent',
+          attempts: [
+            {
+              channel: 'whatsapp',
+              provider: 'meta-wa',
+              providerId,
+              status: 'sent',
+              at: '2026-09-20T12:00:00.000Z',
+            },
+          ],
+        },
+        always: [],
+        status: 'sent',
+        createdAt: '2026-09-20T12:00:00.000Z',
+        updatedAt: '2026-09-20T12:00:00.000Z',
+      });
+      await store.indexProviderId(providerId, {
+        id: messageId,
+        channel: 'whatsapp',
+        provider: 'meta-wa',
+      });
+
+      const provider = createSignedProvider();
+
+      const handleWebhook = await loadWebhookHandler({
+        providers: { whatsapp: provider },
+        kv,
+        env: { MESSAGING_DEV_UNSIGNED: 'true' },
+      });
+
+      // Request without signature header sent to 127.0.0.1 URL
+      const unsignedIpRequest = new Request('http://127.0.0.1:8787/webhooks/meta-wa', {
+        method: 'POST',
+        body: JSON.stringify({ id: providerId, status: 'delivered' }),
+        headers: { 'content-type': 'application/json' },
+      });
+
+      const response = await handleWebhook('meta-wa', unsignedIpRequest);
+      expect(response.status).toBe(200);
+
+      const updatedRecord = await store.get(messageId);
+      expect(updatedRecord?.chain.attempts[0]?.status).toBe('delivered');
+    });
+
+    it('REFUSES dev bypass and returns 401 on non-localhost URL even when MESSAGING_DEV_UNSIGNED is "true"', async () => {
+      const provider = createSignedProvider();
+
+      const handleWebhook = await loadWebhookHandler({
+        providers: { whatsapp: provider },
+        kv,
+        env: { MESSAGING_DEV_UNSIGNED: 'true' },
+      });
+
+      // Production hostname with MESSAGING_DEV_UNSIGNED enabled: must refuse bypass and enforce signature
+      const unsignedProdRequest = new Request(
+        'https://api.messagefall.workers.dev/webhooks/meta-wa',
+        {
+          method: 'POST',
+          body: JSON.stringify({ id: 'wamid_prod_01', status: 'delivered' }),
+          headers: { 'content-type': 'application/json' },
+        }
+      );
+
+      const response = await handleWebhook('meta-wa', unsignedProdRequest);
+      expect(response.status).toBe(401);
+    });
+
+    it('REFUSES dev bypass and returns 401 when MESSAGING_DEV_UNSIGNED is not "true" even on localhost', async () => {
+      const provider = createSignedProvider();
+
+      const handleWebhook = await loadWebhookHandler({
+        providers: { whatsapp: provider },
+        kv,
+        env: { MESSAGING_DEV_UNSIGNED: 'false' },
+      });
+
+      const unsignedRequest = new Request('http://localhost:8787/webhooks/meta-wa', {
+        method: 'POST',
+        body: JSON.stringify({ id: 'wamid_dev_03', status: 'delivered' }),
+        headers: { 'content-type': 'application/json' },
+      });
+
+      const response = await handleWebhook('meta-wa', unsignedRequest);
+      expect(response.status).toBe(401);
+    });
+  });
+});
