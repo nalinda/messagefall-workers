@@ -224,7 +224,12 @@ describe('Entry points export documented functions', () => {
     const providerDirs = fs
       .readdirSync(distFile('./dist/providers'), { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && entry.name !== 'meta-whatsapp')
-      .map((entry) => entry.name);
+      .map((entry) => entry.name)
+      // `_shared` holds helpers the providers deep-import; it has no index.js, so the
+      // `./providers/*` wildcard does not resolve it and it is not an entry point.
+      .filter((name) =>
+        fs.existsSync(distFile(providerTarget.import.replace('*', () => name))),
+      );
 
     const roots = [
       ...Object.entries(pkg.exports)
@@ -238,6 +243,13 @@ describe('Entry points export documented functions', () => {
       file.includes(path.join('providers', 'meta-whatsapp') + path.sep),
     );
     expect(offenders).toEqual([]);
+  });
+
+  it('does not publish ./providers/_shared as an entry point: it is internal to the providers', () => {
+    const providerTarget = exportTarget('./providers/*');
+    const shared = providerTarget.import.replace('*', () => '_shared');
+    expect(fs.existsSync(distFile(shared))).toBe(false);
+    expect(fs.existsSync(distFile('./dist/providers/_shared/http.js'))).toBe(true);
   });
 });
 
