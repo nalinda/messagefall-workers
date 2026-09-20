@@ -15,8 +15,15 @@
 import { beforeAll, describe, expect, it, spyOn } from 'bun:test';
 import { z } from 'zod';
 
+import { kvStatusStore } from '../../src/core/status.js';
 import { consoleProvider } from '../../src/providers/console/index.js';
-import type { RenderedEmail, RenderedSms, RenderedWhatsApp } from '../../src/providers/types.js';
+import type {
+  OutboundMeta,
+  RenderedEmail,
+  RenderedSms,
+  RenderedWhatsApp,
+  SendResult,
+} from '../../src/providers/types.js';
 import { defineTemplates, TemplateValidationError } from '../../src/templates.js';
 import type { MessagingEnv } from '../../src/types.js';
 import {
@@ -27,6 +34,7 @@ import {
   type RecordingProvider,
   recordingProvider,
   type StatusCallbackEvent,
+  type TestExecutionContext,
 } from '../helpers/messaging.js';
 
 const orderInput = z.object({ name: z.string(), orderId: z.string() });
@@ -54,6 +62,11 @@ const templates = defineTemplates({
     input: z.object({ body: z.string() }),
     kind: 'notification' as const,
     sms: ({ body }: { body: string }) => body,
+  },
+  loginCode: {
+    input: z.object({ code: z.string().length(6) }),
+    kind: 'otp' as const,
+    sms: ({ code }: { code: string }) => `Your code is ${code}`,
   },
 });
 
@@ -85,6 +98,45 @@ function silenceConsole(): { logs: string[]; restore: () => void } {
     logs,
     restore: () => {
       console.log = originalLog;
+    },
+  };
+}
+
+/**
+ * ExecutionContext double that collects everything handed to `waitUntil`.
+ */
+function testContext(): TestExecutionContext & { promises: Promise<unknown>[] } {
+  const promises: Promise<unknown>[] = [];
+  return {
+    promises,
+    waitUntil: (promise: Promise<unknown>) => {
+      promises.push(promise);
+    },
+    passThroughOnException: () => {
+      // no-op
+    },
+  };
+}
+
+/**
+ * SMS provider whose `send` records the call and blocks until `release()` is called.
+ */
+function gatedSmsProvider(name: string, providerId: string) {
+  const calls: (RenderedSms & OutboundMeta)[] = [];
+  const { promise: gate, resolve: release } = Promise.withResolvers<void>();
+  return {
+    calls,
+    release: () => {
+      release();
+    },
+    provider: {
+      name,
+      channel: 'sms' as const,
+      send: async (message: RenderedSms & OutboundMeta): Promise<SendResult> => {
+        calls.push(message);
+        await gate;
+        return { ok: true, providerId };
+      },
     },
   };
 }
@@ -532,6 +584,134 @@ describe('Issue #3: createMessaging send pipeline', () => {
       expect(smsAttempts).toHaveLength(1);
       expect(smsAttempts[0]).toMatchObject({ provider: 'throwing-sms', status: 'failed' });
       expect(smsAttempts[0].error).toContain('boom');
+    });
+  });
+
+  describe('provider-id index', () => {
+    it('indexes each attempt providerId back to { id, channel, provider }', async () => {
+      const env = newEnv();
+      const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'rec-wa', [
+        { ok: true, providerId: 'wa-pid-1' },
+      ]);
+      const email = recordingProvider<RenderedEmail>('email', 'rec-email', [
+        { ok: true, providerId: 'email-pid-1' },
+      ]);
+
+      const messaging = api.createMessaging(env, {
+        templates,
+        providers: () => ({ whatsapp: wa, email }),
+        delivery: { fallback: ['whatsapp', 'sms'], always: ['email'] },
+      });
+
+      const { id } = await messaging.send({
+        template: 'orderUpdate',
+        to: TO,
+        locale: 'en',
+        input: INPUT,
+      });
+
+      const store = kvStatusStore(env.MESSAGES_KV!);
+      expect(await store.lookupProviderId('wa-pid-1')).toEqual({
+        id,
+        channel: 'whatsapp',
+        provider: 'rec-wa',
+      });
+      expect(await store.lookupProviderId('email-pid-1')).toEqual({
+        id,
+        channel: 'email',
+        provider: 'rec-email',
+      });
+    });
+  });
+
+  describe('otp sends and ExecutionContext', () => {
+    it('with ctx: resolves { id } after the record is created and runs delivery under ctx.waitUntil', async () => {
+      const env = newEnv();
+      const gated = gatedSmsProvider('otp-sms', 'otp-pid');
+      const ctx = testContext();
+
+      const messaging = api.createMessaging(env, {
+        templates,
+        providers: () => ({ sms: gated.provider }),
+        delivery: { fallback: ['sms'], always: [] },
+      });
+
+      // The provider never completes until released, so send() can only resolve here
+      // if delivery was deferred to ctx.waitUntil.
+      const { id } = await messaging.send(
+        { template: 'loginCode', to: TO, locale: 'en', input: { code: '123456' } },
+        ctx
+      );
+
+      expect(typeof id).toBe('string');
+      expect(id.length).toBeGreaterThan(0);
+      expect(ctx.promises.length).toBeGreaterThan(0);
+
+      // Step 4 has happened: the record exists, pending, with no attempts yet.
+      const before = await messaging.status(id);
+      expect(before).not.toBeNull();
+      expect(before!.kind).toBe('otp');
+      expect(before!.chain.attempts).toHaveLength(0);
+      expect(before!.status).toBe('pending');
+
+      // The waitUntil work performs steps 5-8.
+      gated.release();
+      await Promise.all(ctx.promises);
+
+      expect(gated.calls).toHaveLength(1);
+      expect(gated.calls[0]).toMatchObject({
+        text: 'Your code is 123456',
+        to: TO,
+        messageId: id,
+        template: 'loginCode',
+        kind: 'otp',
+        locale: 'en',
+      });
+
+      const after = await messaging.status(id);
+      expect(after!.chain.attempts).toHaveLength(1);
+      expect(after!.chain.attempts[0]).toMatchObject({
+        channel: 'sms',
+        provider: 'otp-sms',
+        providerId: 'otp-pid',
+        status: 'sent',
+      });
+      expect(await kvStatusStore(env.MESSAGES_KV!).lookupProviderId('otp-pid')).toEqual({
+        id,
+        channel: 'sms',
+        provider: 'otp-sms',
+      });
+    });
+
+    it('without ctx: runs delivery inline so the attempt is recorded before send() resolves', async () => {
+      const gated = gatedSmsProvider('otp-sms', 'otp-pid-inline');
+      gated.release();
+
+      const messaging = api.createMessaging(newEnv(), {
+        templates,
+        providers: () => ({ sms: gated.provider }),
+        delivery: { fallback: ['sms'], always: [] },
+      });
+
+      const { id } = await messaging.send({
+        template: 'loginCode',
+        to: TO,
+        locale: 'en',
+        input: { code: '123456' },
+      });
+
+      // Nothing else is awaited: the attempt must already be on the record.
+      expect(gated.calls).toHaveLength(1);
+      const record = await messaging.status(id);
+      expect(record).not.toBeNull();
+      expect(record!.kind).toBe('otp');
+      expect(record!.chain.attempts).toHaveLength(1);
+      expect(record!.chain.attempts[0]).toMatchObject({
+        channel: 'sms',
+        provider: 'otp-sms',
+        providerId: 'otp-pid-inline',
+        status: 'sent',
+      });
     });
   });
 
