@@ -22,6 +22,13 @@ function handshake(params: Record<string, string>): Request {
   return new Request(url.href);
 }
 
+const METADATA = { display_phone_number: '15550001111', phone_number_id: '123456789012345' };
+
+/**
+ * Statuses are spread across two `changes` in the first entry and a second
+ * `entry`, so an implementation that only reads `entry[0].changes[0]` cannot
+ * produce the expected output: the walk must flatten `entry[].changes[]`.
+ */
 function statusPayload(): unknown {
   return {
     object: 'whatsapp_business_account',
@@ -33,7 +40,7 @@ function statusPayload(): unknown {
             field: 'messages',
             value: {
               messaging_product: 'whatsapp',
-              metadata: { display_phone_number: '15550001111', phone_number_id: '123456789012345' },
+              metadata: METADATA,
               statuses: [
                 {
                   id: 'wamid.SENT1',
@@ -48,12 +55,35 @@ function statusPayload(): unknown {
                   timestamp: '1700000010',
                   recipient_id: '94771234567',
                 },
+              ],
+            },
+          },
+          {
+            field: 'messages',
+            value: {
+              messaging_product: 'whatsapp',
+              metadata: METADATA,
+              statuses: [
                 {
                   id: 'wamid.READ1',
                   status: 'read',
                   timestamp: '1700000020',
                   recipient_id: '94771234567',
                 },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        id: 'WABA_ID_2',
+        changes: [
+          {
+            field: 'messages',
+            value: {
+              messaging_product: 'whatsapp',
+              metadata: METADATA,
+              statuses: [
                 {
                   id: 'wamid.FAILED1',
                   status: 'failed',
@@ -192,7 +222,7 @@ describe('metaWhatsApp provider: webhook', () => {
   });
 
   describe('parse (signed POST)', () => {
-    it('parses a correctly signed status payload into StatusEvent[]', async () => {
+    it('parses a correctly signed status payload into StatusEvent[], flattening entry[].changes[]', async () => {
       const request = await signedRequest(statusPayload(), testConfig.appSecret);
 
       const events = await webhook().parse(request);
