@@ -17,7 +17,7 @@ import { z } from 'zod';
 
 import { consoleProvider } from '../../src/providers/console/index.js';
 import type { RenderedEmail, RenderedSms, RenderedWhatsApp } from '../../src/providers/types.js';
-import { defineTemplates } from '../../src/templates.js';
+import { defineTemplates, TemplateValidationError } from '../../src/templates.js';
 import type { MessagingEnv } from '../../src/types.js';
 import {
   loadMessagingApi,
@@ -284,6 +284,9 @@ describe('Issue #3: createMessaging send pipeline', () => {
           messaging.send({ template: 'orderUpdate', to, locale: 'en', input: INPUT })
         );
         expect(error).toBeInstanceOf(Error);
+        // A typed error: its own name, distinguishable from a template input failure.
+        expect((error as Error).name).not.toBe('Error');
+        expect(error).not.toBeInstanceOf(TemplateValidationError);
       }
 
       expect(wa.calls).toHaveLength(0);
@@ -310,12 +313,13 @@ describe('Issue #3: createMessaging send pipeline', () => {
           input: { name: 42, orderId: 'A-100' },
         })
       );
-      expect(wrongType).toBeInstanceOf(Error);
+      expect(wrongType).toBeInstanceOf(TemplateValidationError);
+      expect((wrongType as Error).name).toBe('TemplateValidationError');
 
       const missingField = await rejection(
         messaging.send({ template: 'orderUpdate', to: TO, locale: 'en', input: { name: 'Ann' } })
       );
-      expect(missingField).toBeInstanceOf(Error);
+      expect(missingField).toBeInstanceOf(TemplateValidationError);
 
       expect(wa.calls).toHaveLength(0);
       expect(sms.calls).toHaveLength(0);
@@ -391,6 +395,40 @@ describe('Issue #3: createMessaging send pipeline', () => {
       });
     });
 
+    it('retries a retryable failure exactly once on the fallback chain path too', async () => {
+      const sms = recordingProvider<RenderedSms>('sms', 'flaky-sms', [
+        { ok: false, error: 'rate limited', retryable: true },
+        { ok: false, error: 'rate limited again', retryable: true },
+      ]);
+
+      const messaging = api.createMessaging(newEnv(), {
+        templates,
+        providers: () => ({ sms }),
+        delivery: { fallback: ['sms'], always: [] },
+      });
+
+      const { id } = await messaging.send({
+        template: 'smsOnly',
+        to: TO,
+        locale: 'en',
+        input: { body: 'hello' },
+      });
+
+      // Initial call plus exactly one retry on the chain channel.
+      expect(sms.calls).toHaveLength(2);
+
+      const record = await messaging.status(id);
+      expect(record).not.toBeNull();
+      const smsAttempts = record!.chain.attempts.filter((a) => a.channel === 'sms');
+      expect(smsAttempts).toHaveLength(1);
+      expect(smsAttempts[0]).toMatchObject({
+        provider: 'flaky-sms',
+        status: 'failed',
+        error: 'rate limited again',
+      });
+      expect(record!.always).toHaveLength(0);
+    });
+
     it('does not retry a failure that is not retryable', async () => {
       const sms = recordingProvider<RenderedSms>('sms', 'dead-sms', [
         { ok: false, error: 'invalid destination' },
@@ -420,6 +458,80 @@ describe('Issue #3: createMessaging send pipeline', () => {
         status: 'failed',
         error: 'invalid destination',
       });
+    });
+  });
+
+  describe('provider errors are settled, not propagated', () => {
+    it('records a failed attempt when a provider rejects and still resolves send() with an id', async () => {
+      let calls = 0;
+      const sms = {
+        name: 'broken-sms',
+        channel: 'sms' as const,
+        send: (): Promise<never> => {
+          calls += 1;
+          return Promise.reject(new Error('socket hang up'));
+        },
+      };
+
+      const messaging = api.createMessaging(newEnv(), {
+        templates,
+        providers: () => ({ sms }),
+        delivery: { fallback: [], always: ['sms'] },
+      });
+
+      const result = await messaging.send({
+        template: 'smsOnly',
+        to: TO,
+        locale: 'en',
+        input: { body: 'hello' },
+      });
+
+      expect(typeof result.id).toBe('string');
+      expect(result.id.length).toBeGreaterThan(0);
+      expect(calls).toBe(1);
+
+      const record = await messaging.status(result.id);
+      expect(record).not.toBeNull();
+      expect(record!.always).toHaveLength(1);
+      expect(record!.always[0]).toMatchObject({
+        channel: 'sms',
+        provider: 'broken-sms',
+        status: 'failed',
+      });
+      expect(record!.always[0].error).toContain('socket hang up');
+    });
+
+    it('records a failed chain attempt when a provider throws synchronously', async () => {
+      const sms = {
+        name: 'throwing-sms',
+        channel: 'sms' as const,
+        send: (): Promise<never> => {
+          throw new Error('boom');
+        },
+      };
+
+      const messaging = api.createMessaging(newEnv(), {
+        templates,
+        providers: () => ({ sms }),
+        delivery: { fallback: ['sms'], always: [] },
+      });
+
+      const result = await messaging.send({
+        template: 'smsOnly',
+        to: TO,
+        locale: 'en',
+        input: { body: 'hello' },
+      });
+
+      expect(typeof result.id).toBe('string');
+      expect(result.id.length).toBeGreaterThan(0);
+
+      const record = await messaging.status(result.id);
+      expect(record).not.toBeNull();
+      const smsAttempts = record!.chain.attempts.filter((a) => a.channel === 'sms');
+      expect(smsAttempts).toHaveLength(1);
+      expect(smsAttempts[0]).toMatchObject({ provider: 'throwing-sms', status: 'failed' });
+      expect(smsAttempts[0].error).toContain('boom');
     });
   });
 
