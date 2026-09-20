@@ -47,7 +47,7 @@ const DEFAULT_FALLBACK_TIMEOUT_MS = 10_000;
 /**
  * Arguments for advancing the delivery fallback chain.
  */
-export interface AdvanceChainArgs<Env = MessagingEnv> {
+export interface AdvanceChainArgs {
   /**
    * Internal message identifier.
    */
@@ -59,7 +59,7 @@ export interface AdvanceChainArgs<Env = MessagingEnv> {
   /**
    * Cloudflare Workers environment bindings (e.g. MESSAGES_KV, FALLBACK_TIMER).
    */
-  env: Env;
+  env: MessagingEnv;
   /**
    * Messaging options containing templates, providers, onStatus, etc.
    */
