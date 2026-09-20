@@ -27,7 +27,7 @@ import {
 import { createLogger } from './logger.js';
 import { type DeliveryOverride, type DeliveryPolicy, resolveDelivery } from './policy.js';
 import { scrubError } from './redact.js';
-import { type RenderInput, renderInputKey } from './render-input.js';
+import { releaseChain, type RenderInput, renderInputKey } from './render-input.js';
 import {
   type Attempt,
   deriveOverallStatus,
@@ -469,16 +469,7 @@ async function cleanupExhaustedChain(
   }
   const lastAttempt = chainAttempts.at(-1);
   if (lastAttempt?.status === 'failed' && chainAttempts.length >= policy.fallback.length) {
-    try {
-      await deps.kv?.delete(renderInputKey(id));
-    } catch {
-      // ignore
-    }
-    try {
-      deps.timer?.cancel?.(id);
-    } catch {
-      // ignore
-    }
+    await releaseChain(deps.timer, deps.kv, id);
   }
 }
 

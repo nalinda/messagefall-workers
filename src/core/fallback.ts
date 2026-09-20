@@ -20,12 +20,7 @@ import type { MessagingEnv } from '../env.js';
 import type { Channel, Provider } from '../providers/types.js';
 import { type AnyRendered, type TemplateDef, validateInput } from '../templates.js';
 import type { MessagingOptions } from './messaging.js';
-import {
-  asRenderInput,
-  readRenderInput,
-  type RenderInput,
-  renderInputKey,
-} from './render-input.js';
+import { asRenderInput, readRenderInput, releaseChain, type RenderInput } from './render-input.js';
 import {
   attemptRecorder,
   notifyStatus,
@@ -94,14 +89,6 @@ function asTimer(env: MessagingEnv, optionsTimer: unknown): FallbackTimerClient 
   return raw && typeof raw === 'object' ? raw : undefined;
 }
 
-function cancelTimer(env: MessagingEnv, optionsTimer: unknown, id: string): void {
-  try {
-    asTimer(env, optionsTimer)?.cancel?.(id);
-  } catch {
-    // Best-effort cancellation
-  }
-}
-
 function rearmTimer(
   env: MessagingEnv,
   optionsTimer: unknown,
@@ -113,14 +100,6 @@ function rearmTimer(
     asTimer(env, optionsTimer)?.setState?.(id, timeoutMs, inputPayload);
   } catch {
     // Best-effort rearming
-  }
-}
-
-async function deleteKVInput(kv: KVNamespace | undefined, id: string): Promise<void> {
-  try {
-    await kv?.delete(renderInputKey(id));
-  } catch {
-    // Best-effort deletion
   }
 }
 
@@ -287,15 +266,15 @@ async function finalizeExhaustion(
     });
   }
 
-  await releaseChain(args, kv);
+  await release(args, kv);
 }
 
 /**
- * Terminal-state cleanup: stop the fallback timer and drop the `in:<id>` render input.
+ * This module's call into the shared terminal-state cleanup, with the timer resolved the same
+ * way every other path here resolves it.
  */
-async function releaseChain(args: AdvanceChainArgs, kv: KVNamespace | undefined): Promise<void> {
-  cancelTimer(args.env, args.options.timer, args.id);
-  await deleteKVInput(kv, args.id);
+async function release(args: AdvanceChainArgs, kv: KVNamespace | undefined): Promise<void> {
+  await releaseChain(asTimer(args.env, args.options.timer), kv, args.id);
 }
 
 /**
@@ -375,7 +354,7 @@ export async function advanceChain(args: AdvanceChainArgs): Promise<void> {
 
   const last = attempts.at(-1);
   if (!last || last.status === 'failed') {
-    await releaseChain(args, kv);
+    await release(args, kv);
     return;
   }
 

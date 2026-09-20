@@ -12,7 +12,7 @@ import type { InputOf, TemplateDef, Templates } from '../templates.js';
 import { advanceChain } from './fallback.js';
 import { DEFAULT_POLICY, type DeliveryOverride, type DeliveryPolicy } from './policy.js';
 import { validateProviderSet } from './provider-set.js';
-import { renderInputKey } from './render-input.js';
+import { releaseChain } from './render-input.js';
 import {
   notifyStatus,
   type ProviderSet,
@@ -164,17 +164,12 @@ async function handleChainStatusApplied<T extends Templates<Record<string, Templ
   }
 
   if (event.status === 'delivered' || event.status === 'read') {
-    const timer = (options.timer ?? env.FALLBACK_TIMER) as FallbackTimerClient | undefined;
-    try {
-      timer?.cancel?.(id);
-    } catch {
-      // ignore
-    }
-    try {
-      await kv.delete(renderInputKey(id));
-    } catch {
-      // ignore
-    }
+    // The chain is terminal: nothing is left to fall back to, so drop the timer and the input.
+    await releaseChain(
+      (options.timer ?? env.FALLBACK_TIMER) as FallbackTimerClient | undefined,
+      kv,
+      id
+    );
   }
 }
 

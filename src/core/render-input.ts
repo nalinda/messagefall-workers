@@ -6,12 +6,16 @@
  * inputs separately — under `in:<id>` in KV with a TTL matching the chain timeout, and with the
  * fallback timer's state. This module owns that key and its payload type so the writer
  * (`./send.js`), the readers (`./fallback.js`, `./webhook.js`) and the cleanup paths all agree
- * on one shape instead of hand-mirroring it.
+ * on one shape instead of hand-mirroring it. It also owns the other end of that lifetime:
+ * {@link releaseChain}, the single terminal-state cleanup every path calls once a chain can no
+ * longer advance.
  *
  * @module
  */
 
 import type { KVNamespace } from '@cloudflare/workers-types';
+
+import type { FallbackTimerClient } from './status.js';
 
 /**
  * Everything the fallback path needs to re-render a message on the next channel.
@@ -89,4 +93,35 @@ export function asRenderInput(value: unknown): RenderInput {
     return value;
   }
   return { input: value };
+}
+
+/**
+ * Terminal-state cleanup for one message: disarm the fallback timer and drop its render input.
+ *
+ * Called from every path that settles a chain for good — the synchronous send exhausting its
+ * fallback channels, the asynchronous advance exhausting or accepting them, and a `delivered` /
+ * `read` webhook arriving. Both steps are best-effort: the chain is already terminal, so a
+ * timer that cannot be reached or a KV delete that fails must not turn into a caller-visible
+ * error. The KV entry carries a TTL, so a missed delete expires on its own; a missed cancel
+ * costs one timer fire that `advanceChain` then finds nothing to do for.
+ *
+ * @param timer - The resolved fallback timer, if the deployment has one.
+ * @param kv - The KV namespace holding the render input, if the deployment has one.
+ * @param id - Internal message identifier.
+ */
+export async function releaseChain(
+  timer: FallbackTimerClient | undefined,
+  kv: KVNamespace | undefined,
+  id: string
+): Promise<void> {
+  try {
+    timer?.cancel?.(id);
+  } catch {
+    // Best-effort cancellation
+  }
+  try {
+    await kv?.delete(renderInputKey(id));
+  } catch {
+    // Best-effort deletion
+  }
 }
