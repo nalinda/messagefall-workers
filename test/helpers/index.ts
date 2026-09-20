@@ -13,7 +13,7 @@ import type {
   OutboundMeta,
   Provider,
   SendResult,
-  TemplateDefinition,
+  TemplateDef,
 } from '../../src/types.js';
 
 const defaultPolicy: DeliveryPolicy = { fallback: ['whatsapp', 'sms'], always: [] };
@@ -23,9 +23,9 @@ const defaultPolicy: DeliveryPolicy = { fallback: ['whatsapp', 'sms'], always: [
  */
 export function createTestState(): MessagingState {
   return {
-    templates: new Map([
+    templates: new Map<string, TemplateDef>([
       ['otp', createTestTemplate('otp')],
-      ['text', createTestTemplate('text')],
+      ['notification', createTestTemplate('notification')],
     ]),
     queue: new Map(),
     store: new Map(),
@@ -41,21 +41,10 @@ export function createTestState(): MessagingState {
 /**
  * Create a test template.
  */
-export function createTestTemplate(kind: 'otp' | 'text'): TemplateDefinition {
+export function createTestTemplate(kind: 'otp' | 'notification'): TemplateDef {
   return {
-    id: kind,
     kind,
-    inputSchema: {
-      type: 'object',
-      shape: {
-        name: { type: 'string' },
-      },
-    },
-    renderings: [
-      { channel: 'whatsapp', options: { text: 'Hello, {name}!' } },
-      { channel: 'sms', options: { text: 'Hello, {name}!' } },
-      { channel: 'email', options: { text: 'Hello, {name}!' } },
-    ],
+    sms: () => 'Hello, test!',
   };
 }
 
@@ -65,18 +54,18 @@ export function createTestTemplate(kind: 'otp' | 'text'): TemplateDefinition {
 export function createMessage(
   templateId: string,
   input: Record<string, string>,
-  policy?: DeliveryPolicy
+  policy?: DeliveryPolicy,
 ): {
-  template: TemplateDefinition;
+  template: TemplateDef;
   policy: DeliveryPolicy;
   input: unknown;
-  kind: 'otp' | 'text';
+  kind: 'otp' | 'notification';
 } {
   return {
-    template: createTestTemplate(templateId as 'otp' | 'text'),
+    template: createTestTemplate(templateId as 'otp' | 'notification'),
     policy: policy ?? defaultPolicy,
     input,
-    kind: templateId as 'otp' | 'text',
+    kind: templateId as 'otp' | 'notification',
   };
 }
 
@@ -107,7 +96,7 @@ export class MockKVNamespace {
 export function createMockKV(): KVNamespace {
   const kv = new MockKVNamespace();
   void kv.put('templates:otp', JSON.stringify({ id: 'otp', kind: 'otp', renderings: [] }));
-  void kv.put('templates:text', JSON.stringify({ id: 'text', kind: 'text', renderings: [] }));
+  void kv.put('templates:notification', JSON.stringify({ id: 'notification', kind: 'notification', renderings: [] }));
   return kv as unknown as KVNamespace;
 }
 
@@ -116,7 +105,7 @@ export function createMockKV(): KVNamespace {
  */
 export function getMessageStatus(
   id: string,
-  store: Map<string, MessageStatusEntry[]>
+  store: Map<string, MessageStatusEntry[]>,
 ): MessageStatusEntry {
   const entries = store.get(id) ?? [];
   const latest = entries.at(-1);
@@ -133,7 +122,7 @@ export function updateMessageStatus(
   store: Map<string, MessageStatusEntry[]>,
   id: string,
   status: DeliveryStatus,
-  timestamp: Date
+  timestamp: Date,
 ): void {
   if (!store.has(id)) {
     store.set(id, []);
@@ -149,10 +138,7 @@ export function updateMessageStatus(
  */
 export type TestProvider = { readonly id: string; readonly channel: Channel };
 
-export function createTestProvider(
-  id: string,
-  channel: Channel
-): TestProvider {
+export function createTestProvider(id: string, channel: Channel): TestProvider {
   return {
     id,
     channel,

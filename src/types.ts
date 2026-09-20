@@ -8,6 +8,7 @@ import type { KVNamespace } from '@cloudflare/workers-types';
 
 import type { DeliveryOverride, DeliveryPolicy } from './core/policy.js';
 import type { Channel, DeliveryStatus, Provider } from './providers/types.js';
+import type { TemplateDef } from './templates.js';
 
 export type {
   Channel,
@@ -20,6 +21,16 @@ export type {
   SendResult,
   StatusEvent,
 } from './providers/types.js';
+export type {
+  AnyRendered,
+  EmailTemplateConfig,
+  InputOf,
+  Locale,
+  TemplateDef,
+  Templates,
+  WhatsAppTemplateConfig,
+} from './templates.js';
+export { definedChannels, defineTemplates, render, TemplateValidationError } from './templates.js';
 
 /**
  * Array of all supported channels.
@@ -29,7 +40,7 @@ export const CHANNELS = ['whatsapp', 'sms', 'email'] as const;
 /**
  * Template kind: 'otp' for one-time codes, 'notification' for general alerts.
  */
-export type TemplateKind = 'otp' | 'notification' | 'text';
+export type TemplateKind = 'otp' | 'notification';
 
 /**
  * Issue reported by standard schema validation.
@@ -63,51 +74,8 @@ export interface StandardSchemaV1<Input = unknown, Output = Input> {
   };
 }
 
-/**
- * Template rendering definition per channel.
- */
-export interface TemplateRendering {
-  channel: Channel;
-  options?: Record<string, string>;
-  template?: string;
-  language?: string | Record<string, string>;
-  params?: (input: unknown) => unknown[];
-  text?: string | ((input: unknown, locale?: string) => string);
-  subject?: (input: unknown, locale?: string) => string;
-  html?: (input: unknown, locale?: string) => string;
-}
-
 export type { DeliveryOverride, DeliveryPolicy, ResolveDeliveryArgs } from './core/policy.js';
 export { DEFAULT_POLICY, PolicyError, resolveDelivery } from './core/policy.js';
-
-/**
- * Template definition in a template catalog.
- */
-export interface TemplateDefinition<TInput = never> {
-  id?: string;
-  kind: TemplateKind;
-  input?: StandardSchemaV1<TInput>;
-  inputSchema?: unknown;
-  whatsapp?: {
-    template?: string;
-    language?: string | Record<string, string>;
-    params?: (input: TInput) => unknown[];
-    text?: string | ((input: TInput) => string);
-  };
-  sms?: string | ((input: TInput, locale?: string) => string);
-  email?: {
-    subject?: (input: TInput, locale?: string) => string;
-    text?: (input: TInput, locale?: string) => string;
-    html?: (input: TInput, locale?: string) => string;
-  };
-  delivery?: DeliveryOverride;
-  renderings?: TemplateRendering[];
-}
-
-/**
- * Catalog of templates.
- */
-export type TemplateCatalog = Record<string, TemplateDefinition<never>>;
 
 /**
  * Message status details.
@@ -161,7 +129,8 @@ export interface MessagingConfig<Env = MessagingEnv> {
     class: unknown;
     id: string | number;
   };
-  templates?: TemplateCatalog;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  templates?: Record<string, TemplateDef<any>>;
   providers?:
     | ((env: Env) => Record<string, Provider>)
     | Provider[]
@@ -183,7 +152,8 @@ export interface MessagingConfig<Env = MessagingEnv> {
  * Messaging state.
  */
 export interface MessagingState {
-  templates: Map<string, TemplateDefinition>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  templates: Map<string, TemplateDef<any>>;
   queue: Map<string, MessageState[]>;
   store: Map<string, MessageStatusEntry[]>;
   providers: Map<string, Provider>;

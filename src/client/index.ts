@@ -6,7 +6,7 @@
  * @module
  */
 
-import type { Channel, DeliveryOverride, TemplateCatalog } from '../types.js';
+import type { Channel, DeliveryOverride, TemplateDef } from '../types.js';
 
 /**
  * Client-side message status.
@@ -42,7 +42,11 @@ export interface ClientSendOptions<TInput = unknown> {
 /**
  * Typed messaging client.
  */
-export class MessagingClient<TTemplates extends TemplateCatalog = TemplateCatalog> {
+/* eslint-disable @typescript-eslint/no-explicit-any */
+export class MessagingClient<
+  TTemplates extends Record<string, TemplateDef<any>> = Record<string, TemplateDef<any>>,
+> {
+  /* eslint-enable @typescript-eslint/no-explicit-any */
   private readonly target: { fetch: (request: Request) => Promise<Response> | Response };
 
   constructor(options: MessagingClientOptions) {
@@ -67,7 +71,11 @@ export class MessagingClient<TTemplates extends TemplateCatalog = TemplateCatalo
       })
     );
     if (!res.ok) {
-      return { status: 'failed', timestamp: new Date().toISOString(), error: `HTTP ${res.status}` };
+      return {
+        status: 'failed',
+        timestamp: new Date().toISOString(),
+        error: `HTTP ${res.status}`,
+      };
     }
     return {
       status: 'sent',
@@ -82,8 +90,9 @@ export class MessagingClient<TTemplates extends TemplateCatalog = TemplateCatalo
  * @param options - Client configuration options.
  * @returns A typed MessagingClient instance.
  */
-export function createMessagingClient<TTemplates extends TemplateCatalog = TemplateCatalog>(
-  options: MessagingClientOptions
-): MessagingClient<TTemplates> {
+export function createMessagingClient<
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  TTemplates extends Record<string, TemplateDef<any>> = Record<string, TemplateDef<any>>,
+>(options: MessagingClientOptions): MessagingClient<TTemplates> {
   return new MessagingClient<TTemplates>(options);
 }

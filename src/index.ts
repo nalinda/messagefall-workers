@@ -15,22 +15,13 @@ import type {
   MessagingEnv,
   MessagingState,
   Provider,
-  TemplateCatalog,
 } from './types.js';
 
 export * from './core/policy.js';
 export * from './providers/index.js';
+export type { AnyRendered } from './templates.js';
+export * from './templates.js';
 export * from './types.js';
-
-/**
- * Define a type-safe template catalog.
- *
- * @param templates - Record of template definitions.
- * @returns The typed template catalog.
- */
-export function defineTemplates<T extends TemplateCatalog>(templates: T): T {
-  return templates;
-}
 
 function resolveConfigPolicy(rawDelivery?: DeliveryOverride): DeliveryPolicy {
   if (rawDelivery && rawDelivery !== 'all' && rawDelivery.fallback && rawDelivery.always) {
