@@ -18,6 +18,7 @@ import type {
 } from './types.js';
 
 export * from './core/policy.js';
+export * from './core/status.js';
 export * from './providers/index.js';
 export type { AnyRendered } from './templates.js';
 export * from './templates.js';

@@ -76,6 +76,14 @@ export interface StandardSchemaV1<Input = unknown, Output = Input> {
 
 export type { DeliveryOverride, DeliveryPolicy, ResolveDeliveryArgs } from './core/policy.js';
 export { DEFAULT_POLICY, PolicyError, resolveDelivery } from './core/policy.js';
+export type {
+  Attempt,
+  MessageRecord,
+  ProviderRef,
+  StatusStore,
+  StatusStoreOptions,
+} from './core/status.js';
+export { DEFAULT_STATUS_TTL, deriveOverallStatus, kvStatusStore } from './core/status.js';
 
 /**
  * Message status details.
