@@ -235,12 +235,12 @@ export interface AttemptRecorder {
  * built with `attemptRecorder` (which appends the attempt, recomputes `chainStatus` and
  * `deriveOverallStatus`, and calls `observe`).
  *
- * Caveat for that async path: `runChain` needs a `ValidatedSendRequest` (to, locale, validated
- * input), and none of those are persisted on the `MessageRecord` — deliberately, because for an
- * OTP send the input holds the one-time code and #10 forbids storing it. #7/#8 therefore cannot
- * rebuild the render from the stored record as things stand; they must either persist a
- * redacted/derived form of what a resume needs, or take a different approach. That decision is
- * theirs, not #3's.
+ * Inputs for that async path: `runChain` needs a `ValidatedSendRequest` (to, locale, validated
+ * input). The `MessageRecord` deliberately carries none of them. Per #7's own acceptance
+ * criterion they live in a separate KV key, `in:<id>`, written on send with a TTL matching the
+ * chain timeout and deleted once the chain reaches a terminal state; #7's fallback path reads
+ * it (or takes a synchronous `input` pass-through) to rebuild the render with `validateInput` +
+ * `renderValidated`. The `in:<id>` write is part of #7's scope and is not done here yet.
  */
 export async function runChain(
   req: ValidatedSendRequest,
@@ -361,42 +361,47 @@ export function attemptRecorder(
     return next;
   };
 
+  /**
+   * Rebuilds the record with a new chain and/or always part. Only chain-part writes recompute
+   * `chain.status`; an always write keeps whatever the chain last said, so a sealed terminal
+   * chain status is never resurrected by a late always attempt.
+   */
   const rederive = (
     record: MessageRecord,
-    chainAttempts: Attempt[],
-    always: Attempt[],
-    progress?: ChainProgress
-  ): MessageRecord => {
-    const chain = {
-      attempts: chainAttempts,
-      status: chainStatus(chainAttempts, policy.fallback, progress),
-    };
-    return {
-      ...record,
-      chain,
-      always,
-      status: deriveOverallStatus(policy, chain, always),
-      updatedAt: new Date().toISOString(),
-    };
-  };
+    chain: MessageRecord['chain'],
+    always: Attempt[]
+  ): MessageRecord => ({
+    ...record,
+    chain,
+    always,
+    status: deriveOverallStatus(policy, chain, always),
+    updatedAt: new Date().toISOString(),
+  });
+
+  const chainPart = (attempts: Attempt[], progress?: ChainProgress): MessageRecord['chain'] => ({
+    attempts,
+    status: chainStatus(attempts, policy.fallback, progress),
+  });
 
   return {
     record: (attempt, part, progress) =>
       enqueue(async () => {
         await updateWithRetry(deps, id, (record) =>
-          rederive(
-            record,
-            part === 'chain' ? [...record.chain.attempts, attempt] : [...record.chain.attempts],
-            part === 'always' ? [...record.always, attempt] : [...record.always],
-            progress
-          )
+          part === 'chain'
+            ? rederive(record, chainPart([...record.chain.attempts, attempt], progress), [
+                ...record.always,
+              ])
+            : rederive(record, { ...record.chain, attempts: [...record.chain.attempts] }, [
+                ...record.always,
+                attempt,
+              ])
         );
         await observe(deps, id, attempt);
       }),
     sealChain: (progress) =>
       enqueue(() =>
         updateWithRetry(deps, id, (record) =>
-          rederive(record, [...record.chain.attempts], [...record.always], progress)
+          rederive(record, chainPart([...record.chain.attempts], progress), [...record.always])
         )
       ),
   };

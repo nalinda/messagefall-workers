@@ -63,7 +63,7 @@ export interface OutboundMeta {
    *
    * Interim shape; the contract-level fix is tracked in #28.
    */
-  template: string | RenderedWhatsApp['template'];
+  template: string | NonNullable<RenderedWhatsApp['template']>;
   /**
    * Template kind: 'otp' for sensitive one-time passwords, 'notification' for general alerts.
    */

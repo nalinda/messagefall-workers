@@ -967,6 +967,46 @@ describe('Issue #3: createMessaging send pipeline', () => {
     });
   });
 
+  describe('a sealed chain status survives later always writes', () => {
+    it('keeps chain.status failed when an always attempt lands after the chain was sealed', async () => {
+      // put #1 create; #2 + #3 the sms attempt and its retry (lost); #4 the seal; #5 email.
+      const env = flakyEnv((put) => put === 2 || put === 3);
+      const sms = recordingProvider<RenderedSms>('sms', 'dead-sms', [{ ok: false, error: 'no' }]);
+      const email = gatedProvider<RenderedEmail>('email', 'slow-email', 'email-late');
+      const captured = captureConsole(['error']);
+
+      try {
+        const messaging = createMessaging(env, {
+          templates,
+          providers: () => ({ sms, email: email.provider }),
+          delivery: { fallback: ['sms'], always: ['email'] },
+        });
+
+        const pending = messaging.send({ template: 'orderUpdate', to: TO, locale: 'en', input: INPUT });
+
+        // The chain is exhausted and sealed while email is still held open.
+        await waitFor(() => email.calls.length === 1);
+        const id = email.calls[0].messageId;
+        await waitFor(() => captured.logs.some((line) => line.includes(id)));
+        const sealed = await messaging.status(id);
+        expect(sealed!.chain.attempts).toHaveLength(0);
+        expect(sealed!.chain.status).toBe('failed');
+
+        email.release();
+        await pending;
+
+        const final = await messaging.status(id);
+        expect(final!.always).toHaveLength(1);
+        expect(final!.always[0]).toMatchObject({ channel: 'email', status: 'sent' });
+        expect(final!.chain.attempts).toHaveLength(0);
+        expect(final!.chain.status).toBe('failed');
+        expect(final!.status).toBe('failed');
+      } finally {
+        captured.restore();
+      }
+    });
+  });
+
   describe('attempts are persisted as each provider settles', () => {
     it('indexes a fast always provider before a slow chain provider has returned', async () => {
       const env = newEnv();
