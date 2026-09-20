@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { Channel, TemplateRendering, TemplateDefinition, DeliveryPolicy } from '../types';
+import type { Channel, DeliveryPolicy,TemplateDefinition, TemplateRendering } from '../types';
 
 /**
  * Provider configuration.

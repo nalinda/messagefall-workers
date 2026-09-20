@@ -51,6 +51,9 @@
     "test:exports": "bun test test/exports.test.ts",
     "prepare": "husky"
   },
+  "eslintConfig": {
+    "extends": ["@serendibyte-co/eslint-config"]
+  },
   "peerDependencies": {
     "@cloudflare/workers-types": ">=4.0.0",
     "hono": "^4.0.0"
@@ -70,6 +73,8 @@
     "@serendibyte-co/prettier-config": "git+https://github.com/serendibyte-co/prettier-config.git#v1.0.2",
     "@types/bun": "^1.4.0",
     "eslint": "^10.8.1",
+    "eslint-plugin-simple-import-sort": "^14.0.0",
+    "eslint-plugin-tsdoc": "^0.5.3",
     "hono": "^4.0.0",
     "husky": "^9.1.7",
     "prettier": "^3.9.6",

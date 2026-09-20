@@ -8,19 +8,11 @@
  */
 
 import type {
-  Provider,
-  ProviderConfig,
-  ProviderSendFn,
-  ProviderStatusFn,
-  ProviderStatus,
-  ProviderFactory,
-} from './types';
-import type {
   Channel,
-  TemplateDefinition,
   DeliveryStatus,
   MessagingState,
   MessageStatus,
+  Provider,
 } from '../../types';
 
 /**
@@ -28,41 +20,49 @@ import type {
  */
 export class StubProvider implements Provider {
   readonly id = 'stub';
-  readonly channel = 'whatsapp' as const; // Stub supports all channels for now
+  readonly channel = 'whatsapp' as const;
+  private readonly state: any;
 
-  constructor(
-    private readonly config: {
-      name: string;
-    },
-    private readonly state: MessagingState,
-  ) {}
+  constructor(state: { kv: any; durable?: { class: any; id: string | number } }) {
+    this.state = state;
+  }
 
-  send(options: ProviderSendOptions): Promise<{
+  async send(options: {
+    config: Record<string, unknown>;
+    channel: Channel;
+    template: { kind: 'otp' | 'text' };
+    input: unknown;
+    policy?: any;
+  }): Promise<{
     messageId: string;
-    status: Promise<ProviderStatus>;
+    status: Promise<MessageStatus>;
   }> {
-    // Log for debugging only - NO message body
-    console.log(`[${this.id}] Sending ${options.channel} message: [SENDING...]`);
+    const { template, input } = options;
+    const messageId = `stub-${Date.now()}`;
 
-    // Generate a fake message ID
-    const messageId = `${this.id}:${Date.now()}:${Math.random().toString(36).substring(7)}`;
-
-    // Mark as sent in state
-    this.state.queueMessage({
+    if (!this.state.queue.has(messageId)) {
+      this.state.queue.set(messageId, []);
+    }
+    this.state.queue.get(messageId)!.push({
       id: messageId,
-      kind: options.template.kind,
+      kind: template.kind,
       channel: options.channel,
-      status: 'pending',
+      status: 'pending' as const,
       statusTimestamp: new Date(),
-      templateId: options.template.id,
+      templateId: template.id,
     });
 
-    // Simulate delivery status after a short delay
-    setTimeout(async () => {
-      this.state.updateMessageStatus(messageId, 'sent', new Date());
+    setTimeout(() => {
+      this.state.queue.get(messageId)!.forEach((msg: any) => {
+        if (msg.id === messageId) {
+          msg.status = 'sent' as const;
+          msg.statusTimestamp = new Date();
+        }
+      });
+      this.storeStatus(messageId, 'sent', new Date());
     }, 100);
 
-    return {
+    return Promise.resolve({
       messageId,
       status: Promise.resolve({
         status: 'sent' as const,
@@ -72,11 +72,11 @@ export class StubProvider implements Provider {
           fake: true,
         },
       }),
-    };
+    });
   }
 
-  status?: ProviderStatusFn = (messageId: string): Promise<ProviderStatus> => {
-    // For stub provider, always return 'sent'
+  status(messageId: string): Promise<MessageStatus> {
+    this.storeStatus(messageId, 'sent', new Date());
     return Promise.resolve({
       status: 'sent' as const,
       timestamp: new Date(),
@@ -85,19 +85,32 @@ export class StubProvider implements Provider {
         fake: true,
       },
     });
-  };
+  }
 
-  statusHandler?: (request: Request) => Response = async (request) => {
-    // Stub webhook handler - just log and return success
+  statusHandler?(request: Request): Response {
     console.log('[Stub] Webhook received');
     return new Response('OK', { status: 200 });
-  };
+  }
+
+  storeStatus(id: string, status: DeliveryStatus, timestamp: Date): void {
+    const entries = this.state.store.get(id) ?? [];
+    entries.push({ id, status, timestamp });
+    this.state.store.set(id, entries);
+  }
 }
 
 /**
  * Factory function for the stub provider.
  */
-export const stubFactory: ProviderFactory = {
+export const stubFactory = {
   id: 'stub',
-  create: (config) => new StubProvider(config.config, config.state),
+  create: (config: { state: any }) => new StubProvider(config.state),
+};
+
+/**
+ * Stub provider factory for testing.
+ */
+export const testStubFactory = {
+  id: 'stub',
+  create: (config: { state: any }) => new StubProvider(config.state),
 };

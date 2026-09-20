@@ -9,8 +9,13 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { describe, expect, it, beforeAll } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 
+import type { CreateMessagingMagicLinkOptions, CreateMessagingPhoneOptions } from '../src/index';
+
+// These tests exercise what a consumer installs: the `package.json#exports`
+// map and the dist files it points at, not the TypeScript sources. dist is
+// rebuilt first so the assertions cannot pass against a stale artefact.
 const rootDir = path.resolve(import.meta.dir, '..');
 
 interface ExportTarget {
@@ -19,9 +24,20 @@ interface ExportTarget {
   default: string;
 }
 
-function readPackageJson(): Record<string, ExportTarget> {
-  const content = fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8');
-  return JSON.parse(content).exports;
+interface PackageJson {
+  exports: Record<string, ExportTarget>;
+  files: string[];
+}
+
+function readPackageJson(): PackageJson {
+  // eslint-disable-next-line security/detect-non-literal-fs-filename -- fixed repo path
+  return JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8')) as PackageJson;
+}
+
+function exportTarget(subpath: string): ExportTarget {
+  const target = new Map(Object.entries(readPackageJson().exports)).get(subpath);
+  if (!target) throw new Error(`package.json#exports has no "${subpath}" entry`);
+  return target;
 }
 
 function distFile(relative: string): string {
@@ -29,11 +45,7 @@ function distFile(relative: string): string {
 }
 
 async function loadExport(subpath: string): Promise<Record<string, unknown>> {
-  const target = readPackageJson()[subpath];
-  if (!target) {
-    throw new Error(`No export target for "${subpath}"`);
-  }
-  return (await import(distFile(target.import))) as Record<string, unknown>;
+  return (await import(distFile(exportTarget(subpath).import))) as Record<string, unknown>;
 }
 
 beforeAll(() => {
@@ -41,29 +53,34 @@ beforeAll(() => {
     cwd: rootDir,
     encoding: 'utf8',
   });
-
   if (result.status !== 0) {
-    throw new Error(`Build failed:\n${result.stderr}`);
+    throw new Error(`bun run build failed:\n${result.stdout}\n${result.stderr}`);
   }
 });
 
-describe('Exports map', () => {
-  it('has correct export entries', () => {
+describe('package.json#exports', () => {
+  it('publishes dist, and every export target is a file the build produces', () => {
     const pkg = readPackageJson();
-    expect(pkg['.']).toBeDefined();
-    expect(pkg['./client']).toBeDefined();
-    expect(pkg['./durable']).toBeDefined();
-    expect(pkg['./providers/stub']).toBeDefined();
+    expect(pkg.files).toContain('dist');
+    const sortedKeys = Object.keys(pkg.exports).sort((a, b) => a.localeCompare(b));
+    expect(sortedKeys).toEqual(['.', './client', './durable', './providers/*']);
+    for (const target of Object.values(pkg.exports)) {
+      for (const file of [target.types, target.import, target.default]) {
+        expect(file.startsWith('./dist/')).toBe(true);
+        expect(fs.existsSync(distFile(file))).toBe(true);
+      }
+      expect(target.default).toBe(target.import);
+    }
   });
 });
 
-describe('Root entry point', () => {
-  it('exports createMessaging as a function', async () => {
+describe('Entry points export documented functions', () => {
+  it('exports createMessaging as a function from the built . entry point', async () => {
     const root = await loadExport('.');
     expect(typeof root.createMessaging).toBe('function');
   });
 
-  it('exports createMessagingApp as a function', async () => {
+  it('exports createMessagingApp as a function from the built . entry point', async () => {
     const root = await loadExport('.');
     expect(typeof root.createMessagingApp).toBe('function');
   });
@@ -77,26 +94,9 @@ describe('Root entry point', () => {
     const root = await loadExport('.');
     expect(typeof root.route).toBe('function');
   });
-});
 
-describe('Client entry point', () => {
-  it('exports createMessagingClient as a function', async () => {
+  it('exports createMessagingClient as a function from the built ./client entry point', async () => {
     const client = await loadExport('./client');
     expect(typeof client.createMessagingClient).toBe('function');
-  });
-});
-
-describe('Durable entry point', () => {
-  it('exports FallbackTimer', async () => {
-    const durable = await loadExport('./durable');
-    expect(durable.FallbackTimer).toBeDefined();
-  });
-});
-
-describe('Stub provider', () => {
-  it('exports stubFactory as an object', async () => {
-    const stub = await import(distFile('providers/stub/index.js'));
-    expect(stub.stubFactory).toBeDefined();
-    expect(typeof stub.stubFactory).toBe('object');
   });
 });

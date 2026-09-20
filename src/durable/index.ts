@@ -37,26 +37,26 @@ export interface FallbackTimer {
   /**
    * Get the timer state.
    */
-  getState(): FallbackTimerState | null;
+  getState(messageId: string): FallbackTimerState | null;
   /**
    * Set the timer state.
    */
-  setState(state: FallbackTimerState): void;
+  setState(messageId: string, timeoutMs: number): void;
   /**
    * Mark timer as triggered (fallback already applied).
    */
-  trigger(): void;
+  trigger(messageId: string): void;
   /**
    * Check if timeout has been reached.
    */
-  isTimeout(): boolean;
+  isTimeout(messageId: string): boolean;
 }
 
 /**
  * FallbackTimer Durable Object spec.
  */
-export class FallbackTimerImpl {
-  private state: Map<string, FallbackTimerState>;
+export class FallbackTimer {
+  private readonly state: Map<string, FallbackTimerState>;
   private readonly timeoutMs: number;
 
   constructor(ctx: DurableObjectSlot) {
@@ -74,32 +74,17 @@ export class FallbackTimerImpl {
   /**
    * Set a new timer state for the message ID.
    */
-  setState(messageId: string, timeoutMs: number): void {
+  setState(messageId: string, timeoutMs?: number): void {
     this.state.set(messageId, {
       messageId,
-      timeoutMs,
+      timeoutMs: timeoutMs ?? this.timeoutMs,
       createdAt: new Date(),
       triggered: false,
     });
   }
 
   /**
-   * Check if timeout has been reached and trigger fallback if so.
-   */
-  checkAndTrigger(messageId: string): boolean {
-    const timer = this.state.get(messageId);
-    if (!timer || timer.triggered) return false;
-    
-    const now = new Date();
-    if (now.getTime() - timer.createdAt.getTime() >= this.timeoutMs) {
-      timer.triggered = true;
-      return true;
-    }
-    return false;
-  }
-
-  /**
-   * Trigger fallback for the message.
+   * Mark timer as triggered (fallback already applied).
    */
   trigger(messageId: string): void {
     const timer = this.state.get(messageId);
@@ -109,11 +94,14 @@ export class FallbackTimerImpl {
   }
 
   /**
-   * Get triggered timers.
+   * Check if timeout has been reached and return true.
    */
-  getTriggered(): string[] {
-    return Array.from(this.state.entries())
-      .filter(([_, t]) => t.triggered)
-      .map(([id]) => id);
+  isTimeout(messageId: string): boolean {
+    const timer = this.state.get(messageId);
+    if (!timer) return false;
+
+    const now = new Date();
+    const elapsed = now.getTime() - timer.createdAt.getTime();
+    return elapsed >= this.timeoutMs;
   }
 }

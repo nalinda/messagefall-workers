@@ -4,8 +4,8 @@
  * @module
  */
 
-export * from './types';
 export * from './stub/index';
+export * from './types';
 // export * from './meta-whatsapp/index';
 // export * from './twilio-sms/index';
 // export * from './vonage-sms/index';
