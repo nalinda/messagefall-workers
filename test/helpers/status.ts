@@ -9,6 +9,7 @@ import { convertV4MiniflareOptions, Miniflare } from 'miniflare';
 
 import type { DeliveryPolicy } from '../../src/core/policy.js';
 import type { Channel, DeliveryStatus } from '../../src/providers/types.js';
+import { patchMiniflareProxy } from './miniflare-proxy.js';
 
 /**
  * Single delivery attempt on a channel.
@@ -85,6 +86,7 @@ export async function createMiniflareKV(): Promise<{
   kv: KVNamespace;
   dispose: () => Promise<void>;
 }> {
+  patchMiniflareProxy();
   const mf = new Miniflare(
     convertV4MiniflareOptions({
       modules: true,

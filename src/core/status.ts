@@ -9,49 +9,6 @@ import type { KVNamespace } from '@cloudflare/workers-types';
 import type { Channel, DeliveryStatus } from '../providers/types.js';
 import type { DeliveryPolicy } from './policy.js';
 
-interface PatchableProxy {
-  __mfPatched?: boolean;
-}
-
-function wrapHandler(handler: ProxyHandler<Record<string | symbol, unknown>>): void {
-  if (typeof handler.get !== 'function') {
-    return;
-  }
-  const origGet = handler.get.bind(handler);
-  handler.get = (target, key, receiver) => {
-    if (Object.prototype.hasOwnProperty.call(target, key)) {
-      return target[key as string];
-    }
-    return origGet(target, key, receiver) as unknown;
-  };
-}
-
-function patchMiniflareProxy(): void {
-  const OriginalProxy = Proxy;
-  const patchable = OriginalProxy as unknown as PatchableProxy;
-  if (patchable.__mfPatched) {
-    return;
-  }
-
-  const PatchedProxy = new OriginalProxy(OriginalProxy, {
-    construct(target, constructorArgs, newTarget) {
-      const [, handler] = constructorArgs as [
-        Record<string | symbol, unknown>,
-        ProxyHandler<Record<string | symbol, unknown>>,
-      ];
-      wrapHandler(handler);
-      return Reflect.construct(target, constructorArgs, newTarget) as object;
-    },
-  });
-
-  (PatchedProxy as unknown as PatchableProxy).__mfPatched = true;
-  // eslint-disable-next-line unicorn/no-global-object-property-assignment
-  (globalThis as unknown as { Proxy: unknown }).Proxy = PatchedProxy;
-}
-
-// eslint-disable-next-line unicorn/no-top-level-side-effects
-patchMiniflareProxy();
-
 /**
  * Single delivery attempt on a channel.
  */
