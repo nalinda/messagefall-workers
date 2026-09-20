@@ -4,30 +4,36 @@
  * Advances delivery across configured fallback channels when a channel fails
  * or times out.
  *
+ * The chain walk itself is NOT implemented here: this module resolves the remaining channels,
+ * the render inputs and the provider set, then hands them to `runChain` / `attemptRecorder` in
+ * `./send.js`, which is the single chain-advance implementation. Everything below is the
+ * asynchronous entry point's own concerns — where the input comes from (`in:<id>` in KV, the
+ * timer's state, or a synchronous pass-through) and what happens to the fallback timer and the
+ * `in:<id>` key once the chain settles.
+ *
  * @module
  */
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 
-import { renderValidated, validateInput } from '../templates.js';
-import type {
-  AnyRendered,
-  Channel,
-  MessagingEnv,
-  OutboundMeta,
-  Provider,
-  SendResult,
-  TemplateDef,
-} from '../types.js';
-import { scrubError } from './logger.js';
+import { validateInput } from '../templates.js';
+import type { AnyRendered, Channel, MessagingEnv, Provider, TemplateDef } from '../types.js';
 import type { MessagingOptions } from './messaging.js';
-import { NO_PROVIDER, notifyStatus, type ProviderSet, type StatusCallbackEvent } from './send.js';
 import {
-  type Attempt,
-  deriveOverallStatus,
-  type MessageRecord,
-  type StatusStore,
-} from './status.js';
+  attemptRecorder,
+  notifyStatus,
+  type ProviderSet,
+  runChain,
+  type SendDeps,
+  type StatusCallbackEvent,
+  type ValidatedSendRequest,
+} from './send.js';
+import type { Attempt, MessageRecord, StatusStore } from './status.js';
+
+/**
+ * Default fallback timeout used when the caller configures none.
+ */
+const DEFAULT_FALLBACK_TIMEOUT_MS = 10_000;
 
 /**
  * Arguments for advancing the delivery fallback chain.
@@ -85,17 +91,18 @@ interface MockTimerCandidate {
 interface InputPayload {
   input: unknown;
   to?: string;
+  email?: string;
   locale?: string;
 }
 
+function asTimer(env: MessagingEnv, optionsTimer: unknown): MockTimerCandidate | undefined {
+  const raw = optionsTimer ?? env.FALLBACK_TIMER;
+  return raw && typeof raw === 'object' ? raw : undefined;
+}
+
 function cancelTimer(env: MessagingEnv, optionsTimer: unknown, id: string): void {
-  const rawTimer = optionsTimer ?? env.FALLBACK_TIMER;
-  if (!rawTimer || typeof rawTimer !== 'object') {
-    return;
-  }
-  const timer = rawTimer as MockTimerCandidate;
   try {
-    timer.cancel?.(id);
+    asTimer(env, optionsTimer)?.cancel?.(id);
   } catch {
     // Best-effort cancellation
   }
@@ -108,13 +115,8 @@ function rearmTimer(
   timeoutMs: number,
   inputPayload?: unknown
 ): void {
-  const rawTimer = optionsTimer ?? env.FALLBACK_TIMER;
-  if (!rawTimer || typeof rawTimer !== 'object') {
-    return;
-  }
-  const timer = rawTimer as MockTimerCandidate;
   try {
-    timer.setState?.(id, timeoutMs, inputPayload);
+    asTimer(env, optionsTimer)?.setState?.(id, timeoutMs, inputPayload);
   } catch {
     // Best-effort rearming
   }
@@ -151,13 +153,7 @@ function findInObject(
 }
 
 function findProviderForChannel(
-  providers:
-    | Record<string, Provider>
-    | Provider[]
-    | Map<string, Provider>
-    | ProviderSet
-    | ((env: MessagingEnv) => ProviderSet)
-    | undefined,
+  providers: AdvanceChainArgs['options']['providers'],
   env: MessagingEnv,
   channel: Channel
 ): Provider<AnyRendered> | undefined {
@@ -173,6 +169,26 @@ function findProviderForChannel(
     return findInObject(resolved as Record<string, unknown>, channel);
   }
   return undefined;
+}
+
+/**
+ * Normalises whatever shape the caller configured providers in into the per-channel
+ * {@link ProviderSet} the send pipeline expects.
+ */
+function toProviderSet(
+  providers: AdvanceChainArgs['options']['providers'],
+  env: MessagingEnv
+): ProviderSet {
+  const find = (channel: Channel): Provider<AnyRendered> | undefined =>
+    findProviderForChannel(providers, env, channel);
+  const set: ProviderSet = {};
+  const whatsapp = find('whatsapp');
+  const sms = find('sms');
+  const email = find('email');
+  if (whatsapp) set.whatsapp = whatsapp;
+  if (sms) set.sms = sms;
+  if (email) set.email = email;
+  return set;
 }
 
 function extractFromTimer(timerCandidate: unknown, id: string): InputPayload | undefined {
@@ -237,7 +253,7 @@ async function resolveInputPayload(
 }
 
 function resolveTemplate(
-  templates: Record<string, TemplateDef<unknown>> | Map<string, TemplateDef<unknown>> | undefined,
+  templates: AdvanceChainArgs['options']['templates'],
   templateName: string
 ): TemplateDef<unknown> | undefined {
   if (templates instanceof Map) {
@@ -247,147 +263,6 @@ function resolveTemplate(
     return Reflect.get(templates, templateName);
   }
   return undefined;
-}
-
-async function attemptSend(
-  provider: Provider<AnyRendered>,
-  sendPayload: AnyRendered & OutboundMeta
-): Promise<SendResult> {
-  let result: SendResult;
-  try {
-    result = await provider.send(sendPayload);
-  } catch (err) {
-    result = { ok: false, error: err instanceof Error ? err.message : String(err) };
-  }
-
-  if (!result.ok && result.retryable) {
-    try {
-      result = await provider.send(sendPayload);
-    } catch (err) {
-      result = { ok: false, error: err instanceof Error ? err.message : String(err) };
-    }
-  }
-  return result;
-}
-
-function renderPayload(
-  template: TemplateDef<unknown> | undefined,
-  channel: Channel,
-  validatedInput: unknown,
-  payload: InputPayload,
-  record: MessageRecord,
-  id: string
-): { sendPayload?: AnyRendered & OutboundMeta; error?: string } {
-  try {
-    const rendered = template
-      ? renderValidated(template, channel, validatedInput, payload.locale ?? 'en')
-      : ({} as AnyRendered);
-    const meta: OutboundMeta = {
-      to: payload.to ?? '',
-      messageId: id,
-      template: record.template,
-      kind: record.kind,
-      locale: payload.locale ?? 'en',
-    };
-    return { sendPayload: { ...meta, ...rendered } as AnyRendered & OutboundMeta };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-async function performChannelAttempt(
-  provider: Provider<AnyRendered> | undefined,
-  template: TemplateDef<unknown> | undefined,
-  channel: Channel,
-  validatedInput: unknown,
-  payload: InputPayload,
-  record: MessageRecord,
-  id: string
-): Promise<Attempt> {
-  if (!provider) {
-    return {
-      channel,
-      provider: NO_PROVIDER,
-      status: 'failed',
-      error: `No provider configured for channel "${channel}"`,
-      at: new Date().toISOString(),
-    };
-  }
-
-  const base = { channel, provider: provider.name };
-  const { sendPayload, error } = renderPayload(
-    template,
-    channel,
-    validatedInput,
-    payload,
-    record,
-    id
-  );
-
-  if (error || !sendPayload) {
-    return {
-      ...base,
-      status: 'failed',
-      error: error ?? 'Template rendering failed',
-      at: new Date().toISOString(),
-    };
-  }
-
-  const result = await attemptSend(provider, sendPayload);
-  const at = new Date().toISOString();
-  return result.ok
-    ? {
-        ...base,
-        status: 'sent',
-        ...(result.providerId && { providerId: result.providerId }),
-        at,
-      }
-    : {
-        ...base,
-        status: 'failed',
-        error: result.error
-          ? scrubError(result.error, [sendPayload, validatedInput, payload.input])
-          : undefined,
-        at,
-      };
-}
-
-async function finalizeExhaustion(
-  args: AdvanceChainArgs,
-  record: MessageRecord,
-  attempts: Attempt[],
-  lastAttemptChannel: Channel,
-  lastAttemptProvider: string,
-  kv: KVNamespace | undefined
-): Promise<void> {
-  const overallStatus = deriveOverallStatus(
-    record.policy,
-    { status: 'failed', attempts },
-    record.always
-  );
-
-  await args.store.update(args.id, (rec) => ({
-    ...rec,
-    chain: {
-      ...rec.chain,
-      status: 'failed',
-      attempts,
-    },
-    status: overallStatus,
-    updatedAt: new Date().toISOString(),
-  }));
-
-  if (args.options.onStatus) {
-    await notifyStatus(args.options.onStatus, {
-      id: args.id,
-      channel: lastAttemptChannel,
-      provider: lastAttemptProvider,
-      status: 'failed',
-    });
-  }
-
-  cancelTimer(args.env, args.options.timer, args.id);
-  await deleteKVInput(kv, args.id);
 }
 
 function shouldSkipAdvancement(
@@ -404,118 +279,94 @@ function shouldSkipAdvancement(
   return reason === 'failed' && lastAttempt.status !== 'failed';
 }
 
-async function recordSentAttempt(
-  args: AdvanceChainArgs,
-  currentRecord: MessageRecord,
-  attempts: Attempt[],
-  attempt: Attempt,
-  payload: InputPayload
-): Promise<void> {
-  const overallStatus = deriveOverallStatus(
-    currentRecord.policy,
-    { status: 'sent', attempts },
-    currentRecord.always
-  );
-
-  await args.store.update(args.id, (rec) => ({
-    ...rec,
-    chain: {
-      ...rec.chain,
-      status: 'sent',
-      attempts,
-    },
-    status: overallStatus,
-    updatedAt: attempt.at,
-  }));
-
-  const fallbackTimeoutMs = args.options.fallbackTimeoutMs ?? 10_000;
-  rearmTimer(args.env, args.options.timer, args.id, fallbackTimeoutMs, payload);
+/**
+ * Builds the {@link SendDeps} the shared pipeline needs for this advance. `defaults` is the
+ * record's own resolved policy: the chain status derivation must see the policy the message was
+ * created with, not whatever the instance defaults are now.
+ */
+function sendDeps(args: AdvanceChainArgs, providers: ProviderSet, record: MessageRecord): SendDeps {
+  return {
+    providers,
+    store: args.store,
+    defaults: record.policy,
+    ...(args.options.onStatus && { onStatus: args.options.onStatus }),
+  };
 }
 
-async function executeFallbackLoop(
+/**
+ * Seals a chain that has no channel left to try: re-derives the terminal `failed` status through
+ * the same recorder the walk uses, notifies the observer for the attempt that ended it, then
+ * releases the timer and the stored input.
+ */
+async function finalizeExhaustion(
   args: AdvanceChainArgs,
-  initialRecord: MessageRecord,
-  nextChannels: Channel[],
-  payload: InputPayload,
-  template: TemplateDef<unknown> | undefined,
-  validatedInput: unknown,
+  record: MessageRecord,
+  lastAttempt: Attempt,
   kv: KVNamespace | undefined
 ): Promise<void> {
-  let currentRecord = initialRecord;
+  const recorder = attemptRecorder(sendDeps(args, {}, record), args.id, record.policy);
+  await recorder.sealChain({
+    attempted: Math.max(record.policy.fallback.length, record.chain.attempts.length),
+    last: 'failed',
+  });
 
-  for (const [index, channel] of nextChannels.entries()) {
-    const provider = findProviderForChannel(args.options.providers, args.env, channel);
-    const attempt = await performChannelAttempt(
-      provider,
-      template,
-      channel,
-      validatedInput,
-      payload,
-      initialRecord,
-      args.id
-    );
-
-    const attempts = [...currentRecord.chain.attempts, attempt];
-
-    if (attempt.providerId) {
-      try {
-        await args.store.indexProviderId(attempt.providerId, {
-          id: args.id,
-          channel: attempt.channel,
-          provider: attempt.provider,
-        });
-      } catch {
-        // ignore indexing error
-      }
-    }
-
-    if (args.options.onStatus) {
-      await notifyStatus(args.options.onStatus, {
-        id: args.id,
-        channel: attempt.channel,
-        provider: attempt.provider,
-        status: attempt.status,
-      });
-    }
-
-    if (attempt.status === 'sent') {
-      await recordSentAttempt(args, currentRecord, attempts, attempt, payload);
-      return;
-    }
-
-    currentRecord = {
-      ...currentRecord,
-      chain: {
-        ...currentRecord.chain,
-        attempts,
-      },
-    };
-
-    if (index === nextChannels.length - 1) {
-      await finalizeExhaustion(
-        args,
-        currentRecord,
-        attempts,
-        attempt.channel,
-        attempt.provider,
-        kv
-      );
-      return;
-    }
-
-    await args.store.update(args.id, (rec) => ({
-      ...rec,
-      chain: {
-        ...rec.chain,
-        attempts,
-      },
-      updatedAt: attempt.at,
-    }));
+  if (args.options.onStatus) {
+    await notifyStatus(args.options.onStatus, {
+      id: args.id,
+      channel: lastAttempt.channel,
+      provider: lastAttempt.provider,
+      status: 'failed',
+    });
   }
+
+  await releaseChain(args, kv);
+}
+
+/**
+ * Terminal-state cleanup: stop the fallback timer and drop the `in:<id>` render input.
+ */
+async function releaseChain(args: AdvanceChainArgs, kv: KVNamespace | undefined): Promise<void> {
+  cancelTimer(args.env, args.options.timer, args.id);
+  await deleteKVInput(kv, args.id);
+}
+
+/**
+ * A template with no channel rendering, used when the record names a template the caller's
+ * catalogue no longer has: every channel then fails to render and is recorded as a failed
+ * attempt rather than dispatched with an empty body.
+ */
+function missingTemplate(kind: MessageRecord['kind']): TemplateDef<unknown> {
+  return { kind };
+}
+
+/**
+ * Rebuilds the `ValidatedSendRequest` that `runChain` renders from, out of the record and the
+ * input payload recovered from KV / the timer / the caller.
+ */
+function rebuildRequest(
+  record: MessageRecord,
+  template: TemplateDef<unknown> | undefined,
+  payload: InputPayload
+): ValidatedSendRequest {
+  const locale = payload.locale ?? 'en';
+  return {
+    templateName: record.template,
+    template: template ?? missingTemplate(record.kind),
+    to: payload.to ?? '',
+    email: payload.email ?? payload.to,
+    locale,
+    input: payload.input,
+    validatedInput: template ? validateInput(template, payload.input) : payload.input,
+  };
 }
 
 /**
  * Advances delivery fallback chain when an attempt fails or times out.
+ *
+ * Resolves the channels still untried, rebuilds the render inputs, then delegates the walk to
+ * `runChain` with a recorder from `attemptRecorder` — the same pair the synchronous send path
+ * uses, so both paths derive chain and overall status identically. Once the walk settles the
+ * timer is re-armed (a channel accepted the message) or the chain is released (exhausted).
  *
  * @param args - Arguments including message id, reason, env, options, and status store.
  */
@@ -533,28 +384,38 @@ export async function advanceChain(args: AdvanceChainArgs): Promise<void> {
   const kv = args.options.kv ?? args.env.MESSAGES_KV;
 
   if (nextChannels.length === 0) {
-    await finalizeExhaustion(
-      args,
-      initialRecord,
-      [...initialRecord.chain.attempts],
-      lastAttempt.channel,
-      lastAttempt.provider,
-      kv
-    );
+    await finalizeExhaustion(args, initialRecord, lastAttempt, kv);
     return;
   }
 
   const payload = await resolveInputPayload(args, kv);
   const template = resolveTemplate(args.options.templates, initialRecord.template);
-  const validatedInput = template ? validateInput(template, payload.input) : payload.input;
+  const providers = toProviderSet(args.options.providers, args.env);
+  const recorder = attemptRecorder(
+    sendDeps(args, providers, initialRecord),
+    args.id,
+    initialRecord.policy
+  );
 
-  await executeFallbackLoop(
-    args,
-    initialRecord,
+  const attempts = await runChain(
+    rebuildRequest(initialRecord, template, payload),
+    args.id,
+    providers,
     nextChannels,
-    payload,
-    template,
-    validatedInput,
-    kv
+    recorder
+  );
+
+  const last = attempts.at(-1);
+  if (!last || last.status === 'failed') {
+    await releaseChain(args, kv);
+    return;
+  }
+
+  rearmTimer(
+    args.env,
+    args.options.timer,
+    args.id,
+    args.options.fallbackTimeoutMs ?? DEFAULT_FALLBACK_TIMEOUT_MS,
+    payload
   );
 }
