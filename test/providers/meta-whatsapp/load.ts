@@ -2,32 +2,7 @@
  * Loader and shared fixtures for the meta-whatsapp provider tests (Issue #4).
  */
 
-import { metaWhatsApp } from '../../../src/providers/meta-whatsapp/index.js';
-import type { Provider, RenderedWhatsApp } from '../../../src/providers/types.js';
-
-/**
- * Configuration accepted by `metaWhatsApp()` as specified in Issue #4.
- */
-export interface MetaWhatsAppConfig {
-  token: string;
-  phoneNumberId: string;
-  appSecret: string;
-  verifyToken: string;
-  apiVersion?: string;
-  name?: string;
-}
-
-export type MetaWhatsAppFactory = (config: MetaWhatsAppConfig) => Provider<RenderedWhatsApp>;
-
-/**
- * Load the `metaWhatsApp` factory from `src/providers/meta-whatsapp`.
- *
- * Kept async so the test files' `beforeAll` hooks are unchanged; a broken
- * import now fails with a real module-resolution error.
- */
-export function loadMetaWhatsApp(): Promise<MetaWhatsAppFactory> {
-  return Promise.resolve(metaWhatsApp);
-}
+import type { MetaWhatsAppConfig } from '../../../src/providers/meta-whatsapp/index.js';
 
 /**
  * Standard configuration used across the meta-whatsapp tests.

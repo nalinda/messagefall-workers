@@ -124,6 +124,9 @@ interface WebhookPayload {
  * fabricate a time for it.
  */
 function toIsoTimestamp(timestamp: unknown): string | null {
+  // `Number('')` is 0, so an empty or whitespace-only string must be rejected
+  // before coercion rather than silently becoming the epoch.
+  if (typeof timestamp === 'string' && timestamp.trim().length === 0) return null;
   const seconds = typeof timestamp === 'string' ? Number(timestamp) : timestamp;
   if (typeof seconds === 'number' && Number.isFinite(seconds)) {
     return new Date(seconds * 1000).toISOString();

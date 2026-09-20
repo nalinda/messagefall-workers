@@ -8,11 +8,11 @@
  * - A message-received payload yields [].
  */
 
-import { beforeAll, describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 
+import { metaWhatsApp } from '../../../src/providers/meta-whatsapp/index.js';
 import type { Provider, RenderedWhatsApp } from '../../../src/providers/types.js';
-import type { MetaWhatsAppFactory } from './load.js';
-import { loadMetaWhatsApp, rejectionOf, signBody, testConfig } from './load.js';
+import { rejectionOf, signBody, testConfig } from './load.js';
 
 const WEBHOOK_URL = 'https://example.com/webhooks/meta-whatsapp';
 
@@ -153,13 +153,7 @@ async function signedRequest(
 }
 
 describe('metaWhatsApp provider: webhook', () => {
-  let metaWhatsApp: MetaWhatsAppFactory;
-  let provider: Provider<RenderedWhatsApp>;
-
-  beforeAll(async () => {
-    metaWhatsApp = await loadMetaWhatsApp();
-    provider = metaWhatsApp(testConfig);
-  });
+  const provider: Provider<RenderedWhatsApp> = metaWhatsApp(testConfig);
 
   function webhook(): NonNullable<Provider<RenderedWhatsApp>['webhook']> {
     if (!provider.webhook) throw new Error('provider.webhook is not defined');

@@ -11,11 +11,11 @@
  * against the built output.
  */
 
-import { afterEach, beforeAll, beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 
+import { metaWhatsApp } from '../../../src/providers/meta-whatsapp/index.js';
 import type { OutboundMeta, RenderedWhatsApp } from '../../../src/providers/types.js';
-import type { MetaWhatsAppFactory } from './load.js';
-import { loadMetaWhatsApp, testConfig } from './load.js';
+import { testConfig } from './load.js';
 
 interface Captured {
   url: string;
@@ -72,12 +72,7 @@ const templateMessage = message(
 const textMessage = message({ text: 'Your match is ready' }, 'notification');
 
 describe('metaWhatsApp provider: send', () => {
-  let metaWhatsApp: MetaWhatsAppFactory;
   let fetchSpy: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>>;
-
-  beforeAll(async () => {
-    metaWhatsApp = await loadMetaWhatsApp();
-  });
 
   beforeEach(() => {
     fetchSpy = spyOn(globalThis, 'fetch');
