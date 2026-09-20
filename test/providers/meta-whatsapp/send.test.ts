@@ -36,15 +36,13 @@ function bodyOf(call: Captured | undefined): Record<string, unknown> {
 }
 
 /**
- * The issue does not fix the recipient format, so `to` is checked by its
- * digits (with or without the leading `+`) and then removed; the rest of the
- * body is matched on the fields the issue names, so optional Cloud API
- * fields such as `recipient_type` are allowed.
+ * `to` is sent exactly as received (E.164 is validated upstream) and is
+ * checked exactly; the rest of the body is matched on the fields the issue
+ * names, so optional Cloud API fields such as `recipient_type` are allowed.
  */
 function withoutRecipient(body: Record<string, unknown>): Record<string, unknown> {
   const { to, ...rest } = body;
-  expect(typeof to).toBe('string');
-  expect(String(to).replaceAll(/\D/g, '')).toBe('94771234567');
+  expect(to).toBe('+94771234567');
   return rest;
 }
 

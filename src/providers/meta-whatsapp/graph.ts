@@ -44,14 +44,6 @@ export function messagesUrl(apiVersion: string, phoneNumberId: string): string {
 }
 
 /**
- * Cloud API recipients are E.164 digits; a leading `+` is accepted but not
- * required, so it is dropped for consistency.
- */
-function recipientOf(to: string): string {
-  return to.startsWith('+') ? to.slice(1) : to;
-}
-
-/**
  * Build the Cloud API `/messages` body for a rendered WhatsApp message.
  *
  * A `template` renders to a template message with one body component whose
@@ -66,7 +58,7 @@ export function buildMessageBody(
   const base = {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
-    to: recipientOf(message.to),
+    to: message.to,
   };
 
   // `OutboundMeta.template` (the catalog template id, a string) and

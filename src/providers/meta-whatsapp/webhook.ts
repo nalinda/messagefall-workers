@@ -128,10 +128,11 @@ function toIsoTimestamp(timestamp: unknown): string | null {
   // before coercion rather than silently becoming the epoch.
   if (typeof timestamp === 'string' && timestamp.trim().length === 0) return null;
   const seconds = typeof timestamp === 'string' ? Number(timestamp) : timestamp;
-  if (typeof seconds === 'number' && Number.isFinite(seconds)) {
-    return new Date(seconds * 1000).toISOString();
-  }
-  return null;
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds)) return null;
+  // Values beyond the Date range produce an invalid Date whose toISOString()
+  // throws; drop the status instead of rejecting the whole batch.
+  const date = new Date(seconds * 1000);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 function toStatusEvent(status: WebhookStatus): StatusEvent | null {

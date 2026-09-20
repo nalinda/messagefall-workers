@@ -65,9 +65,12 @@ export const myProviderFactory: ProviderFactory = {
 };
 ```
 
+## Built-in Providers
+
+- `meta-whatsapp`: Meta WhatsApp Cloud API (template and text sends, signed status webhook)
+
 ## Built-in Providers (to be implemented)
 
-- `meta-whatsapp`: Meta Cloud WhatsApp API
 - `twilio-sms`: Twilio SMS
 - `vonage-sms`: Vonage SMS
 - `gmail`: Gmail API (send with OAuth refresh token)
@@ -138,12 +141,14 @@ These should be passed in `ProviderConfig` or loaded from bindings.
 Each provider's config should be minimal and documented:
 
 ```typescript
-interface MetaWhatsappConfig {
-  phoneId: string;
-  accessToken: string;
-  appId: string;
-  templateName?: string;
-  from?: string;
+// src/providers/meta-whatsapp/index.ts
+interface MetaWhatsAppConfig {
+  token: string; // access token, sent as a bearer token
+  phoneNumberId: string; // WhatsApp Business phone number id
+  appSecret: string; // verifies X-Hub-Signature-256 on webhook payloads
+  verifyToken: string; // expected hub.verify_token in the GET handshake
+  apiVersion?: string; // Graph API version, default 'v23.0'
+  name?: string; // provider instance name, default 'meta-whatsapp'
 }
 ```
 
