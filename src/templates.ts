@@ -182,6 +182,18 @@ function formatIssuePath(path?: StandardSchemaIssue['path']): string {
     .join('.');
 }
 
+/**
+ * Validate a raw input payload against a template's schema without rendering.
+ *
+ * @param def - Template definition.
+ * @param input - Input payload before validation.
+ * @returns The validated (and possibly transformed) input.
+ * @throws {TemplateValidationError} If the input fails the schema.
+ */
+export function validateTemplateInput<In>(def: TemplateDef<In>, input: unknown): In {
+  return validateInput(def, input);
+}
+
 function validateInput<In>(def: TemplateDef<In>, input: unknown): In {
   if (!def.input || !('~standard' in def.input)) {
     return input as In;
