@@ -21,6 +21,7 @@ import {
 } from './send.js';
 import {
   DEFAULT_STATUS_TTL,
+  type FallbackTimerClient,
   kvStatusStore,
   type MessageRecord,
   type StatusStore,
@@ -162,8 +163,7 @@ async function handleChainStatusApplied<T extends Templates<Record<string, Templ
   }
 
   if (event.status === 'delivered' || event.status === 'read') {
-    const timer = (options.timer ?? env.FALLBACK_TIMER) as
-      { cancel?: (timerId: string) => void } | undefined;
+    const timer = (options.timer ?? env.FALLBACK_TIMER) as FallbackTimerClient | undefined;
     try {
       timer?.cancel?.(id);
     } catch {

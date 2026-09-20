@@ -10,6 +10,30 @@ import type { Channel, DeliveryStatus } from '../providers/types.js';
 import type { DeliveryPolicy } from './policy.js';
 
 /**
+ * The fallback timer as the delivery pipeline uses it.
+ *
+ * The timer itself is a Durable Object (`src/durable/`); this is the boundary the send and
+ * fallback paths talk to, so neither has to know whether it holds a real Durable Object stub, a
+ * namespace binding or a test double. Every member is optional because a deployment may run with
+ * no `FALLBACK_TIMER` binding at all, in which case timer handling is simply skipped.
+ */
+export interface FallbackTimerClient {
+  /**
+   * Reads the armed timer for a message, including any render input stashed with it.
+   */
+  getState?(messageId: string): { input?: unknown } | null;
+  /**
+   * Arms (or re-arms) the timer for a message, optionally carrying the render input the
+   * fallback path will need when it fires.
+   */
+  setState?(messageId: string, timeoutMs: number, input?: unknown): void;
+  /**
+   * Disarms the timer for a message; called once the chain reaches a terminal state.
+   */
+  cancel?(messageId: string): void;
+}
+
+/**
  * Single delivery attempt on a channel.
  */
 export interface Attempt {

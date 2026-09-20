@@ -29,7 +29,7 @@ import {
   type StatusCallbackEvent,
   type ValidatedSendRequest,
 } from './send.js';
-import type { Attempt, MessageRecord, StatusStore } from './status.js';
+import type { Attempt, FallbackTimerClient, MessageRecord, StatusStore } from './status.js';
 
 /**
  * Default fallback timeout used when the caller configures none.
@@ -83,12 +83,6 @@ export interface AdvanceChainArgs<Env = MessagingEnv> {
  */
 export type AdvanceChainFn = (args: AdvanceChainArgs) => Promise<void>;
 
-interface MockTimerCandidate {
-  getState?: (id: string) => { input?: unknown } | null;
-  setState?: (id: string, timeoutMs: number, input?: unknown) => void;
-  cancel?: (id: string) => void;
-}
-
 interface InputPayload {
   input: unknown;
   to?: string;
@@ -96,7 +90,7 @@ interface InputPayload {
   locale?: string;
 }
 
-function asTimer(env: MessagingEnv, optionsTimer: unknown): MockTimerCandidate | undefined {
+function asTimer(env: MessagingEnv, optionsTimer: unknown): FallbackTimerClient | undefined {
   const raw = optionsTimer ?? env.FALLBACK_TIMER;
   return raw && typeof raw === 'object' ? raw : undefined;
 }
@@ -192,8 +186,10 @@ function toProviderSet(
   return set;
 }
 
-function extractFromTimer(timerCandidate: unknown, id: string): InputPayload | undefined {
-  const timer = timerCandidate as MockTimerCandidate | undefined;
+function extractFromTimer(
+  timer: FallbackTimerClient | undefined,
+  id: string
+): InputPayload | undefined {
   if (typeof timer?.getState !== 'function') {
     return undefined;
   }
@@ -240,7 +236,7 @@ async function resolveInputPayload(
     return { input: args.input };
   }
 
-  const fromTimer = extractFromTimer(args.options.timer ?? args.env.FALLBACK_TIMER, args.id);
+  const fromTimer = extractFromTimer(asTimer(args.env, args.options.timer), args.id);
   if (fromTimer) {
     return fromTimer;
   }
