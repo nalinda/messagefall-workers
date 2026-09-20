@@ -21,9 +21,9 @@ import { z } from 'zod';
 
 import { createMessagingApp } from '../../src/app/hono.js';
 import type { Attempt, MessageRecord } from '../../src/core/status.js';
+import type { MessagingEnv } from '../../src/env.js';
 import type { Channel, Provider, RenderedEmail, RenderedSms, RenderedWhatsApp, SendResult } from '../../src/providers/types.js';
 import { defineTemplates } from '../../src/templates.js';
-import type { MessagingEnv } from '../helpers/env.js';
 import { createMiniflareKV } from '../helpers/status.js';
 import { createMockExecutionContext } from '../helpers/webhook.js';
 

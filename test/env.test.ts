@@ -15,9 +15,9 @@
 import type { DurableObjectNamespace, KVNamespace } from '@cloudflare/workers-types';
 import { describe, expect, it } from 'bun:test';
 
+import { type MessagingEnv, validateEnv } from '../src/env.js';
 import type { Channel, Provider } from '../src/providers/types.js';
 import type { Templates } from '../src/templates.js';
-import { loadValidateEnv, type MessagingEnv, type ValidateEnvFn } from './helpers/env.js';
 import { memoryKV, pingTemplates } from './helpers/messaging.js';
 
 // Type-level assertion helpers
@@ -61,8 +61,7 @@ describe('MessagingEnv type-level specification (Issue #13)', () => {
 });
 
 describe('validateEnv startup validation (Issue #13)', () => {
-  it('passes on a valid environment and well-formed options', async () => {
-    const validateEnv: ValidateEnvFn = await loadValidateEnv();
+  it('passes on a valid environment and well-formed options', () => {
     const env: MessagingEnv = {
       MESSAGES_KV: memoryKV(),
     };
@@ -85,8 +84,7 @@ describe('validateEnv startup validation (Issue #13)', () => {
     expect(() => validateEnv(env, options)).not.toThrow();
   });
 
-  it('throws an error when MESSAGES_KV is missing from env', async () => {
-    const validateEnv: ValidateEnvFn = await loadValidateEnv();
+  it('throws an error when MESSAGES_KV is missing from env', () => {
     const env = {};
 
     const options = {
@@ -103,8 +101,7 @@ describe('validateEnv startup validation (Issue #13)', () => {
     expect(() => validateEnv(env, options)).toThrow(/MESSAGES_KV/);
   });
 
-  it('throws an error when MESSAGES_KV is not a valid KVNamespace', async () => {
-    const validateEnv: ValidateEnvFn = await loadValidateEnv();
+  it('throws an error when MESSAGES_KV is not a valid KVNamespace', () => {
     const env = {
       MESSAGES_KV: 'not-a-kv-namespace',
     };
@@ -123,8 +120,7 @@ describe('validateEnv startup validation (Issue #13)', () => {
     expect(() => validateEnv(env, options)).toThrow(/MESSAGES_KV/);
   });
 
-  it('throws an error when FALLBACK_TIMER is present but not a namespace', async () => {
-    const validateEnv: ValidateEnvFn = await loadValidateEnv();
+  it('throws an error when FALLBACK_TIMER is present but not a namespace', () => {
     const env = {
       MESSAGES_KV: memoryKV(),
       FALLBACK_TIMER: 'invalid-timer-namespace',
@@ -144,8 +140,7 @@ describe('validateEnv startup validation (Issue #13)', () => {
     expect(() => validateEnv(env, options)).toThrow(/FALLBACK_TIMER/);
   });
 
-  it('throws an error when default delivery policy is malformed', async () => {
-    const validateEnv: ValidateEnvFn = await loadValidateEnv();
+  it('throws an error when default delivery policy is malformed', () => {
     const env: MessagingEnv = {
       MESSAGES_KV: memoryKV(),
     };
@@ -168,8 +163,7 @@ describe('validateEnv startup validation (Issue #13)', () => {
     expect(() => validateEnv(env, options)).toThrow(/delivery/i);
   });
 
-  it('throws an error when a template fails definition-time validation', async () => {
-    const validateEnv: ValidateEnvFn = await loadValidateEnv();
+  it('throws an error when a template fails definition-time validation', () => {
     const env: MessagingEnv = {
       MESSAGES_KV: memoryKV(),
     };
@@ -200,8 +194,7 @@ describe('validateEnv startup validation (Issue #13)', () => {
     expect(() => validateEnv(env, options)).toThrow(/brokenDelivery/);
   });
 
-  it('throws an error when a provider slot is invalid or missing required fields', async () => {
-    const validateEnv: ValidateEnvFn = await loadValidateEnv();
+  it('throws an error when a provider slot is invalid or missing required fields', () => {
     const env: MessagingEnv = {
       MESSAGES_KV: memoryKV(),
     };
@@ -214,8 +207,7 @@ describe('validateEnv startup validation (Issue #13)', () => {
     expect(() => validateEnv(env, options)).toThrow(/missing required field/i);
   });
 
-  it('throws an error when duplicate provider names are configured across slots', async () => {
-    const validateEnv: ValidateEnvFn = await loadValidateEnv();
+  it('throws an error when duplicate provider names are configured across slots', () => {
     const env: MessagingEnv = {
       MESSAGES_KV: memoryKV(),
     };
@@ -242,9 +234,7 @@ describe('validateEnv startup validation (Issue #13)', () => {
     expect(() => validateEnv(env, options)).toThrow(/duplicate provider name/i);
   });
 
-  it('collects ALL problems into a single thrown error listing missing MESSAGES_KV and duplicate provider name', async () => {
-    const validateEnv: ValidateEnvFn = await loadValidateEnv();
-
+  it('collects ALL problems into a single thrown error listing missing MESSAGES_KV and duplicate provider name', () => {
     // Missing MESSAGES_KV entirely
     const env = {};
 
