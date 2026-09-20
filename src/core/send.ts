@@ -521,6 +521,49 @@ export async function notifyStatus(
   }
 }
 
+function validateSendRequest(req: SendRequest): void {
+  if (!E164.test(req.to)) {
+    throw new RecipientError(req.to);
+  }
+  if (
+    req.template.kind === 'otp' &&
+    req.template.whatsapp &&
+    'text' in req.template.whatsapp &&
+    typeof req.template.whatsapp.text === 'function'
+  ) {
+    throw new Error(
+      `Template "${req.templateName}" of kind "otp" must not use whatsapp.text (Meta requires an authentication template for codes)`
+    );
+  }
+}
+
+function resolveEffectivePolicy(
+  defaults: DeliveryPolicy,
+  req: SendRequest
+): { policy: DeliveryPolicy; hasSkippedEmail: boolean } {
+  const initialPolicy = resolveDelivery({
+    defaults,
+    template: req.template.delivery,
+    send: req.delivery,
+    defined: definedChannels(req.template),
+    templateName: req.templateName,
+  });
+
+  const hasEmail = typeof req.email === 'string' && req.email.trim().length > 0;
+  const hasEmailInPolicy =
+    initialPolicy.fallback.includes('email') || initialPolicy.always.includes('email');
+  const hasSkippedEmail = hasEmailInPolicy && !hasEmail;
+
+  const policy: DeliveryPolicy = hasSkippedEmail
+    ? {
+        fallback: initialPolicy.fallback.filter((ch) => ch !== 'email'),
+        always: initialPolicy.always.filter((ch) => ch !== 'email'),
+      }
+    : initialPolicy;
+
+  return { policy, hasSkippedEmail };
+}
+
 /**
  * Runs the send pipeline for one message.
  *
@@ -538,37 +581,16 @@ export async function runSend(
   req: SendRequest,
   ctx?: SendContext
 ): Promise<{ id: string }> {
-  if (!E164.test(req.to)) {
-    throw new RecipientError(req.to);
-  }
+  validateSendRequest(req);
   const validated: ValidatedSendRequest = {
     ...req,
     validatedInput: validateInput(req.template, req.input),
   };
 
-  const initialPolicy = resolveDelivery({
-    defaults: deps.defaults,
-    template: req.template.delivery,
-    send: req.delivery,
-    defined: definedChannels(req.template),
-    templateName: req.templateName,
-  });
-
-  const hasEmail = typeof req.email === 'string' && req.email.trim().length > 0;
-  const hasEmailInPolicy =
-    initialPolicy.fallback.includes('email') || initialPolicy.always.includes('email');
-  const shouldSkipEmail = hasEmailInPolicy && !hasEmail;
-
-  const policy: DeliveryPolicy = shouldSkipEmail
-    ? {
-        fallback: initialPolicy.fallback.filter((ch) => ch !== 'email'),
-        always: initialPolicy.always.filter((ch) => ch !== 'email'),
-      }
-    : initialPolicy;
-
+  const { policy, hasSkippedEmail } = resolveEffectivePolicy(deps.defaults, req);
   const id = newMessageId();
 
-  if (shouldSkipEmail) {
+  if (hasSkippedEmail) {
     defaultLogger.info('send.channel-skipped', {
       id,
       channel: 'email',
