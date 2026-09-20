@@ -13,10 +13,11 @@ import { z } from 'zod';
 
 import type { Channel } from '../src/providers/types.js';
 import {
+  defineTemplates,
   type InputOf,
-  loadTemplatesApi,
+  render,
   type TemplateDef,
-} from './helpers/templates.js';
+} from '../src/templates.js';
 
 // Type-level assertion helpers
 type Extends<A, B> = A extends B ? true : false;
@@ -31,9 +32,7 @@ function assertType<T>(_value: T): void {
 }
 
 describe('defineTemplates type-level specifications', () => {
-  it('correctly infers InputOf<T, K> from a catalog definition', async () => {
-    const { defineTemplates, render } = await loadTemplatesApi();
-
+  it('correctly infers InputOf<T, K> from a catalog definition', () => {
     const catalogDefs = {
       loginCode: {
         input: z.object({ code: z.string().length(6) }),
@@ -82,9 +81,7 @@ describe('defineTemplates type-level specifications', () => {
     expect(rendered).toEqual({ text: 'Your code is 123456' });
   });
 
-  it('verifies client send typing: correct send compiles, wrong template name or input fails', async () => {
-    const { defineTemplates, render } = await loadTemplatesApi();
-
+  it('verifies client send typing: correct send compiles, wrong template name or input fails', () => {
     const catalogDefs = {
       loginCode: {
         input: z.object({ code: z.string() }),
@@ -144,9 +141,7 @@ describe('defineTemplates type-level specifications', () => {
     expect(() => render(templates.loginCode, 'sms', { code: '12' }, 'en')).toThrow();
   });
 
-  it('verifies TemplateDef channel types and rejects delivery naming undefined channels at definition time', async () => {
-    const { defineTemplates } = await loadTemplatesApi();
-
+  it('verifies TemplateDef channel types and rejects delivery naming undefined channels at definition time', () => {
     // TemplateDef accepts valid channel rendering functions and valid delivery override
     const smsDef: TemplateDef<{ message: string }> = {
       input: z.object({ message: z.string() }),
