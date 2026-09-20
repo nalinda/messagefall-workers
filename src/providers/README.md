@@ -73,9 +73,10 @@ the `ProviderSet` a deployment builds from its env:
 - Each provider directory is also published as its own entry point through the `./providers/*`
   subpath export in `package.json`, so `messagefall-workers/providers/meta-whatsapp` imports only
   that provider and stays tree-shakeable.
-- A deployment wires them up in `createMessaging({ providers: (env) => ({ whatsapp: …, sms: …,
-email: … }) })`. The slot key must match the provider's own `channel`, and each provider `name`
-  must be unique across the set; `src/core/provider-set.ts` enforces both.
+- A deployment wires them up through the `providers` option of `createMessaging`, which returns
+  a `ProviderSet` keyed by channel slot. The slot key must match the provider's own `channel`,
+  and each provider `name` must be unique across the set; `src/core/provider-set.ts` enforces
+  both.
 
 ## Built-in Providers
 
