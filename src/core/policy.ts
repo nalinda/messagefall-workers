@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { Channel } from '../types.js';
+import type { Channel } from '../providers/types.js';
 
 /**
  * Concrete delivery policy specifying fallback chain and parallel always-on channels.

@@ -16,8 +16,9 @@
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 
-import { validateInput } from '../templates.js';
-import type { AnyRendered, Channel, MessagingEnv, Provider, TemplateDef } from '../types.js';
+import type { MessagingEnv } from '../env.js';
+import type { Channel, Provider } from '../providers/types.js';
+import { type AnyRendered, type TemplateDef, validateInput } from '../templates.js';
 import type { MessagingOptions } from './messaging.js';
 import {
   attemptRecorder,

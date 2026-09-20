@@ -6,9 +6,9 @@
 
 import type { DurableObjectNamespace, KVNamespace } from '@cloudflare/workers-types';
 
-import type { Provider, StatusEvent } from '../providers/types.js';
+import type { MessagingEnv } from '../env.js';
+import { CHANNELS, type Provider, type StatusEvent } from '../providers/types.js';
 import type { InputOf, TemplateDef, Templates } from '../templates.js';
-import { CHANNELS, type MessagingEnv } from '../types.js';
 import { advanceChain } from './fallback.js';
 import { DEFAULT_POLICY, type DeliveryOverride, type DeliveryPolicy } from './policy.js';
 import {

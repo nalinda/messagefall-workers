@@ -15,6 +15,7 @@ export type {
   SendResult,
   StatusEvent,
 } from './providers/types.js';
+export { CHANNELS } from './providers/types.js';
 export type {
   AnyRendered,
   EmailTemplateConfig,
@@ -25,11 +26,6 @@ export type {
   WhatsAppTemplateConfig,
 } from './templates.js';
 export { definedChannels, defineTemplates, render, TemplateValidationError } from './templates.js';
-
-/**
- * Array of all supported channels.
- */
-export const CHANNELS = ['whatsapp', 'sms', 'email'] as const;
 
 /**
  * Template kind: 'otp' for one-time codes, 'notification' for general alerts.
