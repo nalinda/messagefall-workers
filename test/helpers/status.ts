@@ -42,7 +42,7 @@ export async function createMiniflareKV(): Promise<{
 }
 
 /**
- * Self-test (AGENTS.md, "Shared test fixtures/helpers under `test/helpers/`"): a helper file with
+ * Self-test (see "Testing Guidelines" in `src/providers/README.md`): a helper file with
  * no `describe` of its own never shows up in the runner's output, which makes it look like a
  * red-phase test that silently failed to run. This runs with whichever spec imports the helper.
  */

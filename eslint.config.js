@@ -68,8 +68,8 @@ export default [
     // Test files legitimately run long and access test files / spawn subcommands. They also
     // register their specs by calling `describe`/`it` at module scope, which is a top-level
     // side effect by construction — including in the shared helpers under `test/helpers/`,
-    // which export fixtures AND (per AGENTS.md) carry a self-test so they show up in the
-    // runner's output.
+    // which export fixtures AND carry a self-test (see the testing guidelines in
+    // `src/providers/README.md`) so they show up in the runner's output.
     files: ['test/**/*.ts'],
     rules: {
       'unicorn/no-top-level-side-effects': 'off',

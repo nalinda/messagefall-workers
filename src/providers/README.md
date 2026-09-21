@@ -120,6 +120,9 @@ the `ProviderSet` a deployment builds from its env:
 - `test/providers/contract.test.ts` asserts every built-in provider satisfies the `Provider`
   contract; a new provider should be added there.
 - Use a mock environment for local testing.
+- Shared fixtures and helpers live in `test/helpers/`, and each one carries a self-test — a
+  `describe` of its own with at least an "it loads" case. A helper with no `describe` never
+  appears in the runner's output, which makes it look like a spec that silently failed to run.
 - No message bodies in logs. Enforced two ways: `createLogger` (`src/core/logger.ts`) is the only
   writer, and its `LogFields` is a closed set of identifier and telemetry fields — there is no
   field a body, code, subject or parameter could be passed in, so content is prohibited at
