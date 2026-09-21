@@ -431,7 +431,7 @@ The webhook routes are the only routes that need to be public. `/send` and `/sta
 
 - Use the `console` provider for each channel during development. It prints the recipient and channel, deliberately not the body for `otp` templates, and can simulate a delivered or failed status after a delay so fallback is exercised without any vendor.
 - Vendor webhooks cannot reach localhost. `POST /webhooks/<provider>` accepts an unsigned payload when `MESSAGING_DEV_UNSIGNED=true` is set, so you can replay a status event from a file. Never set that in production.
-- The `examples/basic` directory has a runnable Worker with console providers and a script that replays failed and delivered statuses to exercise fallback.
+- The `examples/basic` directory has a runnable Worker with console providers, and a README section ("Post a Webhook Delivery Status") with curl commands that replay failed and delivered statuses to exercise fallback.
 
 ## Compatibility
 
