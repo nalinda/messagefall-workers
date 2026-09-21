@@ -41,6 +41,25 @@ import {
 const TO = '+14155550123';
 
 /**
+ * The `event` names of the structured log lines in a `captureConsole` capture. Lines that are
+ * not JSON (a provider's own terminal output, say) are ignored.
+ */
+function loggedEvents(logs: string[]): string[] {
+  const events: string[] = [];
+  for (const line of logs) {
+    try {
+      const parsed = JSON.parse(line) as { event?: unknown };
+      if (typeof parsed.event === 'string') {
+        events.push(parsed.event);
+      }
+    } catch {
+      // not a structured line
+    }
+  }
+  return events;
+}
+
+/**
  * ExecutionContext double that captures promises passed to waitUntil.
  */
 function createFakeExecutionContext(): TestExecutionContext & { promises: Promise<unknown>[] } {
@@ -419,8 +438,10 @@ describe('Issue #9: One-time code semantics for kind "otp"', () => {
 
         await Promise.all(ctx.promises);
 
-        // Assert structured log events are emitted
-        expect(logs.length).toBeGreaterThanOrEqual(0);
+        // A real floor, not `>= 0`: the leak check below iterates the captured lines, so an
+        // empty capture would pass it without having examined anything. Naming the event the
+        // send pipeline is known to emit means this test fails if OTP logging stops entirely.
+        expect(loggedEvents(logs)).toContain('send.start');
 
         // Verify the secret code and rendered text never appear in any captured log line
         for (const line of logs) {
@@ -459,6 +480,9 @@ describe('Issue #9: One-time code semantics for kind "otp"', () => {
           locale: 'en',
           input: { code: secretCode },
         });
+
+        // Same floor as above: the loop below asserts nothing on an empty capture.
+        expect(loggedEvents(logs)).toContain('send.start');
 
         for (const line of logs) {
           expect(line).not.toContain(secretCode);
