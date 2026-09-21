@@ -298,6 +298,51 @@ describe('Issue #3: createMessaging send pipeline', () => {
       }
     });
 
+    it('keeps a failed always attempt out of the chain: sms is never tried', async () => {
+      const set = consoleSet();
+      const email = recordingProvider<RenderedEmail>('email', 'dead-email', [
+        { ok: false, error: 'mailbox unavailable' },
+      ]);
+      set.email = email;
+      const smsSpy = spyOn(set.sms!, 'send');
+      const silenced = captureConsole(['log']);
+
+      try {
+        const messaging = createMessaging(newEnv(), {
+          templates,
+          providers: () => set,
+          delivery: { fallback: ['whatsapp', 'sms'], always: ['email'] },
+        });
+
+        const { id } = await messaging.send({
+          template: 'orderUpdate',
+          to: TO,
+          email: 'ann@example.com',
+          locale: 'en',
+          input: INPUT,
+        });
+
+        // The always-on failure must not advance the chain onto sms.
+        expect(email.calls).toHaveLength(1);
+        expect(smsSpy).toHaveBeenCalledTimes(0);
+
+        const record = await messaging.status(id);
+        expect(record!.chain.attempts).toHaveLength(1);
+        expect(record!.chain.attempts[0]).toMatchObject({ channel: 'whatsapp', status: 'sent' });
+        expect(record!.chain.status).toBe('sent');
+        expect(record!.status).toBe('sent');
+
+        expect(record!.always).toHaveLength(1);
+        expect(record!.always[0]).toMatchObject({
+          channel: 'email',
+          provider: 'dead-email',
+          status: 'failed',
+        });
+      } finally {
+        silenced.restore();
+      }
+    });
+
     it('calls onStatus once per attempt with id, channel, provider and status', async () => {
       const set = consoleSet();
       const silenced = captureConsole(['log']);
