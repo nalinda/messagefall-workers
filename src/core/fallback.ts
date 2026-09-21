@@ -33,6 +33,7 @@ import {
   sealAndReleaseChain,
 } from './render-input.js';
 import {
+  type AttemptRecorder,
   attemptRecorder,
   NO_PROVIDER,
   notifyStatus,
@@ -199,6 +200,33 @@ function sendDeps(args: AdvanceChainArgs, providers: ProviderSet, record: Messag
 }
 
 /**
+ * Builds the recorder for one step of this module's work and drains the `onStatus` notifications
+ * it started before handing control back.
+ *
+ * Every recorder here is built through this, so no call site can forget the drain. Awaited
+ * rather than handed to `ctx.waitUntil` the way the synchronous send path's `keepObserversAlive`
+ * does it: nothing on this path is holding an HTTP response open, and the callers that do have a
+ * lifetime to respect — `ctx.waitUntil(applyStatusEvents(...))` in the webhook handler, the
+ * Durable Object's `alarm()` — end that lifetime the moment this module's promise settles. An
+ * observer left running past it would simply be cancelled mid-write, truncating an `onStatus`
+ * the README documents as called on every status change. `finally`, so an advance that fails
+ * still drains what it already started.
+ */
+async function withRecorder<T>(
+  args: AdvanceChainArgs,
+  providers: ProviderSet,
+  record: MessageRecord,
+  run: (recorder: AttemptRecorder) => Promise<T>
+): Promise<T> {
+  const recorder = attemptRecorder(sendDeps(args, providers, record), args.id, record.policy);
+  try {
+    return await run(recorder);
+  } finally {
+    await recorder.settledObservers();
+  }
+}
+
+/**
  * Seals a chain that has no channel left to try: re-derives the terminal `failed` status through
  * the same recorder the walk uses, notifies the observer for the attempt that ended it, then
  * releases the timer and the stored input.
@@ -209,22 +237,23 @@ async function finalizeExhaustion(
   lastAttempt: Attempt,
   kv: KVNamespace | undefined
 ): Promise<void> {
-  const recorder = attemptRecorder(sendDeps(args, {}, record), args.id, record.policy);
-  await recorder.sealChain({
-    attempted: Math.max(record.policy.fallback.length, record.chain.attempts.length),
-    last: 'failed',
-  });
-
-  if (args.options.onStatus) {
-    await notifyStatus(args.options.onStatus, {
-      id: args.id,
-      channel: lastAttempt.channel,
-      provider: lastAttempt.provider,
-      status: 'failed',
+  await withRecorder(args, {}, record, async (recorder) => {
+    await recorder.sealChain({
+      attempted: Math.max(record.policy.fallback.length, record.chain.attempts.length),
+      last: 'failed',
     });
-  }
 
-  await release(args, record, kv);
+    if (args.options.onStatus) {
+      await notifyStatus(args.options.onStatus, {
+        id: args.id,
+        channel: lastAttempt.channel,
+        provider: lastAttempt.provider,
+        status: 'failed',
+      });
+    }
+
+    await release(args, record, kv);
+  });
 }
 
 /**
@@ -281,22 +310,23 @@ async function finalizeUnusableInput(
   reason: UnusableInput
 ): Promise<void> {
   logger.warn(reason.event, { id: args.id, kind: record.kind, channel: nextChannel });
-  const recorder = attemptRecorder(sendDeps(args, providers, record), args.id, record.policy);
-  await recorder.record(
-    {
-      channel: nextChannel,
-      provider: providerNameFor(providers, nextChannel),
-      status: 'failed',
-      error: reason.error,
-      at: new Date().toISOString(),
-    },
-    'chain',
-    {
-      attempted: Math.max(record.policy.fallback.length, record.chain.attempts.length + 1),
-      last: 'failed',
-    }
-  );
-  await release(args, record, kv);
+  await withRecorder(args, providers, record, async (recorder) => {
+    await recorder.record(
+      {
+        channel: nextChannel,
+        provider: providerNameFor(providers, nextChannel),
+        status: 'failed',
+        error: reason.error,
+        at: new Date().toISOString(),
+      },
+      'chain',
+      {
+        attempted: Math.max(record.policy.fallback.length, record.chain.attempts.length + 1),
+        last: 'failed',
+      }
+    );
+    await release(args, record, kv);
+  });
 }
 
 /**
@@ -415,42 +445,39 @@ export async function advanceChain(args: AdvanceChainArgs): Promise<void> {
     return;
   }
 
-  const recorder = attemptRecorder(
-    sendDeps(args, providers, initialRecord),
-    args.id,
-    initialRecord.policy
-  );
+  await withRecorder(args, providers, initialRecord, async (recorder) => {
+    // `runChain` surfaces its first persistence failure by throwing, but only once the walk has
+    // finished — the providers have already been called. `deliverGuarded` in `./send.js` contains
+    // that same throw on the synchronous path; contained here too, because on the Durable Object
+    // alarm path a rejection escaping `advanceChain` escapes `alarm()`, which the platform
+    // retries against storage that the lost write left looking pre-advance — so
+    // `shouldSkipAdvancement` would let the retry walk the SAME channel again and send a second
+    // time. Falling through to `release` instead seals the record, which is what makes that
+    // retry a no-op.
+    let attempts: Attempt[];
+    try {
+      attempts = await runChain(request, args.id, providers, nextChannels, recorder);
+    } catch {
+      logger.error('send.persist-failed', { id: args.id });
+      // Which channel accepted is exactly what the lost write cost us, so the chain cannot be
+      // re-armed for another fallback hop; release it rather than risk advancing on stale state.
+      await release(args, initialRecord, kv);
+      return;
+    }
 
-  // `runChain` surfaces its first persistence failure by throwing, but only once the walk has
-  // finished — the providers have already been called. `deliverGuarded` in `./send.js` contains
-  // that same throw on the synchronous path; contained here too, because on the Durable Object
-  // alarm path a rejection escaping `advanceChain` escapes `alarm()`, which the platform retries
-  // against storage that the lost write left looking pre-advance — so `shouldSkipAdvancement`
-  // would let the retry walk the SAME channel again and send a second time. Falling through to
-  // `release` instead seals the record, which is what makes that retry a no-op.
-  let attempts: Attempt[];
-  try {
-    attempts = await runChain(request, args.id, providers, nextChannels, recorder);
-  } catch {
-    logger.error('send.persist-failed', { id: args.id });
-    // Which channel accepted is exactly what the lost write cost us, so the chain cannot be
-    // re-armed for another fallback hop; release it rather than risk advancing on stale state.
-    await release(args, initialRecord, kv);
-    return;
-  }
+    const last = attempts.at(-1);
+    if (!last || last.status === 'failed') {
+      await release(args, initialRecord, kv);
+      return;
+    }
 
-  const last = attempts.at(-1);
-  if (!last || last.status === 'failed') {
-    await release(args, initialRecord, kv);
-    return;
-  }
-
-  await rearmTimer(
-    args.env,
-    args.options.timer,
-    args.id,
-    args.options.fallbackTimeoutMs ??
-      chainTimeoutMs(initialRecord.kind, args.options.delivery?.timeout),
-    payload
-  );
+    await rearmTimer(
+      args.env,
+      args.options.timer,
+      args.id,
+      args.options.fallbackTimeoutMs ??
+        chainTimeoutMs(initialRecord.kind, args.options.delivery?.timeout),
+      payload
+    );
+  });
 }

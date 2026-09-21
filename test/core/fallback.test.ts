@@ -60,6 +60,19 @@ const testTemplates = defineTemplates({
   },
 });
 
+/**
+ * An `onStatus` that only finishes after an await, so a caller that fails to wait for the
+ * observers it started records nothing.
+ */
+function slowObserver(
+  into: string[]
+): (event: { channel: string; status: string }) => Promise<void> {
+  return async (event) => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    into.push(`${event.channel}:${event.status}`);
+  };
+}
+
 describe('Issue #7: Fallback on failed delivery status', () => {
   let kv: KVNamespace;
   let disposeKv: () => Promise<void>;
@@ -1489,6 +1502,113 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       expect(updatedRecord?.chain.attempts).toHaveLength(2);
       expect(updatedRecord?.chain.attempts[0].channel).toBe('sms');
       expect(updatedRecord?.chain.attempts[1].channel).toBe('whatsapp');
+    });
+  });
+
+  // The asynchronous counterpart to the send path's ctx.waitUntil handover. Nothing here is
+  // holding an HTTP response open, but the callers that drive this module — the webhook
+  // handler's `ctx.waitUntil(applyStatusEvents(...))` and the Durable Object's `alarm()` — end
+  // their lifetime the moment `advanceChain` resolves, so an observer still running then is
+  // cancelled by the runtime mid-write. `advanceChain` must therefore not resolve until the
+  // `onStatus` notifications it started have settled.
+  describe('Async onStatus observers outlive the advance that started them', () => {
+    it('does not resolve advanceChain until an async onStatus for the next attempt has finished', async () => {
+      const waProvider = recordingProvider('whatsapp', 'meta-wa');
+      const smsProvider = recordingProvider('sms', 'twilio-sms');
+
+      const messageId = 'msg_01J9FB00000000000000000018';
+      await store.create({
+        id: messageId,
+        template: 'otpVerification',
+        kind: 'otp',
+        policy: { fallback: ['whatsapp', 'sms'], always: [] },
+        chain: {
+          status: 'failed',
+          attempts: [
+            {
+              channel: 'whatsapp',
+              provider: 'meta-wa',
+              status: 'failed',
+              error: 'Recipient WhatsApp account not found',
+              at: '2026-09-20T10:00:00.000Z',
+            },
+          ],
+        },
+        always: [],
+        status: 'failed',
+        createdAt: '2026-09-20T10:00:00.000Z',
+        updatedAt: '2026-09-20T10:00:05.000Z',
+      });
+      await kv.put(
+        `in:${messageId}`,
+        JSON.stringify({ input: { code: '739104' }, to: '+94771234567', locale: 'en' })
+      );
+
+      const finished: string[] = [];
+      await advanceChain({
+        id: messageId,
+        reason: 'failed',
+        env: { MESSAGES_KV: kv },
+        options: {
+          timer: mockTimer,
+          templates: testTemplates,
+          providers: { whatsapp: waProvider, sms: smsProvider },
+          onStatus: slowObserver(finished),
+        },
+        store,
+      });
+
+      // The SMS attempt was dispatched AND its observer ran to completion.
+      expect(smsProvider.calls).toHaveLength(1);
+      expect(finished).toEqual(['sms:sent']);
+    });
+
+    it('does not resolve advanceChain until an async onStatus for an unrecoverable input has finished', async () => {
+      const waProvider = recordingProvider('whatsapp', 'meta-wa');
+      const smsProvider = recordingProvider('sms', 'twilio-sms');
+
+      const messageId = 'msg_01J9FB00000000000000000019';
+      await store.create({
+        id: messageId,
+        template: 'otpVerification',
+        kind: 'otp',
+        policy: { fallback: ['whatsapp', 'sms'], always: [] },
+        chain: {
+          status: 'failed',
+          attempts: [
+            {
+              channel: 'whatsapp',
+              provider: 'meta-wa',
+              status: 'failed',
+              error: 'Recipient WhatsApp account not found',
+              at: '2026-09-20T10:00:00.000Z',
+            },
+          ],
+        },
+        always: [],
+        status: 'failed',
+        createdAt: '2026-09-20T10:00:00.000Z',
+        updatedAt: '2026-09-20T10:00:05.000Z',
+      });
+      // No `in:<id>` entry and no pass-through: the input is gone, so the next channel is
+      // recorded as failed rather than dispatched — through the same recorder.
+
+      const finished: string[] = [];
+      await advanceChain({
+        id: messageId,
+        reason: 'failed',
+        env: { MESSAGES_KV: kv },
+        options: {
+          timer: mockTimer,
+          templates: testTemplates,
+          providers: { whatsapp: waProvider, sms: smsProvider },
+          onStatus: slowObserver(finished),
+        },
+        store,
+      });
+
+      expect(smsProvider.calls).toHaveLength(0);
+      expect(finished).toEqual(['sms:failed']);
     });
   });
 });
