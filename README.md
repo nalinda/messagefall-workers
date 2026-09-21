@@ -177,11 +177,12 @@ export default createMessagingApp<Env>({
 
 That Worker now serves:
 
-| Route             | Purpose                         |
-| ----------------- | ------------------------------- |
-| `POST /send`      | Send a template to a recipient. |
-| `GET /status/:id` | Delivery status of a message.   |
-| `GET              | POST /webhooks/:provider`       | Delivery-status callbacks, dispatched to the named provider. |
+| Route                      | Purpose                                                      |
+| -------------------------- | ------------------------------------------------------------ |
+| `POST /send`               | Send a template to a recipient.                              |
+| `GET /status/:id`          | Delivery status of a message.                                |
+| `GET /webhooks/:provider`  | Subscription handshake for the named provider.               |
+| `POST /webhooks/:provider` | Delivery-status callbacks, dispatched to the named provider. |
 
 Sending:
 
