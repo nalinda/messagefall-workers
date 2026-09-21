@@ -44,8 +44,7 @@
   "files": [
     "dist",
     "*.md",
-    "LICENSE",
-    ".gitignore"
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
