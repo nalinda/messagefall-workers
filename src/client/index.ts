@@ -8,6 +8,7 @@
 
 import type { Fetcher } from '@cloudflare/workers-types';
 
+import { normalizeBasePath } from '../core/base-path.js';
 import type { MessageRecord } from '../core/status.js';
 import type { InputOf, Templates } from '../templates.js';
 
@@ -107,16 +108,6 @@ export class MessagingClientError extends Error {
     this.name = 'MessagingClientError';
     this.status = status;
   }
-}
-
-function normalizeBasePath(basePath?: string): string {
-  if (!basePath) return '';
-  const trimmed = basePath.trim();
-  const withoutLeading = trimmed.startsWith('/') ? trimmed.slice(1) : trimmed;
-  const withoutTrailing = withoutLeading.endsWith('/')
-    ? withoutLeading.slice(0, -1)
-    : withoutLeading;
-  return withoutTrailing ? `/${withoutTrailing}` : '';
 }
 
 function isRecord(val: unknown): val is Record<string, unknown> {

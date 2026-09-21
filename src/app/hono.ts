@@ -6,6 +6,7 @@
 
 import { Hono } from 'hono';
 
+import { normalizeBasePath } from '../core/base-path.js';
 import {
   createMessaging,
   type MessagingOptions,
@@ -63,16 +64,6 @@ function mapSendError(err: unknown): { status: 400 | 404 | 422; message: string 
     ({ type }) => err instanceof type || isNamedError(err, type.name)
   );
   return match ? { status: match.status, message: errorMessage(err) } : null;
-}
-
-function normalizeBasePath(basePath?: string): string {
-  if (!basePath) return '';
-  const trimmed = basePath.trim();
-  const withoutLeading = trimmed.startsWith('/') ? trimmed.slice(1) : trimmed;
-  const withoutTrailing = withoutLeading.endsWith('/')
-    ? withoutLeading.slice(0, -1)
-    : withoutLeading;
-  return withoutTrailing ? `/${withoutTrailing}` : '';
 }
 
 /**
