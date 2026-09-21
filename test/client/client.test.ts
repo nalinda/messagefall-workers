@@ -12,7 +12,6 @@
  * - Bundle check: importing messagefall-workers/client pulls in no provider code.
  */
 
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -22,39 +21,10 @@ import { z } from 'zod';
 import { createMessagingClient, MessagingClientError } from '../../src/client/index.js';
 import type { MessageRecord } from '../../src/core/status.js';
 import { defineTemplates } from '../../src/templates.js';
+import { buildDist, walkImportGraph } from '../helpers/bundle-isolation.js';
 import { createMockFetcher, rejection } from '../helpers/client.js';
 
 const rootDir = path.resolve(import.meta.dir, '../..');
-
-// Helper to walk relative ESM imports in built dist files
-function relativeImportsOf(file: string): string[] {
-  const source = fs.readFileSync(file, 'utf8');
-  const staticSpecifier = /\bfrom\s*['"]([^'"]+)['"]/g;
-  const dynamicSpecifier = /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
-  const bareSpecifier = /\bimport\s+['"]([^'"]+)['"]/g;
-
-  const specifiers = [
-    ...source.matchAll(staticSpecifier),
-    ...source.matchAll(dynamicSpecifier),
-    ...source.matchAll(bareSpecifier),
-  ].map((match) => match[1]);
-
-  return specifiers
-    .filter((specifier) => specifier.startsWith('.'))
-    .map((specifier) => path.resolve(path.dirname(file), specifier));
-}
-
-function walkImportGraph(roots: string[]): Set<string> {
-  const seen = new Set<string>();
-  const queue = [...roots];
-  for (let file = queue.pop(); file !== undefined; file = queue.pop()) {
-    if (seen.has(file)) continue;
-    if (!fs.existsSync(file)) throw new Error(`Import graph reached a missing file: ${file}`);
-    seen.add(file);
-    queue.push(...relativeImportsOf(file));
-  }
-  return seen;
-}
 
 describe('createMessagingClient runtime behavior (Issue #12)', () => {
   const testTemplates = defineTemplates({
@@ -471,13 +441,7 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
 
   describe('bundle check: importing messagefall-workers/client pulls in no provider code', () => {
     beforeAll(() => {
-      const buildResult = spawnSync('bun', ['run', 'build'], {
-        cwd: rootDir,
-        encoding: 'utf8',
-      });
-      if (buildResult.status !== 0) {
-        throw new Error(`bun run build failed:\n${buildResult.stdout}\n${buildResult.stderr}`);
-      }
+      buildDist();
     });
 
     it('ensures dist/client/index.js imports only type definitions and no provider code', () => {

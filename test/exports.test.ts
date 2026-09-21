@@ -11,6 +11,8 @@ import path from 'node:path';
 
 import { beforeAll, describe, expect, it } from 'bun:test';
 
+import { buildDist, walkImportGraph } from './helpers/bundle-isolation.js';
+
 // These tests exercise what a consumer installs: the `package.json#exports`
 // map and the dist files it points at, not the TypeScript sources. dist is
 // rebuilt first so the assertions cannot pass against a stale artefact.
@@ -43,43 +45,6 @@ function distFile(relative: string): string {
   return path.join(rootDir, relative);
 }
 
-// `from './x.js'` (static import/export), `import('./x.js')` (dynamic) and
-// `import './x.js'` (bare side-effect import).
-const STATIC_SPECIFIER = /\bfrom\s*['"]([^'"]+)['"]/g;
-const DYNAMIC_SPECIFIER = /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
-const BARE_SPECIFIER = /\bimport\s+['"]([^'"]+)['"]/g;
-
-/**
- * Absolute paths of the relative modules `file` imports.
- */
-function relativeImportsOf(file: string): string[] {
-  const source = fs.readFileSync(file, 'utf8');
-  const specifiers = [
-    ...source.matchAll(STATIC_SPECIFIER),
-    ...source.matchAll(DYNAMIC_SPECIFIER),
-    ...source.matchAll(BARE_SPECIFIER),
-  ].map((match) => match[1]);
-  return specifiers
-    .filter((specifier) => specifier.startsWith('.'))
-    .map((specifier) => path.resolve(path.dirname(file), specifier));
-}
-
-/**
- * Walk the ESM import graph from the given absolute files, following only
- * relative specifiers, and return every file reached (including the roots).
- */
-function walkImportGraph(roots: string[]): Set<string> {
-  const seen = new Set<string>();
-  const queue = [...roots];
-  for (let file = queue.pop(); file !== undefined; file = queue.pop()) {
-    if (seen.has(file)) continue;
-    if (!fs.existsSync(file)) throw new Error(`import graph reached a missing file: ${file}`);
-    seen.add(file);
-    queue.push(...relativeImportsOf(file));
-  }
-  return seen;
-}
-
 async function loadExport(subpath: string): Promise<Record<string, unknown>> {
   if (subpath.startsWith('./providers/')) {
     const providerName = subpath.replace('./providers/', '');
@@ -91,13 +56,7 @@ async function loadExport(subpath: string): Promise<Record<string, unknown>> {
 }
 
 beforeAll(() => {
-  const result = spawnSync('bun', ['run', 'build'], {
-    cwd: rootDir,
-    encoding: 'utf8',
-  });
-  if (result.status !== 0) {
-    throw new Error(`bun run build failed:\n${result.stdout}\n${result.stderr}`);
-  }
+  buildDist();
 });
 
 describe('package.json#exports', () => {
