@@ -1,6 +1,11 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
+    // Always emit. With `incremental` inherited from tsconfig.json, a stale
+    // tsconfig.build.tsbuildinfo makes `tsc` consider the build up to date
+    // even when `dist/` has been deleted, so `bun run build` silently emits
+    // nothing. The project is small enough that a full build is cheap.
+    "incremental": false,
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
