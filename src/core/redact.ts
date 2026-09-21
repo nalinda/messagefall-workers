@@ -121,10 +121,11 @@ export function renderedContent(payload: unknown): unknown[] {
     return [];
   }
   const content: unknown[] = extractRenderedStrings(payload);
-  const { template } = payload as { template?: unknown };
-  // RenderedWhatsApp's template config carries the substituted parameters.
-  if (template && typeof template === 'object' && 'params' in template) {
-    content.push(template.params);
+  const { templateConfig } = payload as { templateConfig?: { params?: unknown } };
+  // RenderedWhatsApp's Meta template config carries the substituted parameters. `template`
+  // beside it is only the catalogue name, which is metadata and deliberately not scrubbed for.
+  if (templateConfig && typeof templateConfig === 'object' && 'params' in templateConfig) {
+    content.push(templateConfig.params);
   }
   return content;
 }

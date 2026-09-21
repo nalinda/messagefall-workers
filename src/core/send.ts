@@ -246,8 +246,10 @@ async function attemptChannel(
       kind: req.template.kind,
       locale: req.locale,
     };
-    // See #28 — OutboundMeta.template / RenderedWhatsApp.template collision; rendered wins.
-    payload = { ...meta, ...rendered } as AnyRendered & OutboundMeta;
+    // No key is shared between the two halves: `meta.template` is the catalogue name and the
+    // Meta template config arrives as `rendered.templateConfig`, so neither can overwrite the
+    // other and the provider sees both.
+    payload = { ...meta, ...rendered };
   } catch (error) {
     return {
       ...base,

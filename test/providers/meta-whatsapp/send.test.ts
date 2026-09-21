@@ -13,8 +13,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 
+import { createMessaging, defineTemplates } from '../../../src/index.js';
 import { metaWhatsApp } from '../../../src/providers/meta-whatsapp/index.js';
 import type { OutboundMeta, RenderedWhatsApp } from '../../../src/providers/types.js';
+import { newEnv } from '../../helpers/messaging.js';
 import { testConfig } from './fixtures.js';
 
 interface Captured {
@@ -48,22 +50,22 @@ function withoutRecipient(body: Record<string, unknown>): Record<string, unknown
 
 type WhatsAppMessage = RenderedWhatsApp & OutboundMeta;
 
-// `RenderedWhatsApp.template` (the rendered Meta template) and
-// `OutboundMeta.template` (the catalog template id) share a key, so the
-// intersection cannot be written as a literal. The provider receives the
-// rendered shape, which is what these fixtures carry.
+// `OutboundMeta.template` (the catalogue name) and `RenderedWhatsApp.templateConfig` (the Meta
+// template to send) have different keys, so the intersection the provider actually receives
+// can be written out in full — no cast, and both concepts survive the merge.
 function message(rendered: RenderedWhatsApp, kind: OutboundMeta['kind']): WhatsAppMessage {
-  const meta: Omit<OutboundMeta, 'template'> = {
+  const meta: OutboundMeta = {
     to: '+94771234567',
     messageId: 'msg_test_001',
+    template: 'loginCode',
     kind,
     locale: 'en',
   };
-  return { ...meta, ...rendered } as unknown as WhatsAppMessage;
+  return { ...meta, ...rendered };
 }
 
 const templateMessage = message(
-  { template: { name: 'otp_code', language: 'en', params: ['482910', '10'] } },
+  { templateConfig: { name: 'otp_code', language: 'en', params: ['482910', '10'] } },
   'otp',
 );
 
@@ -220,5 +222,89 @@ describe('metaWhatsApp provider: send', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toContain('network down');
+  });
+});
+
+describe('metaWhatsApp provider: end to end from the template catalogue', () => {
+  let fetchSpy: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>>;
+
+  beforeEach(() => {
+    fetchSpy = spyOn(globalThis, 'fetch');
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+  });
+
+  it('carries a catalogue template render all the way to the Graph body, keeping both names', async () => {
+    const calls: Captured[] = [];
+    fetchSpy.mockImplementation(((url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      return Promise.resolve(Response.json({ messages: [{ id: 'wamid.e2e.1' }] }, { status: 200 }));
+    }) as unknown as typeof fetch);
+
+    const provider = metaWhatsApp(testConfig);
+    // Wrap the real provider so the test can see the exact payload the pipeline assembles,
+    // then hand it straight on — no re-shaping.
+    const seen: (RenderedWhatsApp & OutboundMeta)[] = [];
+    const spyProvider: typeof provider = {
+      ...provider,
+      send: (message) => {
+        seen.push(message);
+        return provider.send(message);
+      },
+    };
+
+    const templates = defineTemplates({
+      loginCode: {
+        kind: 'otp',
+        whatsapp: {
+          template: 'auth_code',
+          language: { en: 'en_US' },
+          params: ({ code }: { code: string }) => [code],
+        },
+      },
+    });
+
+    const messaging = createMessaging(newEnv(), {
+      templates,
+      providers: () => ({ whatsapp: spyProvider }),
+      delivery: { fallback: ['whatsapp'] },
+    });
+
+    const { id } = await messaging.send({
+      template: 'loginCode',
+      to: '+94771234567',
+      locale: 'en',
+      input: { code: '482910' },
+    });
+
+    // 1. The payload the pipeline built carries BOTH concepts, under their own keys.
+    expect(seen).toHaveLength(1);
+    expect(seen[0].template).toBe('loginCode');
+    expect(seen[0].templateConfig).toEqual({
+      name: 'auth_code',
+      language: 'en_US',
+      params: ['482910'],
+    });
+
+    // 2. The Graph body is built from `templateConfig`, not from the catalogue name.
+    expect(calls).toHaveLength(1);
+    const body = bodyOf(calls[0]);
+    expect(body.type).toBe('template');
+    expect(body.template).toMatchObject({
+      name: 'auth_code',
+      language: { code: 'en_US' },
+      components: [{ type: 'body', parameters: [{ type: 'text', text: '482910' }] }],
+    });
+
+    // 3. The record keeps the catalogue name, as it always did.
+    const record = await messaging.status(id);
+    expect(record?.template).toBe('loginCode');
+    expect(record?.chain.attempts[0]).toMatchObject({
+      channel: 'whatsapp',
+      status: 'sent',
+      providerId: 'wamid.e2e.1',
+    });
   });
 });

@@ -186,7 +186,7 @@ describe('Locale resolution of language for WhatsApp templates', () => {
 
     const rendered = render(template, 'whatsapp', { code: '123456' }, 'si');
     expect(rendered).toEqual({
-      template: {
+      templateConfig: {
         name: 'auth_otp',
         language: 'si_LK',
         params: ['123456'],
@@ -207,7 +207,7 @@ describe('Locale resolution of language for WhatsApp templates', () => {
 
     const rendered = render(template, 'whatsapp', { code: '123456' }, 'fr');
     expect(rendered).toEqual({
-      template: {
+      templateConfig: {
         name: 'auth_otp',
         language: 'en_US',
         params: ['123456'],
@@ -244,7 +244,7 @@ describe('Locale resolution of language for WhatsApp templates', () => {
 
     const rendered = render(template, 'whatsapp', { alertId: 'ALT-101' }, 'de');
     expect(rendered).toEqual({
-      template: {
+      templateConfig: {
         name: 'system_alert',
         language: 'en_GB',
         params: ['ALT-101'],
@@ -267,7 +267,7 @@ describe('render() returns exact shapes from #18 and never mutates input', () =>
 
     const result = render(template, 'whatsapp', { code: '654321' }, 'en');
     expect(result).toEqual({
-      template: {
+      templateConfig: {
         name: 'auth_otp',
         language: 'en',
         params: ['654321', 'en'],

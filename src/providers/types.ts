@@ -57,18 +57,12 @@ export interface OutboundMeta {
    */
   messageId: string;
   /**
-   * What the message was rendered from.
-   *
-   * - For a free-text render (SMS, email, WhatsApp `text`) this is the catalogue template
-   *   name, a `string`.
-   * - For a WhatsApp Meta-template render it is the rendered template config
-   *   (`{ name, language, params }`) instead, because the rendered payload and this meta share
-   *   the `template` key and the provider cannot send without the config. In that case the
-   *   catalogue name is not present anywhere in the payload; it remains on the `MessageRecord`.
-   *
-   * Interim shape; the contract-level fix is tracked in #28.
+   * The catalogue template this message was rendered from — the key it has in `defineTemplates`.
+   * Always a `string`, on every channel and every render, including a WhatsApp Meta-template
+   * send: the Meta template config lives under {@link RenderedWhatsApp.templateConfig}, which
+   * deliberately does not share this key.
    */
-  template: string | NonNullable<RenderedWhatsApp['template']>;
+  template: string;
   /**
    * Template kind: 'otp' for sensitive one-time passwords, 'notification' for general alerts.
    */
@@ -85,8 +79,14 @@ export interface OutboundMeta {
 export interface RenderedWhatsApp {
   /**
    * Approved Meta template configuration with name, language, and parameter values.
+   *
+   * Named `templateConfig` rather than `template` because a provider is handed
+   * `RenderedWhatsApp & OutboundMeta`: sharing the `template` key with
+   * {@link OutboundMeta.template} would make the intersection unusable and would let one
+   * concept overwrite the other when the payload is assembled. `template` is the catalogue
+   * name; this is the Meta template to send.
    */
-  template?: {
+  templateConfig?: {
     name: string;
     language: string;
     params: string[];

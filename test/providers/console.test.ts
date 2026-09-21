@@ -108,7 +108,7 @@ describe('Provider types and JSDoc documentation', () => {
     expect(content).toMatch(/\/\*\*[\s\S]*?\*\/\s*locale:\s*string/);
 
     // Rendered WhatsApp / SMS / Email field documentation
-    expect(content).toMatch(/\/\*\*[\s\S]*?\*\/\s*template\?:/);
+    expect(content).toMatch(/\/\*\*[\s\S]*?\*\/\s*templateConfig\?:/);
     expect(content).toMatch(/\/\*\*[\s\S]*?\*\/\s*text\?:/);
     expect(content).toMatch(/\/\*\*[\s\S]*?\*\/\s*subject:/);
     expect(content).toMatch(/\/\*\*[\s\S]*?\*\/\s*html\?:/);
@@ -244,7 +244,7 @@ describe('Console provider send test', () => {
     }
   });
 
-  it('logs the Meta template name, never params or [object Object], when template is a config object', async () => {
+  it('logs the catalogue template name, never the Meta config or its params, on a template send', async () => {
     const consoleProvider = await loadConsoleProvider();
     expect(consoleProvider).toBeDefined();
 
@@ -255,22 +255,25 @@ describe('Console provider send test', () => {
     const capture = captureConsole();
     try {
       const code = '774411';
-      // What the send pipeline hands a WhatsApp provider for a template render: the rendered
-      // config occupies `template`, not the catalogue name.
+      // Exactly what the send pipeline hands a WhatsApp provider for a Meta-template render:
+      // the catalogue name under `template`, the Meta config under `templateConfig`. The two
+      // no longer share a key, so both survive the merge and no cast is needed.
       const message = {
         to: '+94775556666',
         messageId: 'msg_wa_otp_004',
-        template: { name: 'auth_code', language: 'en_US', params: [code] },
+        template: 'loginCode',
+        templateConfig: { name: 'auth_code', language: 'en_US', params: [code] },
         kind: 'otp' as const,
         locale: 'en',
-      } as unknown as Parameters<typeof provider.send>[0];
+      } satisfies Parameters<typeof provider.send>[0];
 
       const result = await provider.send(message);
       expect(result.ok).toBe(true);
 
       const allLogs = capture.logs.join(' ');
-      expect(allLogs).toContain('template=auth_code');
+      expect(allLogs).toContain('template=loginCode');
       expect(allLogs).not.toContain('[object Object]');
+      expect(allLogs).not.toContain('auth_code');
       expect(allLogs).not.toContain(code);
     } finally {
       capture.restore();

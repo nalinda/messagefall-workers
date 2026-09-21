@@ -350,10 +350,21 @@ describe('Issue #3: createMessaging send pipeline', () => {
 
       expect(wa.calls).toHaveLength(1);
       const call = wa.calls[0];
-      // Read through the rendered type: the contract's `R & OutboundMeta` collapses `template`.
+      // The two concepts no longer share a key, so the provider sees BOTH: the catalogue name
+      // under `template` and the Meta template config under `templateConfig`.
       const rendered: RenderedWhatsApp = call;
-      expect(rendered.template).toEqual({ name: 'auth_code', language: 'en_US', params: ['654321'] });
-      expect(call).toMatchObject({ to: TO, messageId: id, kind: 'otp', locale: 'en' });
+      expect(rendered.templateConfig).toEqual({
+        name: 'auth_code',
+        language: 'en_US',
+        params: ['654321'],
+      });
+      expect(call).toMatchObject({
+        to: TO,
+        messageId: id,
+        template: 'loginCodeWa',
+        kind: 'otp',
+        locale: 'en',
+      });
       expect(call.text).toBeUndefined();
 
       const record = await messaging.status(id);

@@ -279,7 +279,7 @@ function renderWhatsApp<In>(
   if ('template' in wa && typeof wa.template === 'string' && wa.template.length > 0) {
     const lang = resolveWhatsAppLanguage(wa.language, locale, wa.template);
     return {
-      template: {
+      templateConfig: {
         name: wa.template,
         language: lang,
         params: wa.params(input, locale),

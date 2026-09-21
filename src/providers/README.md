@@ -21,6 +21,11 @@ interface Provider<R = unknown> {
 `R` is the rendered payload for the channel: `RenderedWhatsApp`, `RenderedSms` or
 `RenderedEmail`. `OutboundMeta` carries `to`, `messageId`, `template`, `kind` and `locale`.
 
+`OutboundMeta.template` is always the catalogue template name (a `string`), on every channel
+and every render. A WhatsApp Meta-template render puts the approved template to send under
+`RenderedWhatsApp.templateConfig` (`{ name, language, params }`) — a separate key, so a
+provider handed `RenderedWhatsApp & OutboundMeta` sees both and neither overwrites the other.
+
 A provider that does not define a `webhook` leaves attempts in the `sent` status until the
 fallback chain timeout advances delivery.
 

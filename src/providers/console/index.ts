@@ -70,19 +70,6 @@ function parseMetaStatuses(payload: unknown): StatusEvent[] {
     });
 }
 
-/**
- * Loggable name for `message.template`, which may be a string or a WhatsApp config (#28).
- */
-function templateLabel(template: unknown): string {
-  if (typeof template === 'string') {
-    return template;
-  }
-  if (template && typeof template === 'object' && 'name' in template) {
-    return String(template.name);
-  }
-  return String(template);
-}
-
 type ConsoleStatusBody = {
   providerId?: string;
   id?: string;
@@ -154,8 +141,7 @@ export function consoleProvider<R = ConsoleRendered>(
     name: providerName,
     channel: providerChannel,
     send: (message: R & OutboundMeta): Promise<SendResult> => {
-      const { to, messageId, kind } = message;
-      const template = templateLabel(message.template);
+      const { to, messageId, kind, template } = message;
 
       if (kind === 'otp') {
         console.log(
