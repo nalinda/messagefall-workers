@@ -74,8 +74,10 @@ describe('Issue #14: Example Worker under examples/basic', () => {
       expect(fs.existsSync(wranglerPath)).toBe(true);
 
       const rawContent = fs.readFileSync(wranglerPath, 'utf8');
-      // Strip comments for JSON parsing
-      const jsonContent = rawContent.replaceAll(/\/\*[\s\S]*?\*\/|\/\/.*/g, '');
+      // Strip comments and trailing commas for JSON parsing
+      const jsonContent = rawContent
+        .replaceAll(/\/\*[\s\S]*?\*\/|\/\/.*/g, '')
+        .replaceAll(/,(\s*[\]}])/g, '$1');
       const config = JSON.parse(jsonContent) as {
         name?: string;
         main?: string;
