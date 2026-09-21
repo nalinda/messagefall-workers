@@ -79,6 +79,11 @@ export interface ConsoleProviderOptions {
  * When sending an OTP message (`kind === 'otp'`), the rendered message body is
  * omitted from log output to prevent secret disclosure.
  *
+ * The recipient IS printed, which is the one documented exception to the logging allow-list in
+ * `src/providers/README.md` ("Security Notes"): this provider is a development stand-in that
+ * sends nowhere, and without `to=` there is nothing local debugging can check the addressing
+ * against. No other provider may log the recipient.
+ *
  * @param options - Console provider configuration options.
  * @returns A Provider instance for console logging.
  */

@@ -161,6 +161,9 @@ These are read from the Worker bindings by the provider factory in the `provider
 - **Never log message bodies** or template parameters
 - **Never log credentials** or API tokens
 - **Only log**: provider name, channel, message ID, status, timestamp
+- **One carve-out**: the `console` provider — and only it — also prints the recipient (`to=`),
+  because a development-mode provider that sends nowhere is useless for local debugging without
+  it. It is never meant to run in production, and no other provider may copy this.
 
 ## Configuration
 
