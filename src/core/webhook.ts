@@ -284,9 +284,19 @@ async function handleSingleEvent(
 }
 
 /**
- * Processes all parsed status events for a webhook invocation.
+ * Applies a batch of parsed status events: matches each one to its message, writes it to the
+ * record and fires `onStatus` / `onStatusApplied`.
+ *
+ * This is the one place a delivery status is turned into a record update. The webhook dispatcher
+ * below calls it for a parsed request body, and `createMessaging` calls it for a provider's
+ * simulated statuses (the console provider's `simulate` option), so a simulated `delivered` or
+ * `failed` takes exactly the path a real vendor callback takes — including driving fallback.
+ *
+ * @param events - The parsed status events.
+ * @param providerName - Name of the provider the events came from, for the unmatched-event log.
+ * @param options - Webhook dispatch configuration options.
  */
-async function processAllEvents(
+export async function applyStatusEvents(
   events: StatusEvent[],
   providerName: string,
   options: WebhookDispatchOptions
@@ -354,9 +364,9 @@ export function createWebhookHandler(options: WebhookDispatchOptions): WebhookHa
     const parsedEvents = Array.isArray(events) ? events : [];
 
     if (ctx && typeof ctx.waitUntil === 'function') {
-      ctx.waitUntil(processAllEvents(parsedEvents, providerName, options));
+      ctx.waitUntil(applyStatusEvents(parsedEvents, providerName, options));
     } else {
-      await processAllEvents(parsedEvents, providerName, options);
+      await applyStatusEvents(parsedEvents, providerName, options);
     }
 
     return new Response('OK', {

@@ -4,8 +4,15 @@
 
 import { describe, expect, it } from 'bun:test';
 
-import { createMessaging, defineTemplates, type Provider, type RenderedSms } from '../../src/index.js';
-import { captureConsole, newEnv, pingTemplates as templates } from '../helpers/messaging.js';
+import {
+  createMessaging,
+  defineTemplates,
+  type Provider,
+  type RenderedSms,
+  type RenderedWhatsApp,
+} from '../../src/index.js';
+import { consoleProvider } from '../../src/providers/console/index.js';
+import { captureConsole, newEnv, pingTemplates as templates, waitFor } from '../helpers/messaging.js';
 
 function stubSms(name: string): Provider<RenderedSms> & { calls: number } {
   const provider = {
@@ -123,6 +130,80 @@ describe('createMessaging.handleWebhook observer failures', () => {
     } finally {
       captured.restore();
     }
+  });
+});
+
+describe('createMessaging simulated statuses', () => {
+  // The console provider's `simulate` option fires statuses on `onSimulatedStatus`. The core
+  // has to wire that hook to the very same handling a real webhook status gets, or the
+  // README's local-development workflow silently drops every simulated status.
+  const twoChannelTemplates = defineTemplates({
+    ping: { kind: 'notification', whatsapp: { text: () => 'ping' }, sms: () => 'ping' },
+  });
+
+  it('applies a simulated delivered status to the record and reports it through onStatus', async () => {
+    const provider = consoleProvider<RenderedSms>({
+      channel: 'sms',
+      name: 'console-sms',
+      simulate: { status: 'delivered', afterMs: 1 },
+    });
+    const events: string[] = [];
+    const messaging = createMessaging(newEnv(), {
+      templates,
+      providers: () => ({ sms: provider }),
+      onStatus: (event) => {
+        events.push(event.status);
+      },
+    });
+
+    const { id } = await messaging.send({
+      template: 'ping',
+      to: '+14155550123',
+      locale: 'en',
+      input: undefined,
+    });
+    await waitFor(async () => {
+      const current = await messaging.status(id);
+      return current?.status === 'delivered';
+    });
+
+    const record = await messaging.status(id);
+    expect(record!.chain.attempts[0]).toMatchObject({
+      providerId: `console_${id}`,
+      status: 'delivered',
+    });
+    expect(record!.status).toBe('delivered');
+    expect(events).toEqual(['sent', 'delivered']);
+  });
+
+  it('drives fallback from a simulated failed status, exactly as a failed webhook would', async () => {
+    const wa = consoleProvider<RenderedWhatsApp>({
+      channel: 'whatsapp',
+      name: 'console-whatsapp',
+      simulate: { status: 'failed', afterMs: 1 },
+    });
+    const sms = consoleProvider<RenderedSms>({ channel: 'sms', name: 'console-sms' });
+    const messaging = createMessaging(newEnv(), {
+      templates: twoChannelTemplates,
+      providers: () => ({ whatsapp: wa, sms }),
+      delivery: { fallback: ['whatsapp', 'sms'], always: [] },
+    });
+
+    const { id } = await messaging.send({
+      template: 'ping',
+      to: '+14155550123',
+      locale: 'en',
+      input: undefined,
+    });
+    await waitFor(async () => {
+      const current = await messaging.status(id);
+      return (current?.chain.attempts.length ?? 0) > 1;
+    });
+
+    const record = await messaging.status(id);
+    expect(record!.chain.attempts.map((attempt) => attempt.channel)).toEqual(['whatsapp', 'sms']);
+    expect(record!.chain.attempts[0].status).toBe('failed');
+    expect(record!.chain.attempts[1]).toMatchObject({ provider: 'console-sms', status: 'sent' });
   });
 });
 

@@ -30,7 +30,7 @@ import {
   type StatusStore,
 } from './status.js';
 import { announceTimerOff, registerMessagingOptions } from './timer.js';
-import { createWebhookHandler } from './webhook.js';
+import { applyStatusEvents, createWebhookHandler, type WebhookDispatchOptions } from './webhook.js';
 
 export { ProviderConfigError } from './provider-set.js';
 export type { ProviderSet, SendContext, StatusCallbackEvent } from './send.js';
@@ -251,6 +251,34 @@ export function statusStoreFor(
 }
 
 /**
+ * Routes a provider's simulated delivery statuses through the webhook path.
+ *
+ * A provider that fakes statuses locally — the console provider's `simulate` option — fires them
+ * on `onSimulatedStatus`. Nothing else in the core assigns that hook, so without this the
+ * simulated `delivered` / `failed` was dropped on the floor: it never reached the status store,
+ * never called `onStatus` and never drove fallback, even though the README's local-development
+ * section advertises exactly that.
+ *
+ * The hook is deliberately wired to {@link applyStatusEvents}, the same function the webhook
+ * dispatcher hands a parsed vendor payload to, rather than to a parallel path — so a simulated
+ * status and a real one are handled identically. Errors are contained: a simulated status fires
+ * from a timer with nobody to reject to.
+ */
+function wireSimulatedStatuses(providers: ProviderSet, options: WebhookDispatchOptions): void {
+  for (const provider of [providers.whatsapp, providers.sms, providers.email]) {
+    if (!provider) {
+      continue;
+    }
+    const providerName = provider.name;
+    provider.onSimulatedStatus = (event: StatusEvent): void => {
+      void applyStatusEvents([event], providerName, options).catch(() => {
+        // Nothing to report to: the status was fired by a timer, not a request.
+      });
+    };
+  }
+}
+
+/**
  * Creates a messaging instance bound to a Worker env.
  *
  * Providers and the status store are memoised per `env` object, so calling this on every
@@ -277,7 +305,7 @@ export function createMessaging<T extends Templates<any>>(
   const store = statusStoreFor(env, options);
   const providers = memoProviders(env, options.providers);
   const templates = new Map<string, TemplateDef<unknown>>(Object.entries(options.templates));
-  const webhook = createWebhookHandler({
+  const webhookOptions: WebhookDispatchOptions = {
     providers: providers as Record<string, Provider>,
     store,
     templates: options.templates,
@@ -294,7 +322,9 @@ export function createMessaging<T extends Templates<any>>(
       : undefined,
     onStatusApplied: ({ id, part, event, record }) =>
       part === 'chain' ? handleChainStatusApplied(id, event, record, env, options, kv) : undefined,
-  });
+  };
+  const webhook = createWebhookHandler(webhookOptions);
+  wireSimulatedStatuses(providers, webhookOptions);
 
   return {
     send(args, ctx) {

@@ -136,3 +136,26 @@ export function memoryKV(): KVNamespace & { dump(): Map<string, string> } {
   };
   return kv as unknown as KVNamespace & { dump(): Map<string, string> };
 }
+
+/**
+ * Polls `condition` until it holds or the budget runs out. For the asynchronous seams a test
+ * cannot await directly — a provider's simulated status fires from a `setTimeout`, and the
+ * record update it triggers is not tied to any promise the caller holds.
+ *
+ * @param condition - Checked on every poll; the wait ends as soon as it returns true.
+ * @param timeoutMs - How long to keep polling before giving up.
+ * @throws If the condition never holds within `timeoutMs`.
+ */
+export async function waitFor(
+  condition: () => boolean | Promise<boolean>,
+  timeoutMs = 2000
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await condition()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`waitFor: condition did not hold within ${timeoutMs}ms`);
+}

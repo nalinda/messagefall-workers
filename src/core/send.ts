@@ -613,7 +613,10 @@ async function stashChainInput(
   }
   const timeoutMs = chainTimeoutMs(req.template.kind, deps.timeout);
   const inputPayload: RenderInput = {
-    input: req.input,
+    // `JSON.stringify` drops a key whose value is `undefined`, and `asRenderInput` recognises
+    // the envelope by its `input` field — so an input-less template would come back out of KV
+    // as a bare payload and lose its recipient. `null` round-trips and renders the same.
+    input: req.input ?? null,
     to: req.to,
     ...(req.email !== undefined && { email: req.email }),
     locale: req.locale,
