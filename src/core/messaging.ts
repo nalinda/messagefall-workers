@@ -318,6 +318,15 @@ function wireSimulatedStatuses(
       onSimulatedStatus?: (event: StatusEvent) => void;
     };
     view.onSimulatedStatus = (event: StatusEvent): void => {
+      // No request lifetime is extended here, deliberately. `applyStatusEvents` can reach a full
+      // chain advance (KV writes, a provider send), and on the send and webhook paths that work
+      // is handed to `ctx.waitUntil`. It cannot be here: these views are built once per messaging
+      // instance and are shared with `advanceChainFor`, so there is no one `SendContext` to own
+      // the promise — and the hook fires from the console provider's `setTimeout`, which may well
+      // run after the request that armed it has returned and its context has been disposed.
+      // Acceptable because the only caller is the console provider's `simulate` option, a
+      // local-development aid: an advance cancelled here costs a simulated status, not a real
+      // message. A provider meant for production must not fake statuses through this hook.
       void applyStatusEvents([event], providerName, options).catch(() => {
         // Nothing to report to: the status was fired by a timer, not a request.
       });
