@@ -5,6 +5,7 @@
  */
 
 import type { KVNamespace } from '@cloudflare/workers-types';
+import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
 
 import type { Channel, OutboundMeta, Provider, SendResult } from '../../src/providers/types.js';
@@ -170,3 +171,19 @@ export async function waitFor(
   }
   throw new Error(`waitFor: condition did not hold within ${timeoutMs}ms`);
 }
+
+/**
+ * Self-test (AGENTS.md, "Shared test fixtures/helpers under `test/helpers/`"): a helper file with
+ * no `describe` of its own never shows up in the runner's output, which makes it look like a
+ * red-phase test that silently failed to run. This runs with whichever spec imports the helper.
+ */
+describe('test/helpers/messaging', () => {
+  it('loads', () => {
+    expect(typeof newEnv().MESSAGES_KV.put).toBe('function');
+    expect(Object.keys(pingTemplates)).toContain('ping');
+    const provider = recordingProvider('sms', 'self-test-sms');
+    expect(provider.name).toBe('self-test-sms');
+    expect(provider.calls).toEqual([]);
+    expect(typeof captureConsole).toBe('function');
+  });
+});

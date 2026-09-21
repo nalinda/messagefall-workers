@@ -14,6 +14,8 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { describe, expect, it } from 'bun:test';
+
 export const rootDir = path.resolve(import.meta.dir, '../..');
 
 // `from './x.js'` (static import/export), `import('./x.js')` (dynamic) and
@@ -115,3 +117,17 @@ export function reachableProviderFiles(providerName: string): string[] {
     file.includes(path.join('providers', providerName) + path.sep)
   );
 }
+
+/**
+ * Self-test (AGENTS.md, "Shared test fixtures/helpers under `test/helpers/`"): a helper file with
+ * no `describe` of its own never shows up in the runner's output, which makes it look like a
+ * red-phase test that silently failed to run. This runs with whichever spec imports the helper.
+ */
+describe('test/helpers/bundle-isolation', () => {
+  it('loads', () => {
+    expect(rootDir.endsWith('/')).toBe(false);
+    expect(typeof walkImportGraph).toBe('function');
+    expect(typeof buildDist).toBe('function');
+    expect(typeof reachableProviderFiles).toBe('function');
+  });
+});

@@ -8,6 +8,8 @@
  * @module
  */
 
+import { describe, expect, it } from 'bun:test';
+
 /**
  * Mock FallbackTimer Durable Object state for testing timer integration (#8).
  */
@@ -70,3 +72,19 @@ export function createMockFallbackTimer(): MockFallbackTimer {
     },
   };
 }
+
+/**
+ * Self-test (AGENTS.md, "Shared test fixtures/helpers under `test/helpers/`"): a helper file with
+ * no `describe` of its own never shows up in the runner's output, which makes it look like a
+ * red-phase test that silently failed to run. This runs with whichever spec imports the helper.
+ */
+describe('test/helpers/fallback', () => {
+  it('loads', () => {
+    const timer = createMockFallbackTimer();
+    expect(timer.armed('msg_absent')).toBeNull();
+    timer.arm('msg_self_test', 1000);
+    expect(timer.armed('msg_self_test')?.timeoutMs).toBe(1000);
+    timer.cancel('msg_self_test');
+    expect(timer.isCancelled('msg_self_test')).toBe(true);
+  });
+});

@@ -8,6 +8,7 @@
  */
 
 import type { Fetcher } from '@cloudflare/workers-types';
+import { describe, expect, it } from 'bun:test';
 
 /**
  * Mock Fetcher interface that records requests for inspection.
@@ -55,3 +56,17 @@ export async function rejection(promise: Promise<unknown>): Promise<unknown> {
   }
   throw new Error('Promise did not reject');
 }
+
+/**
+ * Self-test (AGENTS.md, "Shared test fixtures/helpers under `test/helpers/`"): a helper file with
+ * no `describe` of its own never shows up in the runner's output, which makes it look like a
+ * red-phase test that silently failed to run. This runs with whichever spec imports the helper.
+ */
+describe('test/helpers/client', () => {
+  it('loads', () => {
+    const fetcher = createMockFetcher(() => new Response('ok'));
+    expect(typeof fetcher.fetch).toBe('function');
+    expect(fetcher.requests).toEqual([]);
+    expect(typeof rejection).toBe('function');
+  });
+});

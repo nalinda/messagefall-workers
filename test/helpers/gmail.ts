@@ -7,6 +7,8 @@
  * @module
  */
 
+import { describe, expect, it } from 'bun:test';
+
 /**
  * Decodes base64url string to UTF-8 text using Web standard APIs.
  */
@@ -65,3 +67,16 @@ export function decodeRfc2047(header: string): string {
         decodeRfc2047Word(charset, encoding, text)
     );
 }
+
+/**
+ * Self-test (AGENTS.md, "Shared test fixtures/helpers under `test/helpers/`"): a helper file with
+ * no `describe` of its own never shows up in the runner's output, which makes it look like a
+ * red-phase test that silently failed to run. This runs with whichever spec imports the helper.
+ */
+describe('test/helpers/gmail', () => {
+  it('loads', () => {
+    expect(decodeBase64Url('aGk')).toBe('hi');
+    expect(typeof unfoldHeaders).toBe('function');
+    expect(typeof decodeRfc2047).toBe('function');
+  });
+});

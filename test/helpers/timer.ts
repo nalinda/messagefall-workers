@@ -13,7 +13,7 @@
 
 import type { DurableObjectNamespace } from '@cloudflare/workers-types';
 import { Database, type SQLQueryBindings } from 'bun:sqlite';
-import { setSystemTime } from 'bun:test';
+import { describe, expect, it, setSystemTime } from 'bun:test';
 
 import type { ArmTimerArgs } from '../../src/core/timer.js';
 import type { FallbackTimer } from '../../src/durable/fallback-timer.js';
@@ -495,3 +495,18 @@ export function timerEnv(
 ): MessagingEnv {
   return timer ? { MESSAGES_KV: kv, FALLBACK_TIMER: timer } : { MESSAGES_KV: kv };
 }
+
+/**
+ * Self-test (AGENTS.md, "Shared test fixtures/helpers under `test/helpers/`"): a helper file with
+ * no `describe` of its own never shows up in the runner's output, which makes it look like a
+ * red-phase test that silently failed to run. This runs with whichever spec imports the helper.
+ */
+describe('test/helpers/timer', () => {
+  it('loads', () => {
+    expect(typeof createFakeDurableRuntime).toBe('function');
+    expect(typeof timerProviders).toBe('function');
+    expect(typeof timerEnv).toBe('function');
+    const provider = timerTestProvider<RenderedSms>('self-test-sms', 'sms');
+    expect(provider.name).toBe('self-test-sms');
+  });
+});
