@@ -111,18 +111,11 @@ export class MessagingClientError extends Error {
   }
 }
 
-async function tryParseJsonError(res: {
-  json: () => Promise<unknown>;
-}): Promise<string | undefined> {
-  try {
-    const data = await res.json();
-    if (isRecord(data) && typeof data.error === 'string') {
-      return data.error;
-    }
-  } catch {
-    // Ignore JSON parse errors
-  }
-  return undefined;
+/**
+ * The `error` field of a parsed JSON error body, or `undefined` when `data` isn't that shape.
+ */
+function parseJsonError(data: unknown): string | undefined {
+  return isRecord(data) && typeof data.error === 'string' ? data.error : undefined;
 }
 
 async function tryReadText(res: { text?: () => Promise<string> }): Promise<string | undefined> {
@@ -135,20 +128,44 @@ async function tryReadText(res: { text?: () => Promise<string> }): Promise<strin
   }
 }
 
+/**
+ * Extracts a human-readable error from a non-OK response.
+ *
+ * A `Response` body can only be consumed once: calling `.json()` and then falling back to
+ * `.text()` on the same response throws "Body already used", so the fallback never actually
+ * ran and a non-JSON error body (an HTML gateway page, a plain-text vendor error) was reported
+ * as just the status text. This reads the body exactly once — as text, since that's what
+ * `Response.text()` can always do — then tries to parse that text as JSON, rather than treating
+ * `.json()` and `.text()` as independently retriable reads of the same stream.
+ */
 async function extractError(res: {
   json: () => Promise<unknown>;
   text?: () => Promise<string>;
   statusText?: string;
   status: number;
 }): Promise<string> {
-  const jsonError = await tryParseJsonError(res);
-  if (jsonError) {
-    return jsonError;
+  const text = await tryReadText(res);
+  if (text !== undefined) {
+    try {
+      const jsonError = parseJsonError(JSON.parse(text));
+      if (jsonError) {
+        return jsonError;
+      }
+    } catch {
+      // Not JSON: the raw text itself is the error content.
+    }
+    return text;
   }
 
-  const text = await tryReadText(res);
-  if (text) {
-    return text;
+  // No `text()` on this object (a caller-supplied double rather than a real `Response`): `json()`
+  // is the only other way to read the body, and it is still read exactly once.
+  try {
+    const jsonError = parseJsonError(await res.json());
+    if (jsonError) {
+      return jsonError;
+    }
+  } catch {
+    // Ignore JSON parse errors
   }
 
   return res.statusText || `HTTP ${res.status}`;

@@ -340,8 +340,11 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.status).toBe(502);
-        expect(result.error).toBeDefined();
-        expect(typeof result.error).toBe('string');
+        // The plain-text body's actual content must come through, not just some string: a
+        // `.json()`-then-`.text()` fallback that instead throws "Body already used" would fall
+        // all the way back to `res.statusText` / `HTTP 502`, which is also a defined string and
+        // would slip past a weaker assertion.
+        expect(result.error).toBe('502 Bad Gateway');
       }
     });
 
