@@ -236,20 +236,18 @@ export interface ChainProgress {
 }
 
 /**
- * The best confirmation any attempt on the chain carries: `read` beats `delivered`, and anything
- * else is no confirmation at all.
+ * The best confirmation any attempt on the chain carries: the highest-precedence attempt status
+ * by {@link getStatusPrecedence} — the one ordering of these statuses — and then only when that
+ * is a confirmed delivery. Anything below `delivered` is no confirmation at all.
  */
 function confirmedDelivery(attempts: Attempt[]): 'delivered' | 'read' | undefined {
-  let best: 'delivered' | 'read' | undefined;
+  let best: Attempt['status'] | undefined;
   for (const attempt of attempts) {
-    if (attempt.status === 'read') {
-      return 'read';
-    }
-    if (attempt.status === 'delivered') {
-      best = 'delivered';
+    if (best === undefined || getStatusPrecedence(attempt.status) > getStatusPrecedence(best)) {
+      best = attempt.status;
     }
   }
-  return best;
+  return best === 'delivered' || best === 'read' ? best : undefined;
 }
 
 /**
