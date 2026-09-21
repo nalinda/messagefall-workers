@@ -1803,7 +1803,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       expect(inPut!.options?.expirationTtl).toBe(60);
     });
 
-    it('logs send.index-failed and still dispatches when the in:<id> write rejects', async () => {
+    it('logs send.stash-failed and still dispatches when the in:<id> write rejects', async () => {
       const env = newEnv();
       const kv = env.MESSAGES_KV as ReturnType<typeof memoryKV>;
       const originalPut = kv.put.bind(kv);
@@ -1840,7 +1840,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       const record = await kvStatusStore(env.MESSAGES_KV).get(id);
       expect(record?.status).toBe('sent');
       // The failure is visible in the logs, once, without content.
-      const failures = captured.logs.filter((line) => line.includes('send.index-failed'));
+      const failures = captured.logs.filter((line) => line.includes('send.stash-failed'));
       expect(failures).toHaveLength(1);
       expect(failures[0]).toContain(id);
       for (const line of captured.logs) {

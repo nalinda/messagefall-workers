@@ -38,6 +38,7 @@ export type LogEvent =
   | 'send.persist-failed'
   | 'send.observer-failed'
   | 'send.index-failed'
+  | 'send.stash-failed'
   | 'send.retry'
   | 'send.channel-skipped'
   | 'webhook.applied'

@@ -689,6 +689,11 @@ function resolveEffectivePolicy(
  * called yet, so rejecting here would orphan a `pending` record and send nothing at all. A stash
  * or an arm that fails is logged (without content) and the send proceeds; a later fallback that
  * cannot find the input degrades through `finalizeMissingInput` (`fallback.input-lost`).
+ *
+ * Each of the two gets its own event name — `send.stash-failed` and `timer.arm-failed` — for the
+ * same reason `indexAttempt` keeps `send.index-failed` to itself: the consequences differ (the
+ * async fallback path has no render input and will degrade, versus the chain having no timeout
+ * to move it on at all), and an operator reading the logs has to be able to tell them apart.
  */
 async function stashChainInput(
   deps: SendDeps,
@@ -716,7 +721,7 @@ async function stashChainInput(
         expirationTtl: ttlSeconds,
       });
     } catch {
-      defaultLogger.warn('send.index-failed', { id, kind: req.template.kind });
+      defaultLogger.warn('send.stash-failed', { id, kind: req.template.kind });
     }
   }
   if (isTimedChain(policy.fallback) && typeof deps.timer?.arm === 'function') {
