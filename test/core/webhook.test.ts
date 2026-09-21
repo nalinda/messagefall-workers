@@ -60,6 +60,14 @@ function createSignedProvider(): Provider {
  * A single-attempt record for the redaction tests, where the `in:<id>` render input has expired
  * and the only way back to the rendered content is the template definition.
  */
+/**
+ * A bare POST to the webhook route; the provider double answers from its own closure, so the
+ * body carries nothing.
+ */
+function statusPost(): Request {
+  return new Request('http://localhost/webhooks/meta-wa', { method: 'POST', body: '{}' });
+}
+
 function singleAttemptRecord(
   messageId: string,
   providerId: string,
@@ -606,6 +614,71 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
       // chain wherever it lands.
       expect(updatedRecord?.chain.status).toBe('delivered');
       expect(updatedRecord?.status).toBe('delivered');
+    });
+
+    it('ignores a redelivered `sent` arriving after `delivered` rather than rewinding the status', async () => {
+      const store = kvStatusStore(kv);
+
+      const messageId = 'msg_01J9DISPATCH000000000014';
+      const providerId = 'wamid.HBgL_01J9TEST_OUT_OF_ORDER';
+
+      await store.create({
+        id: messageId,
+        template: 'securityAlert',
+        kind: 'notification',
+        policy: { fallback: ['whatsapp'], always: [] },
+        chain: {
+          status: 'sent',
+          attempts: [
+            {
+              channel: 'whatsapp',
+              provider: 'meta-wa',
+              providerId,
+              status: 'sent',
+              at: '2026-09-20T12:00:00.000Z',
+            },
+          ],
+        },
+        always: [],
+        status: 'sent',
+        createdAt: '2026-09-20T12:00:00.000Z',
+        updatedAt: '2026-09-20T12:00:00.000Z',
+      });
+      await store.indexProviderId(providerId, {
+        id: messageId,
+        channel: 'whatsapp',
+        provider: 'meta-wa',
+      });
+
+      let nextEvent: StatusEvent = {
+        providerId,
+        status: 'delivered',
+        at: '2026-09-20T12:00:30.000Z',
+      };
+      const provider: Provider = {
+        name: 'meta-wa',
+        channel: 'whatsapp',
+        send: () => Promise.resolve({ ok: true }),
+        webhook: {
+          parse: (): Promise<StatusEvent[]> => Promise.resolve([nextEvent]),
+        },
+      };
+
+      const handleWebhook = createWebhookHandler({ providers: { whatsapp: provider }, kv });
+
+      await handleWebhook('meta-wa', statusPost());
+      const afterDelivered = await store.get(messageId);
+      expect(afterDelivered?.status).toBe('delivered');
+
+      // The vendor redelivers the earlier `sent` callback, with the timestamp it always had.
+      nextEvent = { providerId, status: 'sent', at: '2026-09-20T12:00:00.000Z' };
+      await handleWebhook('meta-wa', statusPost());
+
+      const updatedRecord = await store.get(messageId);
+      expect(updatedRecord?.chain.attempts[0].status).toBe('delivered');
+      expect(updatedRecord?.chain.status).toBe('delivered');
+      expect(updatedRecord?.status).toBe('delivered');
+      expect(updatedRecord?.updatedAt).toBe('2026-09-20T12:00:30.000Z');
     });
   });
 

@@ -144,6 +144,45 @@ function resolveStatusStore(options: WebhookDispatchOptions): StatusStore | null
 }
 
 /**
+ * How far along its lifecycle a delivery status is: an attempt goes out `sent`, then either
+ * climbs to `delivered` and `read` or ends `failed`.
+ *
+ * This is deliberately NOT `status.ts`'s `failed < sent < delivered < read`. That ordering ranks
+ * statuses by severity, to take the worst of the always attempts; this one ranks them by the
+ * order they actually arrive in, so `failed` — a terminal outcome that by definition follows
+ * `sent` — counts as progress rather than as a rewind.
+ */
+function lifecycleRank(status: StatusEvent['status']): number {
+  switch (status) {
+    case 'sent': {
+      return 0;
+    }
+    case 'delivered': {
+      return 1;
+    }
+    case 'read': {
+      return 2;
+    }
+    case 'failed': {
+      return 3;
+    }
+  }
+}
+
+/**
+ * Whether an incoming status event should overwrite the attempt's recorded status.
+ *
+ * Vendors redeliver and reorder callbacks, so an event is not automatically the latest word about
+ * an attempt. One is applied when it moves the attempt forward through the lifecycle, or when it
+ * is genuinely newer than what is recorded. A `sent` redelivered after a `delivered` satisfies
+ * neither — it would otherwise rewind the attempt, the chain and the overall status to `sent`
+ * permanently, since nothing later would come along to correct it.
+ */
+function isStatusProgression(att: Attempt, event: StatusEvent): boolean {
+  return lifecycleRank(event.status) > lifecycleRank(att.status) || event.at > att.at;
+}
+
+/**
  * Updates a single attempt if it matches the event and provider reference.
  */
 function updateAttempt(att: Attempt, event: StatusEvent, ref: ProviderRef): Attempt {
@@ -151,7 +190,7 @@ function updateAttempt(att: Attempt, event: StatusEvent, ref: ProviderRef): Atte
     att.providerId === event.providerId ||
     (att.channel === ref.channel && att.provider === ref.provider);
 
-  if (!hasMatched) {
+  if (!hasMatched || !isStatusProgression(att, event)) {
     return att;
   }
 
@@ -188,6 +227,10 @@ function applyStatusUpdate(
 
   const chainAttempts = record.chain.attempts.map((att) => updateAttempt(att, event, ref));
   const alwaysAttempts = record.always.map((att) => updateAttempt(att, event, ref));
+  // `updateAttempt` returns the attempt itself when it leaves it alone, so identity is the test.
+  const hasChanged =
+    chainAttempts.some((att, index) => att !== record.chain.attempts.at(index)) ||
+    alwaysAttempts.some((att, index) => att !== record.always.at(index));
 
   const newChainStatus =
     chainAttempts.length > 0
@@ -208,7 +251,9 @@ function applyStatusUpdate(
     },
     always: alwaysAttempts,
     status: newOverallStatus,
-    updatedAt: event.at,
+    // A dropped event (a redelivery, or one that arrived out of order) changed nothing, so it
+    // must not move `updatedAt` either.
+    updatedAt: hasChanged ? event.at : record.updatedAt,
   };
 
   return { updatedRecord, isChain };
