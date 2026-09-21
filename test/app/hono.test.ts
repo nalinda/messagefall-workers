@@ -28,8 +28,42 @@ import type { Attempt, MessageRecord } from '../../src/core/status.js';
 import type { MessagingEnv } from '../../src/env.js';
 import type { Channel, Provider, RenderedEmail, RenderedSms, RenderedWhatsApp, SendResult } from '../../src/providers/types.js';
 import { defineTemplates } from '../../src/templates.js';
+import { waitFor } from '../helpers/messaging.js';
 import { createMiniflareKV } from '../helpers/status.js';
 import { createMockExecutionContext } from '../helpers/webhook.js';
+
+/**
+ * Reads GET /status/:id once.
+ */
+async function readStatus(
+  app: Hono<{ Bindings: MessagingEnv }>,
+  env: MessagingEnv,
+  id: string
+): Promise<{ status: number; record: MessageRecord }> {
+  const response = await app.fetch(new Request(`https://worker.local/status/${id}`), env);
+  return { status: response.status, record: (await response.json()) as MessageRecord };
+}
+
+/**
+ * Polls GET /status/:id until `hasSettled` holds. An OTP send defers delivery to
+ * `ctx.waitUntil`, so the record is `pending` when POST /send resolves and only settles once
+ * the background work has run — the route itself never waits for it.
+ */
+async function pollStatus(
+  app: Hono<{ Bindings: MessagingEnv }>,
+  env: MessagingEnv,
+  id: string,
+  hasSettled: (record: MessageRecord) => boolean
+): Promise<MessageRecord> {
+  let latest: MessageRecord | undefined;
+  await waitFor(async () => {
+    const { status, record } = await readStatus(app, env, id);
+    if (status !== 200) return false;
+    latest = record;
+    return hasSettled(record);
+  });
+  return latest as MessageRecord;
+}
 
 function createRecordingProvider<R>(
   name: string,
@@ -160,15 +194,9 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
 
     const messageId = sendBody.id;
 
-    // 2. GET /status/:id
-    const statusResponse = await app.fetch(
-      new Request(`https://worker.local/status/${messageId}`),
-      env,
-      ctx as unknown as ExecutionContext
-    );
-
-    expect(statusResponse.status).toBe(200);
-    const statusRecord = (await statusResponse.json()) as MessageRecord;
+    // 2. GET /status/:id — loginCode is an OTP template, so delivery runs under ctx.waitUntil
+    // and the record settles after the response; poll rather than expecting the route to wait.
+    const statusRecord = await pollStatus(app, env, messageId, (r) => r.status === 'sent');
     expect(statusRecord.id).toBe(messageId);
     expect(statusRecord.template).toBe('loginCode');
     expect(statusRecord.status).toBe('sent');
@@ -252,7 +280,20 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
   });
 
   it('POST /send passes c.executionCtx to the send execution context', async () => {
-    const smsProvider = createRecordingProvider<RenderedSms>('http-sms', 'sms');
+    // An OTP send with an ExecutionContext defers delivery to ctx.waitUntil and resolves as soon
+    // as the record exists. The provider is held open, so the only way POST /send can answer
+    // before it releases is that c.executionCtx reached the pipeline and took the work.
+    const gate = Promise.withResolvers<void>();
+    // Safety net: were the context ignored, the request would await the gate forever; releasing
+    // it lets the run finish and fail on the assertions below rather than on a test timeout.
+    const safetyNet = setTimeout(() => {
+      gate.resolve();
+    }, 2000);
+
+    const smsProvider = createRecordingProvider<RenderedSms>('http-sms', 'sms', async () => {
+      await gate.promise;
+      return { ok: true, providerId: 'gated_sms_1' };
+    });
     const app = createMessagingApp({
       templates: testTemplates,
       providers: () => ({ sms: smsProvider }),
@@ -261,24 +302,48 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
     const env: MessagingEnv = { MESSAGES_KV: kv };
     const mockCtx = createMockExecutionContext();
 
-    const response = await app.fetch(
-      new Request('https://worker.local/send', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          template: 'smsOnly',
-          to: '+94771234567',
-          locale: 'en',
-          input: { message: 'Hello' },
+    try {
+      const response = await app.fetch(
+        new Request('https://worker.local/send', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            template: 'loginCode',
+            to: '+94771234567',
+            locale: 'en',
+            input: { code: '482913' },
+            delivery: { fallback: ['sms'] },
+          }),
         }),
-      }),
-      env,
-      mockCtx as unknown as ExecutionContext
-    );
+        env,
+        mockCtx as unknown as ExecutionContext
+      );
 
-    expect(response.status).toBe(200);
-    // Execution context was passed through and received waitUntil promises
-    expect(mockCtx.promises.length).toBeGreaterThanOrEqual(0);
+      expect(response.status).toBe(200);
+      const { id } = (await response.json()) as { id: string };
+
+      // The context was handed the still-running delivery...
+      expect(mockCtx.promises).toHaveLength(1);
+      // ...so the record is still pending while the provider is held open, and GET /status
+      // reports exactly that rather than waiting for background work of its own accord.
+      const held = await readStatus(app, env, id);
+      expect(held.status).toBe(200);
+      expect(held.record.status).toBe('pending');
+      expect(held.record.chain.attempts).toHaveLength(0);
+
+      // Releasing the provider and draining the context's work settles the record.
+      gate.resolve();
+      await mockCtx.flush();
+
+      const settled = await readStatus(app, env, id);
+      expect(settled.record.status).toBe('sent');
+      expect(settled.record.chain.attempts).toHaveLength(1);
+      expect(settled.record.chain.attempts[0]?.provider).toBe('http-sms');
+      expect(smsProvider.calls).toHaveLength(1);
+    } finally {
+      clearTimeout(safetyNet);
+      gate.resolve();
+    }
   });
 
   it('POST /send returns 400 on input validation, missing fields, or invalid phone number', async () => {

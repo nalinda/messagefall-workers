@@ -147,14 +147,6 @@ export function createMessagingApp<E extends MessagingEnv = MessagingEnv>(
   // GET <basePath>/status/:id
   app.get(`${prefix}/status/:id`, async (c) => {
     const id = c.req.param('id');
-    const ctx = getExecutionContext(c);
-    if (
-      ctx &&
-      'promises' in ctx &&
-      Array.isArray((ctx as unknown as { promises: Promise<unknown>[] }).promises)
-    ) {
-      await Promise.all((ctx as unknown as { promises: Promise<unknown>[] }).promises);
-    }
     const messaging = createMessaging(c.env, options);
     const record = await messaging.status(id);
     if (!record) {
