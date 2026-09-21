@@ -593,7 +593,7 @@ async function indexAttempt(deps: SendDeps, id: string, attempt: Attempt): Promi
   try {
     await deps.store.indexProviderId(attempt.providerId, { id, channel, provider });
   } catch {
-    defaultLogger.warn('send.attempt', { id, channel, provider });
+    defaultLogger.warn('send.index-failed', { id, channel, provider });
   }
 }
 
