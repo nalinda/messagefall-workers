@@ -4,14 +4,12 @@
  * This is the single place the provider-slot rules live. `createMessaging` calls
  * {@link validateProviderSet} to fail fast on a bad set; `validateEnv` calls
  * {@link providerSetProblems} to fold the same problems into its one startup report; the
- * asynchronous fallback path calls {@link toProviderSet} to turn whatever shape a caller
- * configured providers in back into the slots the send pipeline reads.
+ * asynchronous fallback path calls {@link toProviderSet} for the set it was handed.
  *
  * @module
  */
 
-import { type Channel, CHANNELS, type Provider } from '../providers/types.js';
-import type { AnyRendered } from '../templates.js';
+import { CHANNELS, type Provider } from '../providers/types.js';
 import type { ProviderSet } from './send.js';
 
 /**
@@ -104,74 +102,15 @@ export function validateProviderSet(set: object): void {
 }
 
 /**
- * Every shape a caller may configure providers in: the per-channel {@link ProviderSet} itself,
- * a factory building one from the env, or a loose collection the slots have to be recovered
- * from by each provider's own `channel`.
- */
-export type ProviderSource<Env = unknown> =
-  | Record<string, Provider>
-  | Provider[]
-  | Map<string, Provider>
-  | ProviderSet
-  | ((env: Env) => ProviderSet);
-
-function findInMap(
-  providers: Map<string, Provider>,
-  channel: Channel
-): Provider<AnyRendered> | undefined {
-  for (const p of providers.values()) {
-    if (p.channel === channel) return p;
-  }
-  return undefined;
-}
-
-function findInObject(
-  providers: Record<string, unknown>,
-  channel: Channel
-): Provider<AnyRendered> | undefined {
-  for (const p of Object.values(providers)) {
-    if (p && typeof p === 'object' && 'channel' in p && p.channel === channel) {
-      return p as Provider<AnyRendered>;
-    }
-  }
-  return undefined;
-}
-
-function findProviderForChannel<Env>(
-  providers: ProviderSource<Env> | undefined,
-  env: Env,
-  channel: Channel
-): Provider<AnyRendered> | undefined {
-  if (!providers) return undefined;
-  const resolved = typeof providers === 'function' ? providers(env) : providers;
-  if (resolved instanceof Map) {
-    return findInMap(resolved, channel);
-  }
-  if (Array.isArray(resolved)) {
-    return resolved.find((p) => p.channel === channel);
-  }
-  if (typeof resolved === 'object') {
-    return findInObject(resolved as Record<string, unknown>, channel);
-  }
-  return undefined;
-}
-
-/**
- * Normalises whatever shape the caller configured providers in into the per-channel
- * {@link ProviderSet} the send pipeline expects. A slot is filled from the first provider
- * declaring that channel; channels with no provider are left absent, which the pipeline records
- * as a failed attempt rather than dispatching nowhere.
+ * The provider set for an advance, with "no providers configured" flattened to an empty set.
  *
- * @param providers - The configured providers, in any supported shape.
- * @param env - Worker bindings, for a provider factory.
+ * There is only one shape to accept: `MessagingOptions.providers` is `(env) => ProviderSet`, and
+ * every internal caller hands on the already-resolved set. A channel with no provider is simply
+ * an absent slot, which the pipeline records as a failed attempt rather than dispatching nowhere.
+ *
+ * @param providers - The resolved provider set, if there is one.
  * @returns The provider set, keyed by channel slot.
  */
-export function toProviderSet<Env>(
-  providers: ProviderSource<Env> | undefined,
-  env: Env
-): ProviderSet {
-  const slots = CHANNELS.map(
-    (channel) => [channel, findProviderForChannel(providers, env, channel)] as const
-  ).filter(([, provider]) => provider !== undefined);
-  return Object.fromEntries(slots);
+export function toProviderSet(providers: ProviderSet | undefined): ProviderSet {
+  return providers ?? {};
 }

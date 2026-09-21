@@ -7,7 +7,7 @@
 import type { DurableObjectNamespace, KVNamespace } from '@cloudflare/workers-types';
 
 import type { MessagingEnv } from '../env.js';
-import type { Provider, StatusEvent } from '../providers/types.js';
+import type { StatusEvent } from '../providers/types.js';
 import type { InputOf, TemplateDef, Templates } from '../templates.js';
 import { advanceChain } from './fallback.js';
 import { DEFAULT_POLICY, type DeliveryOverride, type DeliveryPolicy } from './policy.js';
@@ -306,7 +306,7 @@ export function createMessaging<T extends Templates<any>>(
   const providers = memoProviders(env, options.providers);
   const templates = new Map<string, TemplateDef<unknown>>(Object.entries(options.templates));
   const webhookOptions: WebhookDispatchOptions = {
-    providers: providers as Record<string, Provider>,
+    providers,
     store,
     templates: options.templates,
     env,

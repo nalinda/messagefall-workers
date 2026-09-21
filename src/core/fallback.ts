@@ -23,7 +23,7 @@ import { type TemplateDef, validateInput } from '../templates.js';
 import type { StandardSchemaV1 } from '../types.js';
 import { createLogger } from './logger.js';
 import type { MessagingOptions } from './messaging.js';
-import { type ProviderSource, toProviderSet } from './provider-set.js';
+import { toProviderSet } from './provider-set.js';
 import {
   asRenderInput,
   DEFAULT_LOCALE,
@@ -73,8 +73,8 @@ export interface AdvanceChainArgs {
    * Messaging options containing templates, providers, onStatus, etc.
    */
   options: Omit<Partial<MessagingOptions>, 'templates' | 'providers' | 'onStatus' | 'timer'> & {
-    templates?: MessagingOptions['templates'] | Map<string, TemplateDef<unknown>>;
-    providers?: ProviderSource<MessagingEnv>;
+    templates?: MessagingOptions['templates'];
+    providers?: ProviderSet;
     onStatus?: (event: StatusCallbackEvent) => void | Promise<void>;
     /**
      * Re-arm timeout override. When absent the record's kind selects it from
@@ -172,15 +172,13 @@ function resolveTemplate(
   templates: AdvanceChainArgs['options']['templates'],
   templateName: string
 ): TemplateDef<unknown> | undefined {
-  if (templates instanceof Map) {
-    return templates.get(templateName);
+  if (!templates) {
+    return undefined;
   }
-  if (templates && typeof templates === 'object') {
-    // The catalogue is keyed by name with each entry's own input type; the walk only ever
-    // renders through `validateInput`, which takes the erased `TemplateDef<unknown>`.
-    return Reflect.get(templates, templateName) as TemplateDef<unknown> | undefined;
-  }
-  return undefined;
+  // A `Templates<T>` catalogue is the one shape the public API produces: an object keyed by name,
+  // each entry carrying its own input type. The walk only ever renders through `validateInput`,
+  // which takes the erased `TemplateDef<unknown>`.
+  return Reflect.get(templates, templateName) as TemplateDef<unknown> | undefined;
 }
 
 function shouldSkipAdvancement(
@@ -386,7 +384,7 @@ export async function advanceChain(args: AdvanceChainArgs): Promise<void> {
   }
 
   const payload = await resolveInputPayload(args, kv);
-  const providers = toProviderSet(args.options.providers, args.env);
+  const providers = toProviderSet(args.options.providers);
   if (!isRenderable(payload)) {
     await finalizeMissingInput(args, initialRecord, providers, nextChannels[0], kv);
     return;

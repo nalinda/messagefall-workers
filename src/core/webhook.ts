@@ -11,6 +11,7 @@ import type { Channel, Provider, StatusEvent } from '../providers/types.js';
 import { createLogger } from './logger.js';
 import { extractTemplateSensitiveStrings, scrubError } from './redact.js';
 import { asRenderInput, renderInputKey } from './render-input.js';
+import type { ProviderSet } from './send.js';
 import {
   type Attempt,
   chainStatus,
@@ -59,11 +60,11 @@ export interface StatusApplied {
  * Webhook dispatch configuration options.
  */
 export interface WebhookDispatchOptions {
-  providers?:
-    | Record<string, Provider>
-    | Provider[]
-    | Map<string, Provider>
-    | ((env: unknown) => Record<string, Provider>);
+  /**
+   * The providers, keyed by channel slot — the resolved `ProviderSet` `createMessaging` builds
+   * from `MessagingOptions.providers`, which is the one shape the public API produces.
+   */
+  providers?: ProviderSet;
   kv?: KVNamespace;
   store?: StatusStore;
   templates?: unknown;
@@ -104,26 +105,17 @@ function isDevBypassAllowed(request: Request, env?: Record<string, unknown>): bo
 
 /**
  * Resolves a provider by its name from the configured providers.
+ *
+ * The set is keyed by channel slot, but a webhook arrives for a provider *name*, so the lookup
+ * is over the values rather than the keys.
  */
 function findProvider(
   providers: WebhookDispatchOptions['providers'],
-  providerName: string,
-  env?: Record<string, unknown>
+  providerName: string
 ): Provider | null {
   if (!providers) return null;
-  const resolved = typeof providers === 'function' ? providers(env) : providers;
-  if (resolved instanceof Map) {
-    for (const provider of resolved.values()) {
-      if (provider.name === providerName) {
-        return provider;
-      }
-    }
-    return null;
-  }
-  if (Array.isArray(resolved)) {
-    return resolved.find((p) => p.name === providerName) ?? null;
-  }
-  return Object.values(resolved).find((p) => p.name === providerName) ?? null;
+  const slots: (Provider | undefined)[] = [providers.whatsapp, providers.sms, providers.email];
+  return slots.find((p) => p?.name === providerName) ?? null;
 }
 
 /**
@@ -416,7 +408,7 @@ export function createWebhookHandler(options: WebhookDispatchOptions): WebhookHa
     request: Request,
     ctx?: ExecutionContext
   ): Promise<Response> => {
-    const provider = findProvider(options.providers, providerName, options.env);
+    const provider = findProvider(options.providers, providerName);
     if (!provider || !provider.webhook) {
       return new Response('Not Found', {
         status: 404,

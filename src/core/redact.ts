@@ -176,21 +176,21 @@ export function renderedContent(payload: unknown): unknown[] {
   return content;
 }
 
+/**
+ * One entry of a `Templates<T>` catalogue: the one shape the public API produces, an object
+ * keyed by template name.
+ */
 function getTemplateDefinition(
   templates: unknown,
   templateName: string
 ): Record<string, unknown> | undefined {
-  if (templates instanceof Map) {
-    return templates.get(templateName) as Record<string, unknown> | undefined;
+  if (!templates || typeof templates !== 'object') {
+    return undefined;
   }
-  if (templates && typeof templates === 'object') {
-    for (const [key, value] of Object.entries(templates)) {
-      if (key === templateName && value && typeof value === 'object') {
-        return value as Record<string, unknown>;
-      }
-    }
-  }
-  return undefined;
+  const definition = Reflect.get(templates, templateName) as unknown;
+  return definition && typeof definition === 'object'
+    ? (definition as Record<string, unknown>)
+    : undefined;
 }
 
 type RenderFn = (input: unknown) => unknown;

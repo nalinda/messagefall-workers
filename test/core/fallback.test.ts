@@ -166,7 +166,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         options: {
           timer: mockTimer,
           templates: testTemplates,
-          providers: [waProvider, smsProvider],
+          providers: { whatsapp: waProvider, sms: smsProvider },
           onStatus: (event) => {
             onStatusEvents.push(event);
           },
@@ -259,7 +259,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         env: { MESSAGES_KV: kv },
         options: {
           templates: testTemplates,
-          providers: [waProvider, smsProvider],
+          providers: { whatsapp: waProvider, sms: smsProvider },
         },
         store,
       });
@@ -317,7 +317,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         options: {
           timer: mockTimer,
           templates: testTemplates,
-          providers: [waProvider, smsProvider],
+          providers: { whatsapp: waProvider, sms: smsProvider },
           fallbackTimeoutMs: 15_000,
         },
         store,
@@ -386,7 +386,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         options: {
           timer: mockTimer,
           templates: testTemplates,
-          providers: [waProvider, smsProvider],
+          providers: { whatsapp: waProvider, sms: smsProvider },
           onStatus: (event) => {
             statusEvents.push(event);
           },
@@ -454,7 +454,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         options: {
           timer: mockTimer,
           templates: testTemplates,
-          providers: [],
+          providers: {},
         },
         store,
       });
@@ -497,7 +497,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         env: { MESSAGES_KV: kv },
         options: {
           templates: testTemplates,
-          providers: [],
+          providers: {},
         },
         store,
       });
@@ -564,7 +564,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         env: { MESSAGES_KV: kv },
         options: {
           templates: testTemplates,
-          providers: [waProvider, smsProvider, emailProvider],
+          providers: { whatsapp: waProvider, sms: smsProvider, email: emailProvider },
         },
         store,
       });
@@ -641,7 +641,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         env: { MESSAGES_KV: kv },
         options: {
           templates: testTemplates,
-          providers: [waProvider, smsProvider, emailProvider],
+          providers: { whatsapp: waProvider, sms: smsProvider, email: emailProvider },
         },
         store,
       });
@@ -704,7 +704,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         env: { MESSAGES_KV: kv },
         options: {
           templates: testTemplates,
-          providers: [waProvider, smsProvider],
+          providers: { whatsapp: waProvider, sms: smsProvider },
         },
         store,
       };
@@ -757,7 +757,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         env: { MESSAGES_KV: kv },
         options: {
           templates: testTemplates,
-          providers: [smsProvider],
+          providers: { sms: smsProvider },
         },
         store,
       });
@@ -802,7 +802,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         env: { MESSAGES_KV: kv },
         options: {
           templates: testTemplates,
-          providers: [smsProvider],
+          providers: { sms: smsProvider },
         },
         store,
       });
@@ -854,7 +854,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         env: { MESSAGES_KV: kv },
         options: {
           templates: testTemplates,
-          providers: [smsProvider],
+          providers: { sms: smsProvider },
         },
         store,
       });
@@ -911,7 +911,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         env: { MESSAGES_KV: kv },
         options: {
           templates: testTemplates,
-          providers: [waProvider, smsProvider],
+          providers: { whatsapp: waProvider, sms: smsProvider },
         },
         store,
       });
@@ -989,7 +989,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         env: { MESSAGES_KV: kv },
         options: {
           templates: testTemplates,
-          providers: [waProvider, smsProvider, emailProvider],
+          providers: { whatsapp: waProvider, sms: smsProvider, email: emailProvider },
         },
         store,
       });
@@ -1065,7 +1065,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         id: messageId,
         reason: 'failed',
         env: { MESSAGES_KV: kv },
-        options: { templates: testTemplates, providers: [waProvider, emailProvider] },
+        options: { templates: testTemplates, providers: { whatsapp: waProvider, email: emailProvider } },
         store,
       });
 
@@ -1127,7 +1127,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         env: { MESSAGES_KV: kv },
         options: {
           templates: testTemplates,
-          providers: [waProvider, smsProvider],
+          providers: { whatsapp: waProvider, sms: smsProvider },
         },
         store,
       });
@@ -1183,7 +1183,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         env: { MESSAGES_KV: kv },
         options: {
           templates: testTemplates,
-          providers: [waProvider, smsProvider],
+          providers: { whatsapp: waProvider, sms: smsProvider },
         },
         store,
         input: {
@@ -1233,7 +1233,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         id: messageId,
         reason: 'failed',
         env: { MESSAGES_KV: kv },
-        options: { templates: testTemplates, providers: [waProvider, smsProvider] },
+        options: { templates: testTemplates, providers: { whatsapp: waProvider, sms: smsProvider } },
         store,
       });
 
@@ -1297,7 +1297,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         env: { MESSAGES_KV: kv },
         options: {
           templates: testTemplates,
-          providers: [smsProvider, waProvider],
+          providers: { sms: smsProvider, whatsapp: waProvider },
         },
         store,
       });
