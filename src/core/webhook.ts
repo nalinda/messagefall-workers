@@ -24,7 +24,7 @@ import {
   type StatusStore,
 } from './status.js';
 
-const defaultLogger = createLogger();
+const logger = createLogger();
 
 /**
  * Event emitted when a delivery status update is applied to an attempt.
@@ -369,7 +369,7 @@ async function handleSingleEvent(
   // `applyStatusUpdate` dropped changed nothing, and logging it as applied would tell an
   // operator a status changed when it did not.
   if (applied.hasChanged) {
-    defaultLogger.info('webhook.applied', {
+    logger.info('webhook.applied', {
       id: ref.id,
       channel: ref.channel,
       provider: ref.provider,
@@ -455,7 +455,7 @@ export async function applyStatusEvents(
         unknownCount++;
       }
     } catch (error) {
-      defaultLogger.error('webhook.event-failed', {
+      logger.error('webhook.event-failed', {
         provider: providerName,
         providerId: event.providerId,
         errorCode: error instanceof Error ? error.name : 'UnknownError',
@@ -464,7 +464,7 @@ export async function applyStatusEvents(
   }
 
   if (unknownCount > 0) {
-    defaultLogger.warn('webhook.received', {
+    logger.warn('webhook.received', {
       count: unknownCount,
       provider: providerName,
     });

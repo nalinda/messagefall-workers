@@ -51,7 +51,7 @@ import { chainTimeoutMs, type FallbackTimerClient } from './timer.js';
 import { ulid } from './ulid.js';
 import { errorMessage } from './values.js';
 
-const defaultLogger = createLogger();
+const logger = createLogger();
 
 /**
  * `Attempt.provider` value recorded when a resolved channel has no provider configured.
@@ -293,7 +293,7 @@ async function attemptChannel(
 
   let result = await callProvider(provider, payload);
   if (!result.ok && result.retryable) {
-    defaultLogger.warn('send.retry', { id, channel, provider: provider.name });
+    logger.warn('send.retry', { id, channel, provider: provider.name });
     result = await callProvider(provider, payload);
   }
 
@@ -581,7 +581,7 @@ async function deliverGuarded(
   try {
     await deliver(deps, req, id, policy);
   } catch {
-    defaultLogger.error('send.persist-failed', { id });
+    logger.error('send.persist-failed', { id });
   }
 }
 
@@ -602,7 +602,7 @@ async function indexAttempt(deps: SendDeps, id: string, attempt: Attempt): Promi
   try {
     await deps.store.indexProviderId(attempt.providerId, { id, channel, provider });
   } catch {
-    defaultLogger.warn('send.index-failed', { id, channel, provider });
+    logger.warn('send.index-failed', { id, channel, provider });
   }
 }
 
@@ -621,7 +621,7 @@ export async function notifyStatus(
   try {
     await onStatus?.(event);
   } catch {
-    defaultLogger.warn('send.observer-failed', {
+    logger.warn('send.observer-failed', {
       id: event.id,
       channel: event.channel,
       provider: event.provider,
@@ -733,15 +733,15 @@ async function stashChainInput(
         expirationTtl: ttlSeconds,
       });
     } catch {
-      defaultLogger.warn('send.stash-failed', { id, kind: req.template.kind });
+      logger.warn('send.stash-failed', { id, kind: req.template.kind });
     }
   }
   if (isTimedChain(policy.fallback) && typeof deps.timer?.arm === 'function') {
     try {
       await deps.timer.arm(id, timeoutMs, inputPayload);
-      defaultLogger.info('timer.armed', { id, kind: req.template.kind });
+      logger.info('timer.armed', { id, kind: req.template.kind });
     } catch {
-      defaultLogger.warn('timer.arm-failed', { id, kind: req.template.kind });
+      logger.warn('timer.arm-failed', { id, kind: req.template.kind });
     }
   }
 }
@@ -772,10 +772,10 @@ export async function runSend(
   const { policy, hasSkippedEmail } = resolveEffectivePolicy(deps.defaults, req);
   const id = newMessageId();
 
-  defaultLogger.info('send.start', { id, template: req.templateName, kind: req.template.kind });
+  logger.info('send.start', { id, template: req.templateName, kind: req.template.kind });
 
   if (hasSkippedEmail) {
-    defaultLogger.info('send.channel-skipped', {
+    logger.info('send.channel-skipped', {
       id,
       channel: 'email',
       template: req.templateName,

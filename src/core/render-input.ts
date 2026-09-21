@@ -19,7 +19,7 @@ import { createLogger } from './logger.js';
 import type { StatusStore } from './status.js';
 import type { FallbackTimerClient } from './timer.js';
 
-const defaultLogger = createLogger();
+const logger = createLogger();
 
 /**
  * Everything the fallback path needs to re-render a message on the next channel.
@@ -163,7 +163,7 @@ export async function releaseChain(
   if (isTimedChain(fallback) && typeof timer?.cancel === 'function') {
     try {
       await timer.cancel(id);
-      defaultLogger.info('timer.cancelled', { id });
+      logger.info('timer.cancelled', { id });
     } catch {
       // Best-effort cancellation
     }
