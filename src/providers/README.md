@@ -117,7 +117,9 @@ the `ProviderSet` a deployment builds from its env:
 - `test/providers/contract.test.ts` asserts every built-in provider satisfies the `Provider`
   contract; a new provider should be added there.
 - Use a mock environment for local testing.
-- No message bodies in logs (enforced by the logger and the linter).
+- No message bodies in logs. Enforced two ways: `createLogger` (`src/core/logger.ts`) is the only
+  writer, and it redacts; and a lint rule bans raw `console.*` anywhere under `src/` except the
+  logger itself and the dev console provider — so a provider cannot route round the redaction.
 
 ## Provider Status Mapping
 

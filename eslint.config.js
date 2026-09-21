@@ -48,6 +48,23 @@ export default [
     },
   },
   {
+    // "No message bodies in logs" (src/providers/README.md) is only a real rule if something
+    // enforces it. The shared config's `no-console` still permits `log`/`info`/`warn`/`error`
+    // for the worker runtime, so a bare `console.log(renderedText)` in a provider lints clean.
+    // Ban raw console access under src/ outright: every line that reaches stdout then goes
+    // through `createLogger`, which redacts. The two exceptions are the writers themselves —
+    // the logger, and the console provider whose whole purpose is printing to a dev terminal
+    // (and which does its own OTP-body redaction).
+    files: ['src/**/*.ts'],
+    ignores: ['src/core/logger.ts', 'src/providers/console/index.ts'],
+    rules: {
+      // The empty options object is load-bearing: a severity-only override (`'error'`, or even
+      // `['error']`) keeps the inherited options in flat config, and the inherited `allow` list
+      // is precisely what has to go.
+      'no-console': ['error', {}],
+    },
+  },
+  {
     // Test files legitimately run long and access test files / spawn subcommands.
     files: ['test/**/*.ts'],
     rules: {
