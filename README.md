@@ -253,15 +253,15 @@ The policy resolves in this order, most specific wins:
 Each level may set `fallback`, `always`, or both; unset parts inherit from the next level. Two shorthands exist:
 
 - `delivery: 'all'` sends every channel the template defines in parallel, with no chain.
-- `delivery: { fallback: ['sms'] , always: [] }` sends SMS only, ignoring the default's email.
+- `delivery: { fallback: ['sms'], always: [] }` sends SMS only, ignoring the default's email.
 
 ```ts
-// `messages` here is the client from `createMessagingClient` (see "Calling it from another
+// `messages` here is the client from `createMessagingClient` (see "Sending from another
 // Worker" below); the core sender created by `createMessaging` takes one object instead.
 const messages = createMessagingClient<typeof templates>({ binding: env.MESSAGES });
 
 // default is WhatsApp -> SMS, always email
-await messages.send('accountLocked', { to, locale, input, delivery: 'all' }); // all three at once
+await messages.send('matchFound', { to, locale, input, delivery: 'all' }); // all three at once
 await messages.send('loginCode', { to, locale, input, delivery: { always: [] } }); // chain only, no email
 ```
 

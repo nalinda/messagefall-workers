@@ -107,8 +107,10 @@ const app = createMessagingApp<Env>({
 //
 // The snippet calls `messages.send(...)` in the CLIENT's two-argument form. Pinned here with the
 // binding it assumes, so the form and the two `delivery` shorthands cannot drift the way the
-// quick start once did. (`accountLocked` in the README stands in for any notification template;
-// `matchFound` above is the one this fixture has.)
+// quick start once did. The README's second call names `loginCode`, which this fixture cannot
+// copy verbatim: the snippet reuses one `input` across both calls, and `loginCode`'s schema is
+// not `matchFound`'s. `matchFound` stands in for it, so both calls type-check against the one
+// `input` the snippet has.
 
 async function overridingThePolicy(
   binding: Fetcher,
