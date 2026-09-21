@@ -208,7 +208,6 @@ describe('Entry points export documented functions', () => {
       'advanceChain',
       'armTimer',
       'cancelTimer',
-      'consoleProvider',
       'createMessaging',
       'definedChannels',
       'defineTemplates',

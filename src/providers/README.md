@@ -105,8 +105,10 @@ the `ProviderSet` a deployment builds from its env:
 3. Reuse `_shared/http.ts` (`isRetryableStatus`, `formatHttpError`), `_shared/mime.ts` and
    `_shared/meta-statuses.ts` (`parseStatuses`, for a Meta-shaped status payload) rather than
    restating them.
-4. Re-export it from `src/providers/index.ts` if it should be part of the default barrel. The
-   `./providers/*` subpath export picks the directory up automatically.
+4. Nothing to wire up: the `./providers/*` subpath export picks the directory up automatically.
+   Do NOT re-export it from `src/providers/index.ts` — that barrel is reachable from the root
+   entry and carries types only, so a provider added to it would land in the bundle of every
+   consumer that imports `createMessaging`.
 5. Add tests (see below) and make sure `bun run lint && bun run ts-check && bun test && bun run build`
    is green.
 6. Submit a pull request.
