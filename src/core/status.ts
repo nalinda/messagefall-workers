@@ -202,6 +202,18 @@ export class MessageRecordNotFoundError extends Error {
 export const DEFAULT_STATUS_TTL = 604_800;
 
 /**
+ * The KV key one provider's id maps under. The provider name is the prefix, so the id itself may
+ * contain anything (including `:`) without ambiguity — the key is never parsed back apart.
+ *
+ * @param provider - Provider name owning the id space.
+ * @param providerId - The provider's own message id.
+ * @returns The KV key holding that id's {@link ProviderRef}.
+ */
+function providerIdKey(provider: string, providerId: string): string {
+  return `pid:${provider}:${providerId}`;
+}
+
+/**
  * Whether a chain status is terminal: nothing further can happen to the chain, so the fallback
  * timer is cancelled (or, when it fires anyway, only cleans up). `sent` and `pending` are not.
  *
@@ -384,14 +396,6 @@ export function deriveOverallStatus(
  * @param opts - Status store options (e.g. custom TTL).
  * @returns An implementation of {@link StatusStore}.
  */
-/**
- * The KV key one provider's id maps under. The provider name is the prefix, so the id itself may
- * contain anything (including `:`) without ambiguity — the key is never parsed back apart.
- */
-function providerIdKey(provider: string, providerId: string): string {
-  return `pid:${provider}:${providerId}`;
-}
-
 export function kvStatusStore(kv: KVNamespace, opts?: StatusStoreOptions): StatusStore {
   const ttl = opts?.ttlSeconds ?? DEFAULT_STATUS_TTL;
 
