@@ -3,6 +3,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import { z } from 'zod';
 
 import {
   createMessaging,
@@ -138,7 +139,12 @@ describe('createMessaging simulated statuses', () => {
   // has to wire that hook to the very same handling a real webhook status gets, or the
   // README's local-development workflow silently drops every simulated status.
   const twoChannelTemplates = defineTemplates({
-    ping: { kind: 'notification', whatsapp: { text: () => 'ping' }, sms: () => 'ping' },
+    ping: {
+      input: z.unknown(),
+      kind: 'notification',
+      whatsapp: { text: () => 'ping' },
+      sms: () => 'ping',
+    },
   });
 
   it('applies a simulated delivered status to the record and reports it through onStatus', async () => {
@@ -211,6 +217,7 @@ describe('defineTemplates', () => {
   it('returns the defined template catalog', () => {
     const templates = defineTemplates({
       otp: {
+        input: z.object({ code: z.string() }),
         kind: 'otp',
         whatsapp: {
           template: 'otp_template',
@@ -220,6 +227,7 @@ describe('defineTemplates', () => {
         sms: ({ code }: { code: string }) => `Your code is ${code}`,
       },
       notification: {
+        input: z.unknown(),
         kind: 'notification',
         sms: () => 'Notification message',
       },

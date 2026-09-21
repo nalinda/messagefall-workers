@@ -7,6 +7,7 @@
  */
 
 import { describe, expect, it, spyOn } from 'bun:test';
+import { z } from 'zod';
 
 import { createMessaging, defineTemplates } from '../../src/index.js';
 import type {
@@ -151,6 +152,7 @@ describe('Provider contract type-level specification', () => {
     const messaging = createMessaging(newEnv(), {
       templates: defineTemplates({
         hello: {
+          input: z.unknown(),
           kind: 'notification',
           whatsapp: { text: () => 'hi' },
           email: { subject: () => 'hi', text: () => 'hi' },

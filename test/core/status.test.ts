@@ -14,6 +14,7 @@
 
 import type { KVNamespace, KVNamespacePutOptions } from '@cloudflare/workers-types';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { z } from 'zod';
 
 import type { DeliveryPolicy } from '../../src/core/policy.js';
 import {
@@ -424,8 +425,9 @@ describe('Issue #6: Delivery-status store in KV', () => {
       // Define a template and render it
       const renderedSms = render(
         {
+          input: z.object({ code: z.string().length(6) }),
           kind: 'otp',
-          sms: ({ code }: { code: string }) => `Your security passcode is ${code}. Do not share.`,
+          sms: ({ code }) => `Your security passcode is ${code}. Do not share.`,
         },
         'sms',
         { code: secretCode },

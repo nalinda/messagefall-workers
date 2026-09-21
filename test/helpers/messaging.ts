@@ -5,6 +5,7 @@
  */
 
 import type { KVNamespace } from '@cloudflare/workers-types';
+import { z } from 'zod';
 
 import type { Channel, OutboundMeta, Provider, SendResult } from '../../src/providers/types.js';
 import { defineTemplates } from '../../src/templates.js';
@@ -36,7 +37,7 @@ export function newEnv(): MessagingEnv {
  * The smallest valid catalogue: one sms-only notification template.
  */
 export const pingTemplates = defineTemplates({
-  ping: { kind: 'notification', sms: () => 'ping' },
+  ping: { input: z.unknown(), kind: 'notification', sms: () => 'ping' },
 });
 
 /**

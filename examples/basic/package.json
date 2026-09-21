@@ -5,5 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev"
+  },
+  "dependencies": {
+    "valibot": "^1.5.0"
   }
 }

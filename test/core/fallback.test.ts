@@ -15,6 +15,7 @@
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { z } from 'zod';
 
 import { advanceChain, type AdvanceChainArgs } from '../../src/core/fallback.js';
 import type { DeliveryPolicy } from '../../src/core/policy.js';
@@ -71,6 +72,7 @@ function createRecordingProvider(
 
 const testTemplates = defineTemplates({
   otpVerification: {
+    input: z.object({ code: z.string().length(6) }),
     kind: 'otp',
     whatsapp: {
       template: 'auth_otp_code',
@@ -84,6 +86,7 @@ const testTemplates = defineTemplates({
     },
   },
   alertNotification: {
+    input: z.object({ text: z.string().min(1) }),
     kind: 'notification',
     whatsapp: {
       text: (input: { text: string }) => `[ALERT] ${input.text}`,
@@ -485,7 +488,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       };
       await store.create(record);
 
-      await kv.put(`in:${messageId}`, JSON.stringify({ input: { code: '1234' } }));
+      await kv.put(`in:${messageId}`, JSON.stringify({ input: { code: '123456' } }));
       expect(await kv.get(`in:${messageId}`)).not.toBeNull();
 
       await advanceChain({

@@ -12,6 +12,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import { z } from 'zod';
 
 import { createMessaging, defineTemplates } from '../../../src/index.js';
 import { metaWhatsApp } from '../../../src/providers/meta-whatsapp/index.js';
@@ -257,6 +258,7 @@ describe('metaWhatsApp provider: end to end from the template catalogue', () => 
 
     const templates = defineTemplates({
       loginCode: {
+        input: z.object({ code: z.string().min(1) }),
         kind: 'otp',
         whatsapp: {
           template: 'auth_code',

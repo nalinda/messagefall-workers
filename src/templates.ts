@@ -49,7 +49,7 @@ export interface EmailTemplateConfig<In> {
  * Template definition for a typed template catalog.
  */
 export interface TemplateDef<In = unknown> {
-  input?: StandardSchemaV1<unknown, In>;
+  input: StandardSchemaV1<unknown, In>;
   kind: 'otp' | 'notification';
   whatsapp?: WhatsAppTemplateConfig<In>;
   sms?: (input: In, locale: Locale) => string;
@@ -83,6 +83,31 @@ export class TemplateValidationError extends Error {
     super(message);
     this.name = 'TemplateValidationError';
     this.issues = issues;
+  }
+}
+
+function isStandardSchema(schema: unknown): schema is StandardSchemaV1<unknown, unknown> {
+  if (!schema || (typeof schema !== 'object' && typeof schema !== 'function')) return false;
+  if (!('~standard' in schema)) return false;
+  const standard: unknown = schema['~standard'];
+  return (
+    !!standard &&
+    typeof standard === 'object' &&
+    typeof (standard as { validate?: unknown }).validate === 'function'
+  );
+}
+
+/**
+ * Assert a template's `input` really is a Standard Schema validator. `input` is required on every
+ * template, so this is what a JavaScript caller (or a cast) hits instead of silently skipping
+ * validation.
+ *
+ * @param schema - The value supplied as a template's `input`.
+ * @throws {TypeError} If it is not a Standard Schema validator.
+ */
+function assertStandardSchema(schema: unknown): void {
+  if (!isStandardSchema(schema)) {
+    throw new TypeError('Template "input" must be a Standard Schema validator');
   }
 }
 
@@ -164,14 +189,18 @@ export function assertNoOtpWhatsAppText(templateName: string, def: TemplateDef<u
 }
 
 /**
- * Validates one template definition: it renders at least one channel, an `otp` template does not
- * use `whatsapp.text`, and any `delivery` override only names channels the template defines.
+ * Validates one template definition: it declares an `input` Standard Schema, it renders at least
+ * one channel, an `otp` template does not use `whatsapp.text`, and any `delivery` override only
+ * names channels the template defines.
  *
  * @param templateName - Template name, for the error messages.
  * @param def - The template definition to validate.
  * @throws {Error} On the first problem found.
  */
 export function validateTemplateDef(templateName: string, def: TemplateDef<unknown>): void {
+  if (!isStandardSchema(def.input)) {
+    throw new Error(`Template "${templateName}" must define an "input" Standard Schema validator`);
+  }
   const channels = definedChannels(def);
   if (channels.length === 0) {
     throw new Error(`Template "${templateName}" must define at least one channel rendering`);
@@ -186,9 +215,10 @@ export function validateTemplateDef(templateName: string, def: TemplateDef<unkno
  * Define and validate a type-safe template catalog at definition time.
  *
  * Validations:
- * 1. Each template must define at least one channel rendering.
- * 2. kind: 'otp' must not use whatsapp.text (Meta requires authentication templates).
- * 3. delivery overrides must only name channels defined by the template.
+ * 1. Each template must define an `input` Standard Schema validator.
+ * 2. Each template must define at least one channel rendering.
+ * 3. kind: 'otp' must not use whatsapp.text (Meta requires authentication templates).
+ * 4. delivery overrides must only name channels defined by the template.
  *
  * @param defs - Record of template definitions.
  * @returns The typed template catalog.
@@ -226,9 +256,7 @@ export function validateInput<In>(def: TemplateDef<In>, input: unknown): In {
 }
 
 function validateSchema<In>(def: TemplateDef<In>, input: unknown): In {
-  if (!def.input || !('~standard' in def.input)) {
-    return input as In;
-  }
+  assertStandardSchema(def.input);
   const result = def.input['~standard'].validate(input);
   if (result instanceof Promise) {
     throw new TypeError('Async validation is not supported in synchronous render()');

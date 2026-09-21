@@ -2,10 +2,11 @@
  * Tests for defineTemplates, template catalog validation, and message rendering (Issue #2).
  *
  * Acceptance criteria:
- * - Runtime tests for the three definition-time validations:
- *   1. Throws naming the template if no channel rendering is defined.
- *   2. Throws naming the template if kind: 'otp' is combined with whatsapp.text.
- *   3. Throws naming the template if delivery names a channel the template does not define.
+ * - Runtime tests for the four definition-time validations:
+ *   1. Throws naming the template if no `input` Standard Schema is defined.
+ *   2. Throws naming the template if no channel rendering is defined.
+ *   3. Throws naming the template if kind: 'otp' is combined with whatsapp.text.
+ *   4. Throws naming the template if delivery names a channel the template does not define.
  * - Locale resolution of language record:
  *   - Exact locale match.
  *   - Fallback to 'default' key.
@@ -35,6 +36,45 @@ interface UserScore {
 }
 
 describe('defineTemplates: Definition-time validation', () => {
+  it('throws naming the template when no input schema is defined', () => {
+    const schemalessCatalog = {
+      loginCode: {
+        kind: 'otp' as const,
+        sms: ({ code }: { code: string }) => `Your code is ${code}`,
+      },
+    };
+
+    expect(() =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      defineTemplates(schemalessCatalog as unknown as Record<string, TemplateDef<any>>),
+    ).toThrow(/loginCode.*input/);
+  });
+
+  it('throws naming the template when input is not a Standard Schema validator', () => {
+    const bogusCatalog = {
+      loginCode: {
+        input: { parse: (value: unknown) => value },
+        kind: 'otp' as const,
+        sms: ({ code }: { code: string }) => `Your code is ${code}`,
+      },
+    };
+
+    expect(() =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      defineTemplates(bogusCatalog as unknown as Record<string, TemplateDef<any>>),
+    ).toThrow(/loginCode.*input/);
+  });
+
+  it('render throws rather than skipping validation when input is not a Standard Schema', () => {
+    const bogusTemplate = {
+      input: { parse: (value: unknown) => value },
+      kind: 'otp' as const,
+      sms: ({ code }: { code: string }) => `Your code is ${code}`,
+    } as unknown as TemplateDef<{ code: string }>;
+
+    expect(() => render(bogusTemplate, 'sms', { code: '123456' }, 'en')).toThrow(TypeError);
+  });
+
   it('throws naming the template when no channel rendering is defined', () => {
     const emptyTemplateCatalog = {
       emptyNotification: {

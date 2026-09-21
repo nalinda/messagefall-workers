@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import { z } from 'zod';
 
 import { createMessaging, defineTemplates } from '../../src/index.js';
 import { gmail, type GmailConfig } from '../../src/providers/gmail/index.js';
@@ -583,6 +584,7 @@ describe('Gmail provider (Issue #20)', () => {
 
     const templates = defineTemplates({
       alert: {
+        input: z.unknown(),
         kind: 'notification',
         email: {
           subject: () => 'System Alert',

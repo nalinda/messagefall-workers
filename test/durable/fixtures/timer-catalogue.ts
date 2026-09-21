@@ -7,14 +7,20 @@
  * @module
  */
 
+import * as v from 'valibot';
+
 import type { StatusEvent } from '../../../src/providers/types.js';
 import { defineTemplates } from '../../../src/templates.js';
+
+const codeInput = v.object({ code: v.pipe(v.string(), v.minLength(1)) });
+const textInput = v.object({ text: v.pipe(v.string(), v.minLength(1)) });
 
 /**
  * Template catalogue for the timer specs: an OTP template (whatsapp → sms) and a notification.
  */
 export const timerTemplates = defineTemplates({
   loginCode: {
+    input: codeInput,
     kind: 'otp',
     whatsapp: {
       template: 'auth_code',
@@ -24,6 +30,7 @@ export const timerTemplates = defineTemplates({
     sms: (input: { code: string }) => `Your code is ${input.code}`,
   },
   reminder: {
+    input: textInput,
     kind: 'notification',
     whatsapp: { text: (input: { text: string }) => `Reminder: ${input.text}` },
     sms: (input: { text: string }) => `Reminder: ${input.text}`,

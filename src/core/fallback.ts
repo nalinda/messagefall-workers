@@ -20,6 +20,7 @@ import type { KVNamespace } from '@cloudflare/workers-types';
 import type { MessagingEnv } from '../env.js';
 import type { Channel } from '../providers/types.js';
 import { type TemplateDef, validateInput } from '../templates.js';
+import type { StandardSchemaV1 } from '../types.js';
 import { createLogger } from './logger.js';
 import type { MessagingOptions } from './messaging.js';
 import { type ProviderSource, toProviderSet } from './provider-set.js';
@@ -309,12 +310,24 @@ async function release(
 }
 
 /**
+ * `input` is required on every template, but a template that renders nothing never validates
+ * anything either, so the stand-in below carries a pass-through schema.
+ */
+const PASS_THROUGH_INPUT: StandardSchemaV1<unknown, unknown> = {
+  '~standard': {
+    version: 1,
+    vendor: 'messagefall-workers',
+    validate: (value: unknown) => ({ value }),
+  },
+};
+
+/**
  * A template with no channel rendering, used when the record names a template the caller's
  * catalogue no longer has: every channel then fails to render and is recorded as a failed
  * attempt rather than dispatched with an empty body.
  */
 function missingTemplate(kind: MessageRecord['kind']): TemplateDef<unknown> {
-  return { kind };
+  return { kind, input: PASS_THROUGH_INPUT };
 }
 
 /**
