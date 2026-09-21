@@ -32,7 +32,12 @@ import {
   resolveDelivery,
 } from './policy.js';
 import { renderedContent, scrubError } from './redact.js';
-import { isTimedChain, releaseChain, type RenderInput, renderInputKey } from './render-input.js';
+import {
+  isTimedChain,
+  type RenderInput,
+  renderInputKey,
+  sealAndReleaseChain,
+} from './render-input.js';
 import {
   type Attempt,
   type ChainProgress,
@@ -503,6 +508,13 @@ export function attemptRecorder(
   };
 }
 
+/**
+ * The synchronous counterpart to the fallback path's own release step: a chain that ran out of
+ * channels inside this send is terminal now, so it is sealed and released through the same
+ * helper the asynchronous paths use. Sealing here is what stops a timer cancel that was lost
+ * (`releaseChain` cancels best-effort) from letting the later alarm fire a second terminal
+ * `onStatus` event for a chain nothing has changed about.
+ */
 async function cleanupExhaustedChain(
   deps: SendDeps,
   id: string,
@@ -522,7 +534,7 @@ async function cleanupExhaustedChain(
   }
   const lastAttempt = chainAttempts.at(-1);
   if (lastAttempt?.status === 'failed' && chainAttempts.length >= policy.fallback.length) {
-    await releaseChain(deps.timer, deps.kv, id, policy.fallback);
+    await sealAndReleaseChain(deps.store, deps.timer, deps.kv, id, policy.fallback);
   }
 }
 

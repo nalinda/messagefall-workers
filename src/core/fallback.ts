@@ -29,8 +29,8 @@ import {
   DEFAULT_LOCALE,
   pickRenderInput,
   readRenderInput,
-  releaseChain,
   type RenderInput,
+  sealAndReleaseChain,
 } from './render-input.js';
 import {
   attemptRecorder,
@@ -312,27 +312,13 @@ async function release(
   record: MessageRecord,
   kv: KVNamespace | undefined
 ): Promise<void> {
-  await seal(args);
-  await releaseChain(
+  await sealAndReleaseChain(
+    args.store,
     resolveTimer(args.env, args.options.timer),
     kv,
     args.id,
     record.policy.fallback
   );
-}
-
-/**
- * Marks the record as sealed. Best effort: the chain's terminal outcome is already recorded and
- * notified by the time this runs, so a KV fault (or a record that has since expired) must not
- * turn a finished advance into a thrown one. The worst case of a lost write is the behaviour
- * that existed before the flag.
- */
-async function seal(args: AdvanceChainArgs): Promise<void> {
-  try {
-    await args.store.update(args.id, (current) => ({ ...current, sealed: true }));
-  } catch {
-    // Best-effort sealing
-  }
 }
 
 /**

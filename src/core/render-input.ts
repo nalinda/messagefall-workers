@@ -16,6 +16,7 @@
 import type { KVNamespace } from '@cloudflare/workers-types';
 
 import { createLogger } from './logger.js';
+import type { StatusStore } from './status.js';
 import type { FallbackTimerClient } from './timer.js';
 
 const defaultLogger = createLogger();
@@ -172,4 +173,39 @@ export async function releaseChain(
   } catch {
     // Best-effort deletion
   }
+}
+
+/**
+ * The whole terminal-state cleanup: mark the record `sealed`, then {@link releaseChain}.
+ *
+ * Every path that ends a chain for good goes through here, so the flag and the teardown cannot
+ * drift apart. They have to travel together because the cancel in `releaseChain` is deliberately
+ * best-effort: a lost cancel means the alarm still fires later, and only `sealed` stops
+ * `shouldSkipAdvancement` letting that fire through to a second terminal `onStatus` event for a
+ * chain nothing has actually changed about.
+ *
+ * Sealing is best effort in its own right. The chain's terminal outcome is recorded and notified
+ * by the time this runs, so a KV fault — or a record that has since expired — must not turn a
+ * finished send or advance into a thrown one. The worst case of a lost write is the behaviour
+ * that existed before the flag.
+ *
+ * @param store - The status store holding the record to seal.
+ * @param timer - The resolved fallback timer, if the deployment has one.
+ * @param kv - The KV namespace holding the render input, if the deployment has one.
+ * @param id - Internal message identifier.
+ * @param fallback - The record's resolved chain, deciding whether a timer was ever armed.
+ */
+export async function sealAndReleaseChain(
+  store: Pick<StatusStore, 'update'>,
+  timer: FallbackTimerClient | undefined,
+  kv: KVNamespace | undefined,
+  id: string,
+  fallback: readonly unknown[]
+): Promise<void> {
+  try {
+    await store.update(id, (current) => ({ ...current, sealed: true }));
+  } catch {
+    // Best-effort sealing
+  }
+  await releaseChain(timer, kv, id, fallback);
 }

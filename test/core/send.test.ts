@@ -1091,6 +1091,60 @@ describe('Issue #3: createMessaging send pipeline', () => {
     });
   });
 
+  describe('a chain exhausted synchronously is sealed', () => {
+    // The timer cancel in `releaseChain` is best-effort, so a chain exhausted inside the send can
+    // still see its alarm fire later. `sealed` is what makes `shouldSkipAdvancement` no-op that
+    // fire instead of re-sealing and emitting a second terminal `onStatus` event; the synchronous
+    // path has to set it for the same reason every asynchronous release path does.
+    it('marks the record sealed once the last fallback channel has failed', async () => {
+      const sms = recordingProvider<RenderedSms>('sms', 'dead-sms', [
+        { ok: false, error: 'invalid destination' },
+      ]);
+
+      const messaging = createMessaging(newEnv(), {
+        templates,
+        providers: () => ({ sms }),
+        delivery: { fallback: ['sms'], always: [] },
+      });
+
+      const { id } = await messaging.send({
+        template: 'smsOnly',
+        to: TO,
+        locale: 'en',
+        input: { body: 'hello' },
+      });
+
+      const record = await messaging.status(id);
+      expect(record!.chain.status).toBe('failed');
+      expect(record!.sealed).toBe(true);
+    });
+
+    it('leaves a chain with channels still to try unsealed', async () => {
+      const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'dead-wa', [
+        { ok: false, error: 'no' },
+      ]);
+      const sms = recordingProvider<RenderedSms>('sms', 'live-sms', [{ ok: true }]);
+
+      const messaging = createMessaging(newEnv(), {
+        templates,
+        providers: () => ({ whatsapp: wa, sms }),
+        delivery: { fallback: ['whatsapp', 'sms'], always: [] },
+      });
+
+      const { id } = await messaging.send({
+        template: 'orderUpdate',
+        to: TO,
+        email: 'ann@example.com',
+        locale: 'en',
+        input: INPUT,
+      });
+
+      const record = await messaging.status(id);
+      expect(record!.chain.status).toBe('sent');
+      expect(record!.sealed).toBeUndefined();
+    });
+  });
+
   describe('onStatus does not block the write queue', () => {
     it('records the next chain attempt while a slow onStatus for the previous one is still running', async () => {
       const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'dead-wa', [
