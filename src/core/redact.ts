@@ -118,6 +118,15 @@ function pushBoundedMatch(
   // for instance) gives no literal text to anchor on, so any match would span the whole error
   // string and redact it entirely. Without bounds the value cannot be recovered; skip it rather
   // than destroy the error.
+  //
+  // Worth naming the consequence: this path is the fallback the webhook takes once `in:<id>` has
+  // expired (chain timeout, floor 60s) while the status record is still alive (7 days). So for a
+  // template whose only OTP parameter renders bare — `params: (i) => [i.code]`, as the README
+  // shows — a late vendor error quoting the code back is persisted unscrubbed on a record
+  // `GET /status/:id` serves. Neither escape is free: anchoring on a neighbouring parameter still
+  // needs literal text that a bare-value list does not have, and extending `in:<id>` to the
+  // record's TTL would keep the code in plaintext for seven days to close a gap that opens after
+  // one minute. Recorded in CHANGELOG's "Known limitations" instead.
   if (prefix.length === 0 && suffix.length === 0) {
     return;
   }
