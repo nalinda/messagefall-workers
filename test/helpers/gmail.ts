@@ -20,6 +20,18 @@ export function decodeBase64Url(base64Url: string): string {
   return new TextDecoder().decode(bytes);
 }
 
+/**
+ * Returns a MIME message's header block with folded continuation lines joined back up, as any
+ * real reader does before looking at a header value. A long RFC 2047 subject spans several
+ * lines, so a test that splits the raw message on CRLF would otherwise see only its first
+ * encoded-word.
+ */
+export function unfoldHeaders(mime: string): string {
+  const end = mime.indexOf('\r\n\r\n');
+  const block = end === -1 ? mime : mime.slice(0, end);
+  return block.replaceAll(/\r\n[\t ]+/g, ' ');
+}
+
 function decodeRfc2047Word(_charset: string, encoding: string, text: string): string {
   const enc = encoding.toUpperCase();
   if (enc === 'B') {
@@ -39,11 +51,17 @@ function decodeRfc2047Word(_charset: string, encoding: string, text: string): st
 
 /**
  * Decodes RFC 2047 encoded header fields (e.g. "=?UTF-8?B?...?=").
+ *
+ * The linear whitespace separating two adjacent encoded-words is dropped first, as RFC 2047
+ * § 6.2 requires: a long non-ASCII subject is emitted as several encoded-words folded onto
+ * continuation lines, and that folding is not part of the value.
  */
 export function decodeRfc2047(header: string): string {
-  return header.replaceAll(
-    /=\?([^?]+)\?([BQ])\?([^?]+)\?=/gi,
-    (_, charset: string, encoding: string, text: string) =>
-      decodeRfc2047Word(charset, encoding, text)
-  );
+  return header
+    .replaceAll(/\?=(?:\r\n)?[\t ]+=\?/g, '?==?')
+    .replaceAll(
+      /=\?([^?]+)\?([BQ])\?([^?]+)\?=/gi,
+      (_, charset: string, encoding: string, text: string) =>
+        decodeRfc2047Word(charset, encoding, text)
+    );
 }

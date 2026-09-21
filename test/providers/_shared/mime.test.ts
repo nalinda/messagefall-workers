@@ -12,7 +12,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import { buildMimeMessage } from '../../../src/providers/_shared/mime.js';
-import { decodeRfc2047 } from '../../helpers/gmail.js';
+import { decodeRfc2047, unfoldHeaders } from '../../helpers/gmail.js';
 
 describe('MIME message builder (Issue #20)', () => {
   it('builds a text-only MIME message with required headers and CRLF line endings', () => {
@@ -111,7 +111,7 @@ describe('MIME message builder (Issue #20)', () => {
 
       expect(mime.length).toBeGreaterThan(0);
 
-      const lines = mime.split('\r\n');
+      const lines = unfoldHeaders(mime).split('\r\n');
       const subjectLine = lines.find((line) => line.startsWith('Subject:'));
       expect(subjectLine).toBeDefined();
       const subjectHeader = subjectLine!.slice('Subject:'.length).trim();
@@ -135,7 +135,7 @@ describe('MIME message builder (Issue #20)', () => {
     });
 
     expect(mime.length).toBeGreaterThan(0);
-    const lines = mime.split('\r\n');
+    const lines = unfoldHeaders(mime).split('\r\n');
     const subjectLine = lines.find((line) => line.startsWith('Subject:'));
     expect(subjectLine).toBeDefined();
     const subjectHeader = subjectLine!.slice('Subject:'.length).trim();
@@ -156,7 +156,7 @@ describe('MIME message builder (Issue #20)', () => {
     });
 
     expect(mime.length).toBeGreaterThan(0);
-    const lines = mime.split('\r\n');
+    const lines = unfoldHeaders(mime).split('\r\n');
     const dateLine = lines.find((line) => line.startsWith('Date:'));
     expect(dateLine).toBeDefined();
     const dateHeader = dateLine!.slice('Date:'.length).trim();
@@ -207,6 +207,111 @@ describe('MIME message builder (Issue #20)', () => {
       const headerBlock = mime.slice(0, mime.indexOf('\r\n\r\n'));
       expect(headerBlock).not.toContain('Bcc:');
       expect(headerBlock).toContain('=?UTF-8?B?');
+    });
+  });
+
+  describe('Content-Transfer-Encoding', () => {
+    it('declares 8bit for a non-ASCII text-only body', () => {
+      const mime = buildMimeMessage({
+        from: 'sender@example.com',
+        to: 'recipient@example.com',
+        subject: 'Verification',
+        text: 'ඔබගේ සත්‍යාපන කේතය: 123456',
+      });
+
+      expect(mime).toContain('Content-Transfer-Encoding: 8bit');
+      // Declared, not re-encoded: the body is still written verbatim.
+      expect(mime).toContain('ඔබගේ සත්‍යාපන කේතය: 123456');
+    });
+
+    it('declares 7bit for an ASCII-only body', () => {
+      const mime = buildMimeMessage({
+        from: 'sender@example.com',
+        to: 'recipient@example.com',
+        subject: 'Verification',
+        text: 'Your code is 123456',
+      });
+
+      expect(mime).toContain('Content-Transfer-Encoding: 7bit');
+      expect(mime).not.toContain('Content-Transfer-Encoding: 8bit');
+    });
+
+    it('declares the encoding per part, so an ASCII text part and a non-ASCII html part differ', () => {
+      const mime = buildMimeMessage({
+        from: 'sender@example.com',
+        to: 'recipient@example.com',
+        subject: 'Order',
+        text: 'Plain ASCII summary',
+        html: '<p>ඔබගේ ඇණවුම</p>',
+      });
+
+      const textPartStart = mime.indexOf('Content-Type: text/plain');
+      const htmlPartStart = mime.indexOf('Content-Type: text/html');
+      const textPart = mime.slice(textPartStart, htmlPartStart);
+      const htmlPart = mime.slice(htmlPartStart);
+
+      expect(textPart).toContain('Content-Transfer-Encoding: 7bit');
+      expect(htmlPart).toContain('Content-Transfer-Encoding: 8bit');
+    });
+  });
+
+  describe('RFC 2047 encoded-word folding', () => {
+    const longSinhalaSubject = 'ඔබගේ ගිණුම සඳහා වූ සත්‍යාපන කේතය සහ ආරක්ෂක දැනුම්දීම පිළිබඳ විස්තර';
+
+    it('folds a long non-ASCII subject into several encoded-words, none over 75 characters', () => {
+      const mime = buildMimeMessage({
+        from: 'sender@example.com',
+        to: 'recipient@example.com',
+        subject: longSinhalaSubject,
+        text: 'Body',
+      });
+
+      const headerBlock = mime.slice(0, mime.indexOf('\r\n\r\n'));
+      const words = headerBlock.match(/=\?UTF-8\?B\?[^?]+\?=/g) ?? [];
+      expect(words.length).toBeGreaterThan(1);
+      for (const word of words) {
+        expect(word.length).toBeLessThanOrEqual(75);
+      }
+
+      // Every line carrying one stays inside RFC 2047's 76-character header-line limit, the
+      // `Subject: ` prefix included.
+      const subjectLines = headerBlock
+        .split('\r\n')
+        .filter((line) => line.startsWith('Subject:') || line.startsWith(' =?UTF-8?B?'));
+      expect(subjectLines).toHaveLength(words.length);
+      for (const line of subjectLines) {
+        expect(line.length).toBeLessThanOrEqual(76);
+      }
+    });
+
+    it('round-trips the folded subject back to the original text', () => {
+      const mime = buildMimeMessage({
+        from: 'sender@example.com',
+        to: 'recipient@example.com',
+        subject: longSinhalaSubject,
+        text: 'Body',
+      });
+
+      const headerBlock = mime.slice(0, mime.indexOf('\r\n\r\n'));
+      const subjectHeader = headerBlock.slice(
+        headerBlock.indexOf('Subject: ') + 'Subject: '.length,
+        headerBlock.indexOf('\r\nDate: ')
+      );
+      expect(decodeRfc2047(subjectHeader)).toBe(longSinhalaSubject);
+    });
+
+    it('keeps a short non-ASCII subject in a single unfolded encoded-word', () => {
+      const mime = buildMimeMessage({
+        from: 'sender@example.com',
+        to: 'recipient@example.com',
+        subject: 'Café ☕',
+        text: 'Body',
+      });
+
+      const headerBlock = mime.slice(0, mime.indexOf('\r\n\r\n'));
+      const words = headerBlock.match(/=\?UTF-8\?B\?[^?]+\?=/g) ?? [];
+      expect(words).toHaveLength(1);
+      expect(decodeRfc2047(words[0] ?? '')).toBe('Café ☕');
     });
   });
 });

@@ -25,7 +25,7 @@ import { createMessaging, defineTemplates } from '../../src/index.js';
 import { gmail, type GmailConfig } from '../../src/providers/gmail/index.js';
 import type { OutboundMeta, RenderedEmail } from '../../src/providers/types.js';
 import { buildDist, reachableProviderFiles } from '../helpers/bundle-isolation.js';
-import { decodeBase64Url, decodeRfc2047 } from '../helpers/gmail.js';
+import { decodeBase64Url, decodeRfc2047, unfoldHeaders } from '../helpers/gmail.js';
 import { memoryKV, newEnv } from '../helpers/messaging.js';
 
 interface CapturedRequest {
@@ -352,7 +352,7 @@ describe('Gmail provider (Issue #20)', () => {
     expect(capturedSendBody).toBeDefined();
 
     const decodedMime = decodeBase64Url(capturedSendBody!.raw!);
-    const lines = decodedMime.split('\r\n');
+    const lines = unfoldHeaders(decodedMime).split('\r\n');
     const subjectLine = lines.find((line) => line.startsWith('Subject:'));
     expect(subjectLine).toBeDefined();
     const rawSubjectHeader = subjectLine!.slice('Subject:'.length).trim();
