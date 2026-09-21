@@ -79,9 +79,34 @@ export interface MessagingClient<T extends Templates<any> = Templates<any>> {
   ): Promise<ClientSendResult>;
 
   /**
-   * Fetch the status record of a sent message by ID.
+   * Fetch the status record of a sent message by ID. Resolves `null` when the messaging Worker
+   * has no record for that id, and throws {@link MessagingClientError} for any other non-OK
+   * response, so a server fault is never mistaken for an unknown message.
    */
   status(id: string): Promise<MessageRecord | null>;
+}
+
+/**
+ * Thrown by {@link MessagingClient.status} when the messaging Worker answers with anything other
+ * than a record or a `404`.
+ *
+ * `status()` resolves `null` for "no such message" alone. Any other non-OK response — a `500`
+ * from the messaging Worker, a service binding answering for a route that is not there — is a
+ * fault the calling Worker has to be able to tell apart from an unknown id, so it is raised
+ * rather than flattened into `null`. The message is extracted exactly as `send()` extracts the
+ * one it reports on its `{ ok: false }` result.
+ */
+export class MessagingClientError extends Error {
+  /**
+   * HTTP status the messaging Worker answered with.
+   */
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'MessagingClientError';
+    this.status = status;
+  }
 }
 
 function normalizeBasePath(basePath?: string): string {
@@ -200,7 +225,7 @@ export function createMessagingClient<
       }
 
       if (!res.ok) {
-        return null;
+        throw new MessagingClientError(res.status, await extractError(res));
       }
 
       const record = await res.json<MessageRecord>();

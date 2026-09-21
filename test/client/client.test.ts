@@ -7,7 +7,8 @@
  * - BasePath normalization: defaults to '/' and handles custom prefixes.
  * - Error handling: non-2xx responses map to { ok: false, status, error } and never throw;
  *   network errors from the binding fetch do throw.
- * - status(id): GET <basePath>/status/:id returning MessageRecord or null on 404.
+ * - status(id): GET <basePath>/status/:id returning MessageRecord, null on 404, and throwing
+ *   MessagingClientError on any other non-OK response.
  * - Bundle check: importing messagefall-workers/client pulls in no provider code.
  */
 
@@ -18,7 +19,7 @@ import path from 'node:path';
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { z } from 'zod';
 
-import { createMessagingClient } from '../../src/client/index.js';
+import { createMessagingClient, MessagingClientError } from '../../src/client/index.js';
 import type { MessageRecord } from '../../src/core/status.js';
 import { defineTemplates } from '../../src/templates.js';
 import { createMockFetcher, rejection } from '../helpers/client.js';
@@ -435,6 +436,19 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
       const record = await client.status('msg_unknown_id');
 
       expect(record).toBeNull();
+    });
+
+    it('throws MessagingClientError on a server error so it is not mistaken for "not found"', async () => {
+      const fetcher = createMockFetcher(() =>
+        Response.json({ error: 'KV namespace unavailable' }, { status: 500 })
+      );
+
+      const client = createMessagingClient<TestCatalog>({ binding: fetcher });
+      const error = await rejection(client.status('msg_01J8STATUS500'));
+
+      expect(error).toBeInstanceOf(MessagingClientError);
+      expect((error as MessagingClientError).status).toBe(500);
+      expect((error as MessagingClientError).message).toBe('KV namespace unavailable');
     });
 
     it('re-throws network errors during status lookup', async () => {
