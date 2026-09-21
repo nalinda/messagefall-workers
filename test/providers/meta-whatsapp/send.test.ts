@@ -28,7 +28,7 @@ interface Captured {
 function graphError(code: number, message: string, status: number): Response {
   return Response.json(
     { error: { message, type: 'OAuthException', code, fbtrace_id: 'trace' } },
-    { status },
+    { status }
   );
 }
 
@@ -67,7 +67,7 @@ function message(rendered: RenderedWhatsApp, kind: OutboundMeta['kind']): WhatsA
 
 const templateMessage = message(
   { templateConfig: { name: 'otp_code', language: 'en', params: ['482910', '10'] } },
-  'otp',
+  'otp'
 );
 
 const textMessage = message({ text: 'Your match is ready' }, 'notification');
@@ -101,7 +101,7 @@ describe('metaWhatsApp provider: send', () => {
 
   it('POSTs a template message to graph.facebook.com/<v>/<phoneNumberId>/messages with the Cloud API body', async () => {
     const calls = mockFetch(() =>
-      Response.json({ messages: [{ id: 'wamid.template.1' }] }, { status: 200 }),
+      Response.json({ messages: [{ id: 'wamid.template.1' }] }, { status: 200 })
     );
 
     const provider = metaWhatsApp(testConfig);
@@ -137,7 +137,7 @@ describe('metaWhatsApp provider: send', () => {
 
   it('honours a custom apiVersion in the endpoint', async () => {
     const calls = mockFetch(() =>
-      Response.json({ messages: [{ id: 'wamid.version.1' }] }, { status: 200 }),
+      Response.json({ messages: [{ id: 'wamid.version.1' }] }, { status: 200 })
     );
 
     const provider = metaWhatsApp({ ...testConfig, apiVersion: 'v21.0' });
@@ -148,7 +148,7 @@ describe('metaWhatsApp provider: send', () => {
 
   it('POSTs a text message as { type: "text", text: { body } }', async () => {
     const calls = mockFetch(() =>
-      Response.json({ messages: [{ id: 'wamid.text.1' }] }, { status: 200 }),
+      Response.json({ messages: [{ id: 'wamid.text.1' }] }, { status: 200 })
     );
 
     const provider = metaWhatsApp(testConfig);
@@ -170,8 +170,8 @@ describe('metaWhatsApp provider: send', () => {
           contacts: [{ input: '+94771234567', wa_id: '94771234567' }],
           messages: [{ id: 'wamid.sent.200.first' }, { id: 'wamid.sent.200.second' }],
         },
-        { status: 200 },
-      ),
+        { status: 200 }
+      )
     );
 
     const provider = metaWhatsApp(testConfig);

@@ -74,19 +74,29 @@ describe('Provider contract type-level specification', () => {
     expect(providersFactory).toBeDefined();
 
     // Type assertion checks
-    type TestAssignableToSmsSlot = Expect<
-      Extends<typeof customSmsProvider, Provider<RenderedSms>>
-    >;
+    type TestAssignableToSmsSlot = Expect<Extends<typeof customSmsProvider, Provider<RenderedSms>>>;
     assertType<TestAssignableToSmsSlot>(true);
 
     // Runtime assertion: the registered custom provider is the one a send goes through.
     const sendSpy = spyOn(customSmsProvider, 'send');
     const messaging = createMessaging(newEnv(), { templates, providers: providersFactory });
-    const { id } = await messaging.send({ template: 'ping', to: '+14155550123', locale: 'en', input: undefined });
+    const { id } = await messaging.send({
+      template: 'ping',
+      to: '+14155550123',
+      locale: 'en',
+      input: undefined,
+    });
     expect(sendSpy).toHaveBeenCalledTimes(1);
-    expect(sendSpy.mock.calls[0][0]).toMatchObject({ to: '+14155550123', messageId: id, text: 'ping' });
+    expect(sendSpy.mock.calls[0][0]).toMatchObject({
+      to: '+14155550123',
+      messageId: id,
+      text: 'ping',
+    });
     const record = await messaging.status(id);
-    expect(record!.chain.attempts[0]).toMatchObject({ provider: 'my-custom-sms', providerId: `gw_${id}` });
+    expect(record!.chain.attempts[0]).toMatchObject({
+      provider: 'my-custom-sms',
+      providerId: `gw_${id}`,
+    });
   });
 
   it('allows Provider<RenderedWhatsApp> and Provider<RenderedEmail> in their respective slots', async () => {
@@ -139,9 +149,7 @@ describe('Provider contract type-level specification', () => {
     type TestWaAssignable = Expect<
       Extends<typeof customWhatsAppProvider, Provider<RenderedWhatsApp>>
     >;
-    type TestEmailAssignable = Expect<
-      Extends<typeof customEmailProvider, Provider<RenderedEmail>>
-    >;
+    type TestEmailAssignable = Expect<Extends<typeof customEmailProvider, Provider<RenderedEmail>>>;
 
     assertType<TestWaAssignable>(true);
     assertType<TestEmailAssignable>(true);
@@ -172,7 +180,10 @@ describe('Provider contract type-level specification', () => {
     expect(emailSpy).toHaveBeenCalledTimes(1);
     const record = await messaging.status(id);
     expect(record!.chain.attempts[0]).toMatchObject({ provider: 'meta-whatsapp-direct' });
-    expect(record!.always[0]).toMatchObject({ provider: 'direct-smtp-email', providerId: 'email_msg_123' });
+    expect(record!.always[0]).toMatchObject({
+      provider: 'direct-smtp-email',
+      providerId: 'email_msg_123',
+    });
   });
 
   it('verifies SendResult discriminant shape and StatusEvent fields', () => {

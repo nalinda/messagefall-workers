@@ -19,11 +19,7 @@ import { z } from 'zod';
 
 import { advanceChain, type AdvanceChainArgs } from '../../src/core/fallback.js';
 import type { DeliveryPolicy } from '../../src/core/policy.js';
-import {
-  kvStatusStore,
-  type MessageRecord,
-  type StatusStore,
-} from '../../src/core/status.js';
+import { kvStatusStore, type MessageRecord, type StatusStore } from '../../src/core/status.js';
 import type {
   Channel,
   OutboundMeta,
@@ -34,10 +30,7 @@ import type {
   SendResult,
 } from '../../src/providers/types.js';
 import { defineTemplates } from '../../src/templates.js';
-import {
-  createMockFallbackTimer,
-  type MockFallbackTimer,
-} from '../helpers/fallback.js';
+import { createMockFallbackTimer, type MockFallbackTimer } from '../helpers/fallback.js';
 import { createMiniflareKV } from '../helpers/status.js';
 
 interface SentCall<T = unknown> {
@@ -1012,9 +1005,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
 
       expect(updatedRecord?.chain.attempts[1].channel).toBe('sms');
       expect(updatedRecord?.chain.attempts[1].status).toBe('failed');
-      expect(updatedRecord?.chain.attempts[1].error).toBe(
-        'Twilio SMS service unavailable (503)'
-      );
+      expect(updatedRecord?.chain.attempts[1].error).toBe('Twilio SMS service unavailable (503)');
 
       expect(updatedRecord?.chain.attempts[2].channel).toBe('email');
       expect(updatedRecord?.chain.attempts[2].status).toBe('sent');
@@ -1065,7 +1056,10 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         id: messageId,
         reason: 'failed',
         env: { MESSAGES_KV: kv },
-        options: { templates: testTemplates, providers: { whatsapp: waProvider, email: emailProvider } },
+        options: {
+          templates: testTemplates,
+          providers: { whatsapp: waProvider, email: emailProvider },
+        },
         store,
       });
 
@@ -1233,7 +1227,10 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         id: messageId,
         reason: 'failed',
         env: { MESSAGES_KV: kv },
-        options: { templates: testTemplates, providers: { whatsapp: waProvider, sms: smsProvider } },
+        options: {
+          templates: testTemplates,
+          providers: { whatsapp: waProvider, sms: smsProvider },
+        },
         store,
       });
 

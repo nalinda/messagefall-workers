@@ -13,19 +13,13 @@ import { z } from 'zod';
 
 import type { Messaging } from '../src/core/messaging.js';
 import type { Channel } from '../src/providers/types.js';
-import {
-  defineTemplates,
-  type InputOf,
-  render,
-  type TemplateDef,
-} from '../src/templates.js';
+import { defineTemplates, type InputOf, render, type TemplateDef } from '../src/templates.js';
 
 // Type-level assertion helpers
 type Extends<A, B> = A extends B ? true : false;
 type Expect<T extends true> = T;
-type Equals<X, Y> = (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2
-  ? true
-  : false;
+type Equals<X, Y> =
+  (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
 
 function assertType<T>(_value: T): void {
   // Compile-time type verification helper
@@ -96,9 +90,7 @@ describe('defineTemplates type-level specifications', () => {
     type MatchFoundInput = InputOf<CatalogType, 'matchFound'>;
 
     type TestLoginCodeInputExact = Expect<Equals<LoginCodeInput, { code: string }>>;
-    type TestMatchFoundInputExact = Expect<
-      Equals<MatchFoundInput, { title: string; url: string }>
-    >;
+    type TestMatchFoundInputExact = Expect<Equals<MatchFoundInput, { title: string; url: string }>>;
 
     assertType<TestLoginCodeInputExact>(true);
     assertType<TestMatchFoundInputExact>(true);
@@ -188,7 +180,7 @@ describe('defineTemplates type-level specifications', () => {
 
     expect(() =>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      defineTemplates(invalidCatalog as Record<string, TemplateDef<any>>),
+      defineTemplates(invalidCatalog as Record<string, TemplateDef<any>>)
     ).toThrow(/badDeliveryTemplate/);
   });
 });

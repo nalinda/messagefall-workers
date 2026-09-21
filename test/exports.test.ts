@@ -148,7 +148,7 @@ describe('package.json#exports', () => {
             // but ignore type-only imports like `import type ... from 'zod'`
             const runtimeImportRegex = new RegExp(
               String.raw`^\s*import\s+(?!type\s)(?:[^'"]*from\s+)?['"]${lib}(?:/.*)?['"]`,
-              'm',
+              'm'
             );
             const requireRegex = new RegExp(String.raw`require\s*\(['"]${lib}(?:/.*)?['"]\)`, 'm');
             expect(runtimeImportRegex.test(content)).toBe(false);
@@ -257,9 +257,7 @@ describe('Entry points export documented functions', () => {
       .map((entry) => entry.name)
       // `_shared` holds helpers the providers deep-import; it has no index.js, so the
       // `./providers/*` wildcard does not resolve it and it is not an entry point.
-      .filter((name) =>
-        fs.existsSync(distFile(providerTarget.import.replace('*', () => name))),
-      );
+      .filter((name) => fs.existsSync(distFile(providerTarget.import.replace('*', () => name))));
 
     const roots = [
       ...Object.entries(pkg.exports)
@@ -270,7 +268,7 @@ describe('Entry points export documented functions', () => {
 
     const reachable = walkImportGraph(roots.map((relative) => distFile(relative)));
     const offenders = [...reachable].filter((file) =>
-      file.includes(path.join('providers', 'meta-whatsapp') + path.sep),
+      file.includes(path.join('providers', 'meta-whatsapp') + path.sep)
     );
     expect(offenders).toEqual([]);
   });

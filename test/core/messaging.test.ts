@@ -18,7 +18,12 @@ import {
   type RenderedWhatsApp,
 } from '../../src/index.js';
 import { consoleProvider } from '../../src/providers/console/index.js';
-import { captureConsole, newEnv, pingTemplates as templates, waitFor } from '../helpers/messaging.js';
+import {
+  captureConsole,
+  newEnv,
+  pingTemplates as templates,
+  waitFor,
+} from '../helpers/messaging.js';
 
 function stubSms(name: string): Provider<RenderedSms> & { calls: number } {
   const provider = {
@@ -41,11 +46,20 @@ describe('createMessaging', () => {
       providers: () => ({ sms: stub }),
     });
 
-    const { id } = await messaging.send({ template: 'ping', to: '+14155550123', locale: 'en', input: undefined });
+    const { id } = await messaging.send({
+      template: 'ping',
+      to: '+14155550123',
+      locale: 'en',
+      input: undefined,
+    });
 
     expect(stub.calls).toBe(1);
     const record = await messaging.status(id);
-    expect(record!.chain.attempts[0]).toMatchObject({ provider: 'stub', providerId: 'stub-1', status: 'sent' });
+    expect(record!.chain.attempts[0]).toMatchObject({
+      provider: 'stub',
+      providerId: 'stub-1',
+      status: 'sent',
+    });
   });
 });
 
@@ -71,7 +85,12 @@ describe('createMessaging.handleWebhook', () => {
       },
     });
 
-    const { id } = await messaging.send({ template: 'ping', to: '+14155550123', locale: 'en', input: undefined });
+    const { id } = await messaging.send({
+      template: 'ping',
+      to: '+14155550123',
+      locale: 'en',
+      input: undefined,
+    });
     const response = await messaging.handleWebhook(
       'hooked-sms',
       new Request('https://worker.local/webhooks/hooked-sms', {
@@ -82,7 +101,10 @@ describe('createMessaging.handleWebhook', () => {
 
     expect(response.status).toBe(200);
     const record = await messaging.status(id);
-    expect(record!.chain.attempts[0]).toMatchObject({ providerId: 'hooked-1', status: 'delivered' });
+    expect(record!.chain.attempts[0]).toMatchObject({
+      providerId: 'hooked-1',
+      status: 'delivered',
+    });
     expect(record!.status).toBe('delivered');
     expect(events).toEqual([
       { id, channel: 'sms', provider: 'hooked-sms', status: 'sent' },
@@ -102,7 +124,11 @@ describe('createMessaging.handleWebhook observer failures', () => {
       webhook: {
         parse: () =>
           Promise.resolve([
-            { providerId: 'hooked-2', status: 'delivered' as const, at: '2026-09-20T00:00:00.000Z' },
+            {
+              providerId: 'hooked-2',
+              status: 'delivered' as const,
+              at: '2026-09-20T00:00:00.000Z',
+            },
             { providerId: 'hooked-2', status: 'read' as const, at: '2026-09-20T00:00:01.000Z' },
           ]),
       },
@@ -121,7 +147,12 @@ describe('createMessaging.handleWebhook observer failures', () => {
     const captured = captureConsole(['warn']);
 
     try {
-      const { id } = await messaging.send({ template: 'ping', to: '+14155550123', locale: 'en', input: undefined });
+      const { id } = await messaging.send({
+        template: 'ping',
+        to: '+14155550123',
+        locale: 'en',
+        input: undefined,
+      });
       const response = await messaging.handleWebhook(
         'hooked-sms',
         new Request('https://worker.local/webhooks/hooked-sms', { method: 'POST' })
@@ -291,7 +322,12 @@ describe('createMessaging.handleWebhook concurrency', () => {
       webhook: {
         parse: () =>
           Promise.resolve([
-            { providerId: 'wa-dup-1', status: 'failed' as const, error: 'undeliverable', at: failedAt },
+            {
+              providerId: 'wa-dup-1',
+              status: 'failed' as const,
+              error: 'undeliverable',
+              at: failedAt,
+            },
           ]),
       },
     };

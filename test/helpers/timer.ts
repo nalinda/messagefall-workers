@@ -252,7 +252,7 @@ function createStorage(schedule: Scheduled[], name: string): FakeStorage {
         data.has(keyOrKeys) ? structuredClone(data.get(keyOrKeys)) : undefined
       );
     }) as FakeStorage['get'],
-    put: ((keyOrEntries: string | Record<string, unknown>, value?: unknown) => {
+    put: (keyOrEntries: string | Record<string, unknown>, value?: unknown) => {
       if (typeof keyOrEntries === 'string') {
         data.set(keyOrEntries, structuredClone(value));
       } else {
@@ -261,7 +261,7 @@ function createStorage(schedule: Scheduled[], name: string): FakeStorage {
         }
       }
       return Promise.resolve();
-    }),
+    },
     delete: ((keyOrKeys: string | string[]) => {
       if (Array.isArray(keyOrKeys)) {
         let count = 0;
@@ -376,7 +376,10 @@ export function createFakeDurableRuntime(
   const fireDue = async (): Promise<void> => {
     // Alarms fire in scheduled order; an alarm handler may re-arm, so re-scan after each.
     for (;;) {
-      const due = schedule.filter((s) => s.at <= now).toSorted((a, b) => a.at - b.at).at(0);
+      const due = schedule
+        .filter((s) => s.at <= now)
+        .toSorted((a, b) => a.at - b.at)
+        .at(0);
       if (due === undefined) {
         return;
       }

@@ -53,15 +53,18 @@ export type ConsoleMethod = 'log' | 'info' | 'warn' | 'error';
  * @param methods - Console methods to capture.
  * @returns The captured lines and a restore function.
  */
-export function captureConsole(
-  methods: ConsoleMethod[] = ['log', 'info', 'warn', 'error']
-): { logs: string[]; restore: () => void } {
+export function captureConsole(methods: ConsoleMethod[] = ['log', 'info', 'warn', 'error']): {
+  logs: string[];
+  restore: () => void;
+} {
   const logs: string[] = [];
   const target = console as unknown as Record<ConsoleMethod, (...args: unknown[]) => void>;
   const originals = new Map<ConsoleMethod, (...args: unknown[]) => void>();
   const intercept = (...args: unknown[]): void => {
     logs.push(
-      args.map((a) => (typeof a === 'object' && a !== null ? JSON.stringify(a) : String(a))).join(' ')
+      args
+        .map((a) => (typeof a === 'object' && a !== null ? JSON.stringify(a) : String(a)))
+        .join(' ')
     );
   };
   for (const method of methods) {

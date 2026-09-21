@@ -459,7 +459,9 @@ describe('Provider contract shape and optional methods', () => {
     const consoleProvider = await loadConsoleProvider();
     expect(consoleProvider).toBeDefined();
 
-    const provider = consoleProvider ? consoleProvider({ channel: 'sms', name: 'console-sms' }) : null;
+    const provider = consoleProvider
+      ? consoleProvider({ channel: 'sms', name: 'console-sms' })
+      : null;
     expect(provider).not.toBeNull();
     if (!provider) return;
 
@@ -553,7 +555,9 @@ describe('Provider contract shape and optional methods', () => {
     expect(typeof customProvider.webhook?.parse).toBe('function');
 
     // Handshake verification
-    const verifyReq = new Request('https://worker.local/webhooks/meta-whatsapp?hub.mode=subscribe&hub.challenge=test_challenge');
+    const verifyReq = new Request(
+      'https://worker.local/webhooks/meta-whatsapp?hub.mode=subscribe&hub.challenge=test_challenge'
+    );
     const verifyRes = await customProvider.webhook?.verify?.(verifyReq);
     expect(verifyRes).not.toBeNull();
     expect(await verifyRes?.text()).toBe('test_challenge');
@@ -679,7 +683,9 @@ describe('Startup provider validation', () => {
     expect(thrownError?.message).toBeDefined();
     // Bulleted format should list multiple problems (e.g. lines beginning with '- ' or '* ')
     const lines = thrownError?.message.split('\n') ?? [];
-    const bulletLines = lines.filter((l) => l.trimStart().startsWith('-') || l.trimStart().startsWith('*'));
+    const bulletLines = lines.filter(
+      (l) => l.trimStart().startsWith('-') || l.trimStart().startsWith('*')
+    );
     expect(bulletLines.length).toBeGreaterThanOrEqual(2);
   });
 });

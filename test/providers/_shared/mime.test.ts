@@ -63,7 +63,8 @@ describe('MIME message builder (Issue #20)', () => {
     expect(mime.length).toBeGreaterThan(0);
 
     // Content-Type must be multipart/alternative with a boundary parameter
-    const boundaryMatch = /Content-Type:\s*multipart\/alternative;\s*boundary="?([^"\r\n]+)"?/i.exec(mime);
+    const boundaryMatch =
+      /Content-Type:\s*multipart\/alternative;\s*boundary="?([^"\r\n]+)"?/i.exec(mime);
     expect(boundaryMatch).not.toBeNull();
     const boundary = boundaryMatch![1];
 
@@ -180,7 +181,7 @@ describe('MIME message builder (Issue #20)', () => {
           to: value,
           subject: 'Hello',
           text: 'Body',
-        }),
+        })
       ).toThrow(/line break/);
     });
 
@@ -191,7 +192,7 @@ describe('MIME message builder (Issue #20)', () => {
           to: 'recipient@example.com',
           subject: 'Hello',
           text: 'Body',
-        }),
+        })
       ).toThrow(/line break/);
     });
 

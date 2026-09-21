@@ -120,12 +120,7 @@ class Harness {
     await this.json(await this.post(`/__test/fire?id=${encodeURIComponent(id)}`));
   }
 
-  async arm(args: {
-    id: string;
-    afterMs: number;
-    input: unknown;
-    locale: string;
-  }): Promise<void> {
+  async arm(args: { id: string; afterMs: number; input: unknown; locale: string }): Promise<void> {
     await this.json(await this.post('/__test/arm', args));
   }
 

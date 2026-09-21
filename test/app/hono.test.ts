@@ -26,7 +26,14 @@ import { z } from 'zod';
 import { createMessagingApp } from '../../src/app/hono.js';
 import type { Attempt, MessageRecord } from '../../src/core/status.js';
 import type { MessagingEnv } from '../../src/env.js';
-import type { Channel, Provider, RenderedEmail, RenderedSms, RenderedWhatsApp, SendResult } from '../../src/providers/types.js';
+import type {
+  Channel,
+  Provider,
+  RenderedEmail,
+  RenderedSms,
+  RenderedWhatsApp,
+  SendResult,
+} from '../../src/providers/types.js';
 import { defineTemplates } from '../../src/templates.js';
 import { waitFor } from '../helpers/messaging.js';
 import { createMiniflareKV } from '../helpers/status.js';
@@ -653,9 +660,7 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
     // a consumer without `hono` installed could not import the root entry at all.
     expect(root.createMessagingApp).toBeUndefined();
 
-    const source = await Bun.file(
-      path.join(import.meta.dir, '../../src/index.ts')
-    ).text();
+    const source = await Bun.file(path.join(import.meta.dir, '../../src/index.ts')).text();
     expect(source).not.toContain('app/hono');
   });
 

@@ -326,11 +326,7 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
       expect(sendRes.status).toBe(200);
       const { id } = (await sendRes.json()) as { id: string };
 
-      const record = await harness.waitForRecord(
-        id,
-        (r) => r.always.length === 3,
-        SETTLE_TIMEOUT
-      );
+      const record = await harness.waitForRecord(id, (r) => r.always.length === 3, SETTLE_TIMEOUT);
       expect(record.chain.attempts).toHaveLength(0);
       expect(record.always).toHaveLength(3);
 

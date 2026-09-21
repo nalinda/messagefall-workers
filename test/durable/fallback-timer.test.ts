@@ -332,11 +332,15 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
   });
 
   describe('an alarm that finds the chain still pending (first attempt not settled)', () => {
-
     it('re-schedules itself for another timeout instead of clearing storage or advancing', async () => {
       const id = 'msg_01J9FB0000000000000000TM10';
       await seedSent(store, kv, pendingRecord(id));
-      await armTimer(env.FALLBACK_TIMER, { id, afterMs: OTP_TIMEOUT, input: { code: CODE }, locale: 'en' });
+      await armTimer(env.FALLBACK_TIMER, {
+        id,
+        afterMs: OTP_TIMEOUT,
+        input: { code: CODE },
+        locale: 'en',
+      });
 
       await clock.advance(OTP_TIMEOUT);
 
@@ -354,7 +358,12 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
     it('gives up after MAX_PENDING_RECHECKS consecutive pending alarms and clears storage', async () => {
       const id = 'msg_01J9FB0000000000000000TM11';
       await seedSent(store, kv, pendingRecord(id));
-      await armTimer(env.FALLBACK_TIMER, { id, afterMs: OTP_TIMEOUT, input: { code: CODE }, locale: 'en' });
+      await armTimer(env.FALLBACK_TIMER, {
+        id,
+        afterMs: OTP_TIMEOUT,
+        input: { code: CODE },
+        locale: 'en',
+      });
 
       // The first alarm plus every allowed re-check keep the object armed ...
       for (let fired = 1; fired <= MAX_PENDING_RECHECKS; fired += 1) {
@@ -381,7 +390,12 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
     it('a chain that becomes sent between re-checks is advanced normally on the next alarm', async () => {
       const id = 'msg_01J9FB0000000000000000TM12';
       await seedSent(store, kv, pendingRecord(id));
-      await armTimer(env.FALLBACK_TIMER, { id, afterMs: OTP_TIMEOUT, input: { code: CODE }, locale: 'en' });
+      await armTimer(env.FALLBACK_TIMER, {
+        id,
+        afterMs: OTP_TIMEOUT,
+        input: { code: CODE },
+        locale: 'en',
+      });
 
       await clock.advance(OTP_TIMEOUT);
       expect(alarmCount(ns, id)).toBe(1);
@@ -495,9 +509,7 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
 
       // Nothing ever fires for them, even long after every timeout.
       await clock.advance(NOTIFICATION_TIMEOUT * 2);
-      expect(ns.calls.filter((c) => c.method === 'alarm' && c.name !== chained.id)).toHaveLength(
-        0
-      );
+      expect(ns.calls.filter((c) => c.method === 'alarm' && c.name !== chained.id)).toHaveLength(0);
       const allChain = await chainOf(store, all.id);
       const singleChain = await chainOf(store, single.id);
       expect(allChain.attempts).toHaveLength(0);

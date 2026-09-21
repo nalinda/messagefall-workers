@@ -140,7 +140,7 @@ function messageReceivedPayload(): unknown {
 async function signedRequest(
   payload: unknown,
   secret: string,
-  headerOverride?: Record<string, string> | null,
+  headerOverride?: Record<string, string> | null
 ): Promise<Request> {
   const body = JSON.stringify(payload);
   const headers: Record<string, string> = { 'content-type': 'application/json' };
@@ -181,7 +181,7 @@ describe('metaWhatsApp provider: webhook', () => {
           'hub.mode': 'subscribe',
           'hub.verify_token': testConfig.verifyToken,
           'hub.challenge': '1158201444',
-        }),
+        })
       );
 
       expect(response).not.toBeNull();
@@ -195,7 +195,7 @@ describe('metaWhatsApp provider: webhook', () => {
           'hub.mode': 'subscribe',
           'hub.verify_token': 'wrong-token',
           'hub.challenge': '1158201444',
-        }),
+        })
       );
 
       expect(response).not.toBeNull();
@@ -209,7 +209,7 @@ describe('metaWhatsApp provider: webhook', () => {
           'hub.mode': 'unsubscribe',
           'hub.verify_token': testConfig.verifyToken,
           'hub.challenge': '1158201444',
-        }),
+        })
       );
 
       expect(response).not.toBeNull();
@@ -230,13 +230,21 @@ describe('metaWhatsApp provider: webhook', () => {
       const events = await webhook().parse(request);
 
       expect(events).toEqual([
-        { providerId: 'wamid.SENT1', status: 'sent', at: new Date(1_700_000_000_000).toISOString() },
+        {
+          providerId: 'wamid.SENT1',
+          status: 'sent',
+          at: new Date(1_700_000_000_000).toISOString(),
+        },
         {
           providerId: 'wamid.DELIVERED1',
           status: 'delivered',
           at: new Date(1_700_000_010_000).toISOString(),
         },
-        { providerId: 'wamid.READ1', status: 'read', at: new Date(1_700_000_020_000).toISOString() },
+        {
+          providerId: 'wamid.READ1',
+          status: 'read',
+          at: new Date(1_700_000_020_000).toISOString(),
+        },
         {
           providerId: 'wamid.FAILED1',
           status: 'failed',
@@ -326,7 +334,7 @@ describe('metaWhatsApp provider: webhook', () => {
         expect(new Date(at).toISOString()).toBe(event.at);
         expect(at).toBeGreaterThanOrEqual(before - 1000);
         expect(at).toBeLessThanOrEqual(after + 1000);
-      },
+      }
     );
 
     it('yields [] for a signed message-received (non-status) payload', async () => {

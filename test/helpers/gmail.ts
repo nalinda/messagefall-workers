@@ -41,7 +41,9 @@ function decodeRfc2047Word(_charset: string, encoding: string, text: string): st
  * Decodes RFC 2047 encoded header fields (e.g. "=?UTF-8?B?...?=").
  */
 export function decodeRfc2047(header: string): string {
-  return header.replaceAll(/=\?([^?]+)\?([BQ])\?([^?]+)\?=/gi, (_, charset: string, encoding: string, text: string) =>
-    decodeRfc2047Word(charset, encoding, text)
+  return header.replaceAll(
+    /=\?([^?]+)\?([BQ])\?([^?]+)\?=/gi,
+    (_, charset: string, encoding: string, text: string) =>
+      decodeRfc2047Word(charset, encoding, text)
   );
 }

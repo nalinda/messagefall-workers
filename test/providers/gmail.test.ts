@@ -236,7 +236,10 @@ describe('Gmail provider (Issue #20)', () => {
 
     mockFetchHandler((url, init) => {
       if (url.includes('oauth2.googleapis.com/token')) {
-        return Response.json({ access_token: 'ya29.send_test_token', expires_in: 3600 }, { status: 200 });
+        return Response.json(
+          { access_token: 'ya29.send_test_token', expires_in: 3600 },
+          { status: 200 }
+        );
       }
       if (url.includes('gmail.googleapis.com/gmail/v1/users/me/messages/send')) {
         const bodyStr = typeof init?.body === 'string' ? init.body : '';
@@ -291,7 +294,10 @@ describe('Gmail provider (Issue #20)', () => {
 
     mockFetchHandler((url, init) => {
       if (url.includes('oauth2.googleapis.com/token')) {
-        return Response.json({ access_token: 'ya29.send_test_token', expires_in: 3600 }, { status: 200 });
+        return Response.json(
+          { access_token: 'ya29.send_test_token', expires_in: 3600 },
+          { status: 200 }
+        );
       }
       if (url.includes('gmail.googleapis.com/gmail/v1/users/me/messages/send')) {
         const bodyStr = typeof init?.body === 'string' ? init.body : '';
@@ -344,7 +350,10 @@ describe('Gmail provider (Issue #20)', () => {
 
     mockFetchHandler((url, init) => {
       if (url.includes('oauth2.googleapis.com/token')) {
-        return Response.json({ access_token: 'ya29.send_test_token', expires_in: 3600 }, { status: 200 });
+        return Response.json(
+          { access_token: 'ya29.send_test_token', expires_in: 3600 },
+          { status: 200 }
+        );
       }
       if (url.includes('gmail.googleapis.com/gmail/v1/users/me/messages/send')) {
         const bodyStr = typeof init?.body === 'string' ? init.body : '';
@@ -489,66 +498,78 @@ describe('Gmail provider (Issue #20)', () => {
     [502, 'Bad Gateway', true],
     [503, 'Service Unavailable', true],
     [504, 'Gateway Timeout', true],
-  ])('maps HTTP %d on messages/send to retryable: true', async (status, message, expectedRetryable) => {
-    const provider = gmail(testConfig);
+  ])(
+    'maps HTTP %d on messages/send to retryable: true',
+    async (status, message, expectedRetryable) => {
+      const provider = gmail(testConfig);
 
-    mockFetchHandler((url) => {
-      if (url.includes('oauth2.googleapis.com/token')) {
-        return Response.json({ access_token: 'ya29.token_status_test', expires_in: 3600 }, { status: 200 });
-      }
-      if (url.includes('gmail.googleapis.com/gmail/v1/users/me/messages/send')) {
-        return Response.json(
-          {
-            error: {
-              code: status,
-              message,
+      mockFetchHandler((url) => {
+        if (url.includes('oauth2.googleapis.com/token')) {
+          return Response.json(
+            { access_token: 'ya29.token_status_test', expires_in: 3600 },
+            { status: 200 }
+          );
+        }
+        if (url.includes('gmail.googleapis.com/gmail/v1/users/me/messages/send')) {
+          return Response.json(
+            {
+              error: {
+                code: status,
+                message,
+              },
             },
-          },
-          { status }
-        );
-      }
-      return new Response('Not Found', { status: 404 });
-    });
+            { status }
+          );
+        }
+        return new Response('Not Found', { status: 404 });
+      });
 
-    const result = await provider.send(sampleEmail);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.retryable).toBe(expectedRetryable);
-      expect(result.error).toContain(message);
+      const result = await provider.send(sampleEmail);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.retryable).toBe(expectedRetryable);
+        expect(result.error).toContain(message);
+      }
     }
-  });
+  );
 
   it.each([
     [400, 'Invalid recipient address', false],
     [403, 'Insufficient Permission: scope missing', false],
-  ])('maps HTTP %d to non-retryable with Google error message', async (status, message, expectedRetryable) => {
-    const provider = gmail(testConfig);
+  ])(
+    'maps HTTP %d to non-retryable with Google error message',
+    async (status, message, expectedRetryable) => {
+      const provider = gmail(testConfig);
 
-    mockFetchHandler((url) => {
-      if (url.includes('oauth2.googleapis.com/token')) {
-        return Response.json({ access_token: 'ya29.token_status_test', expires_in: 3600 }, { status: 200 });
-      }
-      if (url.includes('gmail.googleapis.com/gmail/v1/users/me/messages/send')) {
-        return Response.json(
-          {
-            error: {
-              code: status,
-              message,
+      mockFetchHandler((url) => {
+        if (url.includes('oauth2.googleapis.com/token')) {
+          return Response.json(
+            { access_token: 'ya29.token_status_test', expires_in: 3600 },
+            { status: 200 }
+          );
+        }
+        if (url.includes('gmail.googleapis.com/gmail/v1/users/me/messages/send')) {
+          return Response.json(
+            {
+              error: {
+                code: status,
+                message,
+              },
             },
-          },
-          { status }
-        );
-      }
-      return new Response('Not Found', { status: 404 });
-    });
+            { status }
+          );
+        }
+        return new Response('Not Found', { status: 404 });
+      });
 
-    const result = await provider.send(sampleEmail);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.retryable).toBe(expectedRetryable);
-      expect(result.error).toContain(message);
+      const result = await provider.send(sampleEmail);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.retryable).toBe(expectedRetryable);
+        expect(result.error).toContain(message);
+      }
     }
-  });
+  );
 
   it('maps network errors (thrown fetch) to retryable: true', async () => {
     const provider = gmail(testConfig);
@@ -574,7 +595,10 @@ describe('Gmail provider (Issue #20)', () => {
 
     mockFetchHandler((url) => {
       if (url.includes('oauth2.googleapis.com/token')) {
-        return Response.json({ access_token: 'ya29.messaging_token', expires_in: 3600 }, { status: 200 });
+        return Response.json(
+          { access_token: 'ya29.messaging_token', expires_in: 3600 },
+          { status: 200 }
+        );
       }
       if (url.includes('gmail.googleapis.com/gmail/v1/users/me/messages/send')) {
         return Response.json({ id: 'gmail_pipeline_001' }, { status: 200 });

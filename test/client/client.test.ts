@@ -429,7 +429,10 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
     it('returns null when status endpoint returns 404 (not found)', async () => {
       const fetcher = createMockFetcher((req) => {
         expect(req.url).toBe('https://messaging/status/msg_unknown_id');
-        return Response.json({ error: 'Message record not found: msg_unknown_id' }, { status: 404 });
+        return Response.json(
+          { error: 'Message record not found: msg_unknown_id' },
+          { status: 404 }
+        );
       });
 
       const client = createMessagingClient<TestCatalog>({ binding: fetcher });

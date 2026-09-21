@@ -170,7 +170,12 @@ describe('httpSms provider', () => {
     }> = [
       { status: 200, body: 'OK', expectedOk: true, expectedRetryable: false },
       { status: 201, body: 'Created', expectedOk: true, expectedRetryable: false },
-      { status: 400, body: 'Bad Request: invalid phone', expectedOk: false, expectedRetryable: false },
+      {
+        status: 400,
+        body: 'Bad Request: invalid phone',
+        expectedOk: false,
+        expectedRetryable: false,
+      },
       { status: 401, body: 'Unauthorized', expectedOk: false, expectedRetryable: false },
       { status: 403, body: 'Forbidden', expectedOk: false, expectedRetryable: false },
       { status: 404, body: 'Endpoint Not Found', expectedOk: false, expectedRetryable: false },
@@ -349,7 +354,12 @@ describe('httpSms provider', () => {
       providers: () => ({ sms: provider }),
     });
 
-    const { id } = await messaging.send({ template: 'ping', to: '+94771234567', locale: 'en', input: undefined });
+    const { id } = await messaging.send({
+      template: 'ping',
+      to: '+94771234567',
+      locale: 'en',
+      input: undefined,
+    });
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(capturedUrl).toBe('https://sms.example.lk/send');
     const record = await messaging.status(id);

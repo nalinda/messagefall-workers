@@ -116,9 +116,7 @@ describe('Issue #14: Example Worker under examples/basic', () => {
       expect(indexContent).toMatch(/export\s+\{\s*FallbackTimer\s*\}\s+from/);
 
       // Runs createMessagingApp at module scope (not inside a fetch handler)
-      expect(indexContent).toMatch(
-        /const\s+app\s*=\s*createMessagingApp/
-      );
+      expect(indexContent).toMatch(/const\s+app\s*=\s*createMessagingApp/);
       expect(indexContent).toMatch(/export\s+default\s+app/);
 
       // No external vendor providers or credentials

@@ -386,7 +386,12 @@ describe('Issue #3: createMessaging send pipeline', () => {
         delivery: { fallback: ['whatsapp', 'sms'], always: [] },
       });
 
-      const pending = messaging.send({ template: 'orderUpdate', to: TO, locale: 'en', input: INPUT });
+      const pending = messaging.send({
+        template: 'orderUpdate',
+        to: TO,
+        locale: 'en',
+        input: INPUT,
+      });
 
       // whatsapp has failed and been recorded; sms is still held open.
       await waitFor(() => sms.calls.length === 1);
@@ -714,7 +719,13 @@ describe('Issue #3: createMessaging send pipeline', () => {
       expect(wa.calls).toHaveLength(0);
       expect(sms.calls).toHaveLength(0);
       expect(email.calls).toHaveLength(0);
-      expect(kv.dump().keys().filter((k) => k.startsWith('msg:')).toArray()).toHaveLength(0);
+      expect(
+        kv
+          .dump()
+          .keys()
+          .filter((k) => k.startsWith('msg:'))
+          .toArray()
+      ).toHaveLength(0);
     });
   });
 
@@ -1056,7 +1067,12 @@ describe('Issue #3: createMessaging send pipeline', () => {
         },
       });
 
-      const { id } = await messaging.send({ template: 'orderUpdate', to: TO, locale: 'en', input: INPUT });
+      const { id } = await messaging.send({
+        template: 'orderUpdate',
+        to: TO,
+        locale: 'en',
+        input: INPUT,
+      });
 
       // send() resolved and the sms attempt is on the record although the whatsapp observer
       // is still hanging.
@@ -1311,7 +1327,6 @@ describe('Issue #3: createMessaging send pipeline', () => {
       });
       expect(record!.always[0].error).toContain('socket hang up');
     });
-
   });
 
   describe('chain and always run in parallel', () => {
@@ -1738,4 +1753,3 @@ describe('Issue #3: createMessaging send pipeline', () => {
     });
   });
 });
-

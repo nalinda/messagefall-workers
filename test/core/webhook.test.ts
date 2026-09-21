@@ -34,10 +34,7 @@ function createSignedProvider(): Provider {
     channel: 'whatsapp',
     send: () => Promise.resolve({ ok: true }),
     webhook: {
-      parse: async (
-        req: Request,
-        parseOpts?: WebhookParseOptions
-      ): Promise<StatusEvent[]> => {
+      parse: async (req: Request, parseOpts?: WebhookParseOptions): Promise<StatusEvent[]> => {
         const sig = req.headers.get('x-hub-signature-256');
         if (sig !== 'sha256=valid_test_signature' && parseOpts?.devUnsigned !== true) {
           throw new Error('Signature validation failed');
@@ -1054,7 +1051,11 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
         headers: { 'content-type': 'application/json' },
       });
 
-      const response = await handleWebhook('meta-wa', request, mockCtx as unknown as ExecutionContext);
+      const response = await handleWebhook(
+        'meta-wa',
+        request,
+        mockCtx as unknown as ExecutionContext
+      );
       expect(response.status).toBe(200);
 
       // Verify ctx.waitUntil was called
@@ -1282,7 +1283,9 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
       const providerId = 'wamid.HBgL_01J9REDACT_WA';
       const secretCode = '480221';
 
-      await store.create(singleAttemptRecord(messageId, providerId, 'loginOtp', 'whatsapp', 'meta-wa'));
+      await store.create(
+        singleAttemptRecord(messageId, providerId, 'loginOtp', 'whatsapp', 'meta-wa')
+      );
       await store.indexProviderId(providerId, {
         id: messageId,
         channel: 'whatsapp',
@@ -1332,7 +1335,9 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
       const messageId = 'msg_01J9REDACT000000000PARAM';
       const providerId = 'wamid.HBgL_01J9REDACT_PARAM';
 
-      await store.create(singleAttemptRecord(messageId, providerId, 'loginOtp', 'whatsapp', 'meta-wa'));
+      await store.create(
+        singleAttemptRecord(messageId, providerId, 'loginOtp', 'whatsapp', 'meta-wa')
+      );
       await store.indexProviderId(providerId, {
         id: messageId,
         channel: 'whatsapp',
@@ -1407,7 +1412,11 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
           webhook: {
             parse: () =>
               Promise.resolve([
-                { providerId: expiredProviderId, status: 'delivered', at: '2026-09-20T13:00:00.000Z' },
+                {
+                  providerId: expiredProviderId,
+                  status: 'delivered',
+                  at: '2026-09-20T13:00:00.000Z',
+                },
                 { providerId: liveProviderId, status: 'delivered', at: '2026-09-20T13:00:01.000Z' },
               ]),
           },
@@ -1461,7 +1470,11 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
             parse: () =>
               Promise.resolve([
                 { providerId: firstProviderId, status: 'failed', at: '2026-09-20T13:00:00.000Z' },
-                { providerId: secondProviderId, status: 'delivered', at: '2026-09-20T13:00:01.000Z' },
+                {
+                  providerId: secondProviderId,
+                  status: 'delivered',
+                  at: '2026-09-20T13:00:01.000Z',
+                },
               ]),
           },
         };

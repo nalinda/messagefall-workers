@@ -28,9 +28,8 @@ import { createMockFetcher } from '../helpers/client.js';
 type Extends<A, B> = A extends B ? true : false;
 type Not<T extends boolean> = T extends true ? false : true;
 type Expect<T extends true> = T;
-type Equals<X, Y> = (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2
-  ? true
-  : false;
+type Equals<X, Y> =
+  (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
 
 function assertType<T>(_value: T): void {
   // Compile-time type verification helper
@@ -316,9 +315,7 @@ describe('createMessagingClient type-level specifications (Issue #12)', () => {
 
   it('verifies client options interface requires Fetcher binding and accepts optional basePath', async () => {
     type ExpectedOptions = { binding: Fetcher; basePath?: string };
-    type TestOptionsCompiles = Expect<
-      Extends<ExpectedOptions, CreateMessagingClientOptions>
-    >;
+    type TestOptionsCompiles = Expect<Extends<ExpectedOptions, CreateMessagingClientOptions>>;
     assertType<TestOptionsCompiles>(true);
 
     const fetcher = createMockFetcher(() => {

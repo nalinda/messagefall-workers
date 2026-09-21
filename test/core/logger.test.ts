@@ -18,22 +18,12 @@ import path from 'node:path';
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
 
-import {
-  createLogger,
-  type LogEvent,
-  type LogFields,
-  type Logger,
-} from '../../src/core/logger.js';
+import { createLogger, type LogEvent, type LogFields, type Logger } from '../../src/core/logger.js';
 import { createMessaging } from '../../src/core/messaging.js';
 import { scrubError } from '../../src/core/redact.js';
 import type { Channel, Provider, RenderedSms } from '../../src/providers/types.js';
 import { defineTemplates, render } from '../../src/templates.js';
-import {
-  assertType,
-  type Expect,
-  type Extends,
-  type Not,
-} from '../helpers/logger.js';
+import { assertType, type Expect, type Extends, type Not } from '../helpers/logger.js';
 import { captureConsole, memoryKV } from '../helpers/messaging.js';
 
 interface ConsoleCallMatch {
@@ -131,20 +121,15 @@ describe('Issue #10: No message bodies in logs, enforced in code', () => {
 
       // 4. Sensitive message body fields are prohibited on LogFields
       type DisallowedFieldKeys =
-        | 'text'
-        | 'body'
-        | 'code'
-        | 'subject'
-        | 'params'
-        | 'input'
-        | 'message'
-        | 'payload';
+        'text' | 'body' | 'code' | 'subject' | 'params' | 'input' | 'message' | 'payload';
       type TestDisallowedFieldKeys = Expect<Not<Extends<DisallowedFieldKeys, keyof LogFields>>>;
       assertType<TestDisallowedFieldKeys>(true);
 
       // 5. Logger method signatures only accept allow-listed events and LogFields
       type LoggerInfoArgs = Parameters<Logger['info']>;
-      type TestInfoSignature = Expect<Extends<[event: LogEvent, fields?: LogFields], LoggerInfoArgs>>;
+      type TestInfoSignature = Expect<
+        Extends<[event: LogEvent, fields?: LogFields], LoggerInfoArgs>
+      >;
       assertType<TestInfoSignature>(true);
 
       expect(typeof assertType).toBe('function');
@@ -277,7 +262,7 @@ describe('Issue #10: No message bodies in logs, enforced in code', () => {
           templates: otpCatalog,
           providers: () => ({ sms: failingSms }),
           delivery: { fallback: ['sms'], always: [] },
-        },
+        }
       );
 
       const { id } = await messaging.send({

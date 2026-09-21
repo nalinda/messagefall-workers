@@ -46,7 +46,7 @@ describe('defineTemplates: Definition-time validation', () => {
 
     expect(() =>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      defineTemplates(schemalessCatalog as unknown as Record<string, TemplateDef<any>>),
+      defineTemplates(schemalessCatalog as unknown as Record<string, TemplateDef<any>>)
     ).toThrow(/loginCode.*input/);
   });
 
@@ -61,7 +61,7 @@ describe('defineTemplates: Definition-time validation', () => {
 
     expect(() =>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      defineTemplates(bogusCatalog as unknown as Record<string, TemplateDef<any>>),
+      defineTemplates(bogusCatalog as unknown as Record<string, TemplateDef<any>>)
     ).toThrow(/loginCode.*input/);
   });
 
@@ -85,7 +85,7 @@ describe('defineTemplates: Definition-time validation', () => {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(() => defineTemplates(emptyTemplateCatalog as Record<string, TemplateDef<any>>)).toThrow(
-      /emptyNotification/,
+      /emptyNotification/
     );
   });
 
@@ -102,7 +102,7 @@ describe('defineTemplates: Definition-time validation', () => {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(() => defineTemplates(invalidOtpCatalog as Record<string, TemplateDef<any>>)).toThrow(
-      /loginCode/,
+      /loginCode/
     );
   });
 
@@ -153,7 +153,7 @@ describe('defineTemplates: Definition-time validation', () => {
 
     expect(() =>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      defineTemplates(invalidDeliveryFallback as Record<string, TemplateDef<any>>),
+      defineTemplates(invalidDeliveryFallback as Record<string, TemplateDef<any>>)
     ).toThrow(/smsOnlyOtp/);
   });
 
@@ -169,7 +169,7 @@ describe('defineTemplates: Definition-time validation', () => {
 
     expect(() =>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      defineTemplates(invalidDeliveryAlways as Record<string, TemplateDef<any>>),
+      defineTemplates(invalidDeliveryAlways as Record<string, TemplateDef<any>>)
     ).toThrow(/smsOnlyAlert/);
   });
 
@@ -267,7 +267,7 @@ describe('Locale resolution of language for WhatsApp templates', () => {
     };
 
     expect(() => render(template, 'whatsapp', { code: '123456' }, 'fr')).toThrow(
-      /locale|language/i,
+      /locale|language/i
     );
   });
 
@@ -363,7 +363,7 @@ describe('render() returns exact shapes from #18 and never mutates input', () =>
       template,
       'email',
       { title: 'New Item', url: 'https://example.com/item/1' },
-      'en',
+      'en'
     );
     expect(result).toEqual({
       subject: 'Match: New Item',
@@ -402,9 +402,7 @@ describe('render() returns exact shapes from #18 and never mutates input', () =>
       sms: ({ code }) => `Code: ${code}`,
     };
 
-    expect(() => render(smsOnlyTemplate, 'email', { code: '123456' }, 'en')).toThrow(
-      /email/i,
-    );
+    expect(() => render(smsOnlyTemplate, 'email', { code: '123456' }, 'en')).toThrow(/email/i);
   });
 });
 
@@ -468,16 +466,16 @@ describe('Zod and Valibot interoperability via Standard Schema only', () => {
       valibotCatalog.gameNotification,
       'sms',
       { username: 'alice', score: 100 },
-      'en',
+      'en'
     );
     expect(rendered).toEqual({ text: 'Player alice scored 100' });
 
     // A wrong field type and a missing field both fail, through Valibot's own issues.
     expect(() =>
-      render(valibotCatalog.gameNotification, 'sms', { username: 'alice', score: 'NaN' }, 'en'),
+      render(valibotCatalog.gameNotification, 'sms', { username: 'alice', score: 'NaN' }, 'en')
     ).toThrow(TemplateValidationError);
     expect(() =>
-      render(valibotCatalog.gameNotification, 'sms', { username: 'alice' }, 'en'),
+      render(valibotCatalog.gameNotification, 'sms', { username: 'alice' }, 'en')
     ).toThrow(TemplateValidationError);
   });
 

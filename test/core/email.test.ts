@@ -40,9 +40,12 @@ const emailCatalog = defineTemplates({
     },
     sms: ({ name, orderId }: NotificationInput) => `${name}: order ${orderId} shipped`,
     email: {
-      subject: ({ orderId }: NotificationInput, locale: string) => `[${locale}] Order ${orderId} shipped`,
-      text: ({ name, orderId }: NotificationInput) => `Hi ${name}, your order ${orderId} is on its way.`,
-      html: ({ name, orderId }: NotificationInput) => `<h1>Hi ${name}</h1><p>Your order <strong>${orderId}</strong> is on its way.</p>`,
+      subject: ({ orderId }: NotificationInput, locale: string) =>
+        `[${locale}] Order ${orderId} shipped`,
+      text: ({ name, orderId }: NotificationInput) =>
+        `Hi ${name}, your order ${orderId} is on its way.`,
+      html: ({ name, orderId }: NotificationInput) =>
+        `<h1>Hi ${name}</h1><p>Your order <strong>${orderId}</strong> is on its way.</p>`,
     },
   },
   orderTextOnly: {
@@ -54,7 +57,8 @@ const emailCatalog = defineTemplates({
     sms: ({ name, orderId }: NotificationInput) => `${name}: order ${orderId} shipped`,
     email: {
       subject: ({ orderId }: NotificationInput) => `Order ${orderId} update`,
-      text: ({ name, orderId }: NotificationInput) => `Hi ${name}, your order ${orderId} status updated.`,
+      text: ({ name, orderId }: NotificationInput) =>
+        `Hi ${name}, your order ${orderId} status updated.`,
     },
   },
   emailOnlyNotification: {
@@ -106,7 +110,9 @@ describe('Issue #11: Email channel rendering', () => {
       expect(rendered.subject).toBe('[en] Order ORD-456 shipped');
       expect(rendered.text).toBe('Hi Bob, your order ORD-456 is on its way.');
       expect('html' in rendered).toBe(true);
-      expect(rendered.html).toBe('<h1>Hi Bob</h1><p>Your order <strong>ORD-456</strong> is on its way.</p>');
+      expect(rendered.html).toBe(
+        '<h1>Hi Bob</h1><p>Your order <strong>ORD-456</strong> is on its way.</p>'
+      );
     });
 
     it('passes locale through to subject, text, and html functions', () => {
@@ -122,7 +128,12 @@ describe('Issue #11: Email channel rendering', () => {
         },
       });
 
-      const renderedFr = render(localizedCatalog.localizedEmail, 'email', { code: 'ABC' }, 'fr') as RenderedEmail;
+      const renderedFr = render(
+        localizedCatalog.localizedEmail,
+        'email',
+        { code: 'ABC' },
+        'fr'
+      ) as RenderedEmail;
       expect(renderedFr.subject).toBe('[fr] Code: ABC');
       expect(renderedFr.text).toBe('[fr] text ABC');
       expect(renderedFr.html).toBe('<p>[fr] html ABC</p>');
@@ -137,7 +148,9 @@ describe('Issue #11: Email channel rendering', () => {
         },
       });
 
-      expect(() => render(smsOnlyCatalog.smsOnly, 'email', { text: 'hi' }, 'en')).toThrow(/channel "email" is not defined/i);
+      expect(() => render(smsOnlyCatalog.smsOnly, 'email', { text: 'hi' }, 'en')).toThrow(
+        /channel "email" is not defined/i
+      );
     });
 
     it('definedChannels identifies email channel correctly', () => {
@@ -148,7 +161,10 @@ describe('Issue #11: Email channel rendering', () => {
 
   describe('Console provider delivery', () => {
     it('sends through console provider as a chain channel with correct subject and text', async () => {
-      const emailConsole = consoleProvider<RenderedEmail>({ channel: 'email', name: 'console-email' });
+      const emailConsole = consoleProvider<RenderedEmail>({
+        channel: 'email',
+        name: 'console-email',
+      });
       const emailSpy = spyOn(emailConsole, 'send');
       const silenced = captureConsole(['log']);
 
@@ -191,8 +207,13 @@ describe('Issue #11: Email channel rendering', () => {
     });
 
     it('sends through console provider as an always channel with correct subject, text, and html', async () => {
-      const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'rec-wa', [{ ok: true, providerId: 'wa-123' }]);
-      const emailConsole = consoleProvider<RenderedEmail>({ channel: 'email', name: 'console-email' });
+      const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'rec-wa', [
+        { ok: true, providerId: 'wa-123' },
+      ]);
+      const emailConsole = consoleProvider<RenderedEmail>({
+        channel: 'email',
+        name: 'console-email',
+      });
       const emailSpy = spyOn(emailConsole, 'send');
       const silenced = captureConsole(['log']);
 
@@ -219,7 +240,9 @@ describe('Issue #11: Email channel rendering', () => {
         expect(emailPayload.messageId).toBe(id);
         expect(emailPayload.subject).toBe('[en] Order ORD-200 shipped');
         expect(emailPayload.text).toBe('Hi Bob, your order ORD-200 is on its way.');
-        expect(emailPayload.html).toBe('<h1>Hi Bob</h1><p>Your order <strong>ORD-200</strong> is on its way.</p>');
+        expect(emailPayload.html).toBe(
+          '<h1>Hi Bob</h1><p>Your order <strong>ORD-200</strong> is on its way.</p>'
+        );
 
         const record = await messaging.status(id);
         expect(record).not.toBeNull();
@@ -243,7 +266,9 @@ describe('Issue #11: Email channel rendering', () => {
 
   describe('Skipping email when no email address is present', () => {
     it('skips email when in always, logs send.channel-skipped, and still sends phone channel', async () => {
-      const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'rec-wa', [{ ok: true, providerId: 'wa-pid' }]);
+      const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'rec-wa', [
+        { ok: true, providerId: 'wa-pid' },
+      ]);
       const email = recordingProvider<RenderedEmail>('email', 'rec-email');
 
       const capturedConsole = captureConsole(['log', 'info', 'warn', 'error']);
@@ -301,7 +326,9 @@ describe('Issue #11: Email channel rendering', () => {
 
     it('skips email when in fallback chain, logs send.channel-skipped, and falls back to sms', async () => {
       const email = recordingProvider<RenderedEmail>('email', 'rec-email');
-      const sms = recordingProvider<RenderedSms>('sms', 'rec-sms', [{ ok: true, providerId: 'sms-pid' }]);
+      const sms = recordingProvider<RenderedSms>('sms', 'rec-sms', [
+        { ok: true, providerId: 'sms-pid' },
+      ]);
       const capturedConsole = captureConsole(['log', 'info', 'warn', 'error']);
 
       try {
