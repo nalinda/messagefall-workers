@@ -159,18 +159,27 @@ export interface StatusStore {
   /**
    * Indexes a provider ID mapping back to the message.
    *
+   * The index is scoped by the provider the id came from (`ref.provider`): a provider id is only
+   * unique within its own vendor, and several attempts on one message can legitimately carry the
+   * same bare id — the console provider mints `console_<messageId>` on every channel, and two
+   * real vendors can collide by coincidence. An index keyed on the bare id alone is
+   * last-writer-wins across all of a message's attempts, so a webhook from one provider would
+   * resolve to another provider's attempt.
+   *
    * @param providerId - External provider ID.
    * @param ref - Reference object containing internal message ID, channel, and provider.
    */
   indexProviderId(providerId: string, ref: ProviderRef): Promise<void>;
 
   /**
-   * Looks up the provider reference associated with a provider ID.
+   * Looks up the provider reference associated with a provider ID, within one provider's own
+   * id space. See {@link StatusStore.indexProviderId} for why the provider is part of the key.
    *
    * @param providerId - External provider ID.
+   * @param provider - Name of the provider the id belongs to (the webhook route's provider).
    * @returns The reference if found, or null.
    */
-  lookupProviderId(providerId: string): Promise<ProviderRef | null>;
+  lookupProviderId(providerId: string, provider: string): Promise<ProviderRef | null>;
 }
 
 /**
@@ -350,12 +359,21 @@ export function deriveOverallStatus(
  *
  * Keys:
  * - `msg:<id>` - MessageRecord serialized as JSON.
- * - `pid:<providerId>` - ProviderRef serialized as JSON.
+ * - `pid:<provider>:<providerId>` - ProviderRef serialized as JSON, scoped to the provider whose
+ *   id space the providerId belongs to.
  *
  * @param kv - Cloudflare KV namespace instance.
  * @param opts - Status store options (e.g. custom TTL).
  * @returns An implementation of {@link StatusStore}.
  */
+/**
+ * The KV key one provider's id maps under. The provider name is the prefix, so the id itself may
+ * contain anything (including `:`) without ambiguity — the key is never parsed back apart.
+ */
+function providerIdKey(provider: string, providerId: string): string {
+  return `pid:${provider}:${providerId}`;
+}
+
 export function kvStatusStore(kv: KVNamespace, opts?: StatusStoreOptions): StatusStore {
   const ttl = opts?.ttlSeconds ?? DEFAULT_STATUS_TTL;
 
@@ -389,13 +407,13 @@ export function kvStatusStore(kv: KVNamespace, opts?: StatusStoreOptions): Statu
     },
 
     async indexProviderId(providerId: string, ref: ProviderRef): Promise<void> {
-      await kv.put(`pid:${providerId}`, JSON.stringify(ref), {
+      await kv.put(providerIdKey(ref.provider, providerId), JSON.stringify(ref), {
         expirationTtl: ttl,
       });
     },
 
-    async lookupProviderId(providerId: string): Promise<ProviderRef | null> {
-      const data = await kv.get(`pid:${providerId}`);
+    async lookupProviderId(providerId: string, provider: string): Promise<ProviderRef | null> {
+      const data = await kv.get(providerIdKey(provider, providerId));
       if (data === null) {
         return null;
       }

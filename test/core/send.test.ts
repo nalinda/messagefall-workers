@@ -869,7 +869,9 @@ describe('Issue #3: createMessaging send pipeline', () => {
         expect(record!.status).toBe('sent');
         expect(record!.chain.attempts).toHaveLength(1);
         expect(record!.chain.attempts[0]).toMatchObject({ providerId: 'sms-after-retry' });
-        expect(await kvStatusStore(env.MESSAGES_KV).lookupProviderId('sms-after-retry')).toEqual({
+        expect(
+          await kvStatusStore(env.MESSAGES_KV).lookupProviderId('sms-after-retry', 'rec-sms')
+        ).toEqual({
           id,
           channel: 'sms',
           provider: 'rec-sms',
@@ -1116,11 +1118,13 @@ describe('Issue #3: createMessaging send pipeline', () => {
       expect(wa.calls).toHaveLength(1);
       expect(events).toHaveLength(1);
       expect(events[0]).toMatchObject({ channel: 'email', provider: 'fast-email', status: 'sent' });
-      expect(await store.lookupProviderId('email-fast-pid')).toMatchObject({ channel: 'email' });
+      expect(await store.lookupProviderId('email-fast-pid', 'fast-email')).toMatchObject({
+        channel: 'email',
+      });
       const midway = await store.get(events[0].id);
       expect(midway!.always).toHaveLength(1);
       expect(midway!.chain.attempts).toHaveLength(0);
-      expect(await store.lookupProviderId('wa-slow-pid')).toBeNull();
+      expect(await store.lookupProviderId('wa-slow-pid', 'slow-wa')).toBeNull();
 
       wa.release();
       const { id } = await pending;
@@ -1128,7 +1132,9 @@ describe('Issue #3: createMessaging send pipeline', () => {
       expect(record!.chain.attempts).toHaveLength(1);
       expect(record!.always).toHaveLength(1);
       expect(record!.status).toBe('sent');
-      expect(await store.lookupProviderId('wa-slow-pid')).toMatchObject({ channel: 'whatsapp' });
+      expect(await store.lookupProviderId('wa-slow-pid', 'slow-wa')).toMatchObject({
+        channel: 'whatsapp',
+      });
     });
   });
 
@@ -1421,12 +1427,12 @@ describe('Issue #3: createMessaging send pipeline', () => {
       });
 
       const store = kvStatusStore(env.MESSAGES_KV);
-      expect(await store.lookupProviderId('wa-pid-1')).toEqual({
+      expect(await store.lookupProviderId('wa-pid-1', 'rec-wa')).toEqual({
         id,
         channel: 'whatsapp',
         provider: 'rec-wa',
       });
-      expect(await store.lookupProviderId('email-pid-1')).toEqual({
+      expect(await store.lookupProviderId('email-pid-1', 'rec-email')).toEqual({
         id,
         channel: 'email',
         provider: 'rec-email',
@@ -1486,7 +1492,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
         providerId: 'otp-pid',
         status: 'sent',
       });
-      expect(await kvStatusStore(env.MESSAGES_KV).lookupProviderId('otp-pid')).toEqual({
+      expect(await kvStatusStore(env.MESSAGES_KV).lookupProviderId('otp-pid', 'otp-sms')).toEqual({
         id,
         channel: 'sms',
         provider: 'otp-sms',

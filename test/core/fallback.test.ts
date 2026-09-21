@@ -225,7 +225,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         store,
       });
 
-      const providerRef = await store.lookupProviderId('sms_vendor_ref_999');
+      const providerRef = await store.lookupProviderId('sms_vendor_ref_999', 'mock-sms');
       expect(providerRef).not.toBeNull();
       expect(providerRef?.id).toBe(messageId);
       expect(providerRef?.channel).toBe('sms');

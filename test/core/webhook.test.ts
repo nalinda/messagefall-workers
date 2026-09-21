@@ -1335,6 +1335,132 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
       expect(updatedRecord?.always[0]?.status).toBe('delivered');
     });
 
+    it('routes colliding provider ids by provider, so an always-on webhook cannot touch the chain', async () => {
+      // A provider id is only unique inside its own vendor's id space. The console provider mints
+      // `console_<messageId>` on EVERY channel (per #18), so a config with one console provider
+      // per channel — exactly what `examples/basic` ships — gives the WhatsApp chain attempt and
+      // the email always-on attempt the same bare id. Matching on that id alone wrote the email's
+      // `failed` onto the WhatsApp chain attempt and emitted `StatusApplied`, advancing the
+      // fallback chain off an always-on channel's outcome, which the always-on contract forbids.
+      const store = kvStatusStore(kv);
+
+      const messageId = 'msg_01J9COLLIDE0000000000001';
+      // The one id both attempts carry.
+      const sharedProviderId = `console_${messageId}`;
+
+      await store.create({
+        id: messageId,
+        template: 'orderUpdate',
+        kind: 'notification',
+        policy: { fallback: ['whatsapp', 'sms'], always: ['email'] },
+        chain: {
+          status: 'sent',
+          attempts: [
+            {
+              channel: 'whatsapp',
+              provider: 'console-whatsapp',
+              providerId: sharedProviderId,
+              status: 'sent',
+              at: '2026-09-20T12:00:00.000Z',
+            },
+          ],
+        },
+        always: [
+          {
+            channel: 'email',
+            provider: 'console-email',
+            providerId: sharedProviderId,
+            status: 'sent',
+            at: '2026-09-20T12:00:00.000Z',
+          },
+        ],
+        status: 'sent',
+        createdAt: '2026-09-20T12:00:00.000Z',
+        updatedAt: '2026-09-20T12:00:00.000Z',
+      });
+
+      // Both attempts index the same bare id; email is written last, so an index keyed on the id
+      // alone would resolve every one of this message's callbacks to the email attempt's ref.
+      await store.indexProviderId(sharedProviderId, {
+        id: messageId,
+        channel: 'whatsapp',
+        provider: 'console-whatsapp',
+      });
+      await store.indexProviderId(sharedProviderId, {
+        id: messageId,
+        channel: 'email',
+        provider: 'console-email',
+      });
+
+      const appliedEvents: StatusApplied[] = [];
+      const emailFailed: StatusEvent = {
+        providerId: sharedProviderId,
+        status: 'failed',
+        at: '2026-09-20T12:00:30.000Z',
+        error: 'mailbox full',
+      };
+
+      const handleEmailWebhook = createWebhookHandler({
+        providers: {
+          email: {
+            name: 'console-email',
+            channel: 'email',
+            send: () => Promise.resolve({ ok: true }),
+            webhook: { parse: () => Promise.resolve([emailFailed]) },
+          },
+        },
+        kv,
+        onStatusApplied: (applied) => {
+          appliedEvents.push(applied);
+        },
+      });
+
+      const emailResponse = await handleEmailWebhook(
+        'console-email',
+        new Request('http://localhost/webhooks/console-email', { method: 'POST', body: '{}' })
+      );
+      expect(emailResponse.status).toBe(200);
+
+      const afterEmail = await store.get(messageId);
+      // The always-on attempt took the failure...
+      expect(afterEmail?.always[0]?.status).toBe('failed');
+      expect(afterEmail?.always[0]?.error).toBe('mailbox full');
+      // ...and the chain attempt that happens to share its id is untouched.
+      expect(afterEmail?.chain.attempts[0].status).toBe('sent');
+      expect(afterEmail?.chain.attempts[0].error).toBeUndefined();
+      expect(afterEmail?.chain.status).toBe('sent');
+      // No chain event, so nothing for the fallback bridge to advance on.
+      expect(appliedEvents).toHaveLength(0);
+
+      // And the WhatsApp provider's own callback still finds its own attempt: scoping the index
+      // per provider keeps both refs alive instead of letting the later write win.
+      const whatsappDelivered: StatusEvent = {
+        providerId: sharedProviderId,
+        status: 'delivered',
+        at: '2026-09-20T12:01:00.000Z',
+      };
+      const handleWhatsappWebhook = createWebhookHandler({
+        providers: { whatsapp: providerEmitting('console-whatsapp', whatsappDelivered) },
+        kv,
+        onStatusApplied: (applied) => {
+          appliedEvents.push(applied);
+        },
+      });
+
+      await handleWhatsappWebhook(
+        'console-whatsapp',
+        new Request('http://localhost/webhooks/console-whatsapp', { method: 'POST', body: '{}' })
+      );
+
+      const afterWhatsapp = await store.get(messageId);
+      expect(afterWhatsapp?.chain.attempts[0].status).toBe('delivered');
+      expect(afterWhatsapp?.chain.status).toBe('delivered');
+      // The always-on attempt keeps its own outcome.
+      expect(afterWhatsapp?.always[0]?.status).toBe('failed');
+      expect(appliedEvents).toHaveLength(1);
+      expect(appliedEvents[0].channel).toBe('whatsapp');
+    });
+
     it('runs background processing under ctx.waitUntil when ctx is provided', async () => {
       const store = kvStatusStore(kv);
 

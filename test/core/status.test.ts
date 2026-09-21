@@ -9,7 +9,7 @@
  * - Zero-content leakage, for what the status store itself writes: renders a template with a
  *   known code, drives create and update through this store, then scans the KV namespace and
  *   asserts no code, rendered text, subject, html, input or params landed in it. The fixture
- *   writes nothing but the store's own `msg:<id>` and `pid:<providerId>` entries, so that is
+ *   writes nothing but the store's own `msg:<id>` and `pid:<provider>:<providerId>` entries, so that is
  *   the scope of the guarantee — not the namespace a real send leaves behind. A real send also
  *   writes the raw plaintext render input to `in:<id>` here, which is a deliberate, documented
  *   gap (the README's Delivery status section, and the CHANGELOG's known limitations) and is
@@ -164,7 +164,7 @@ describe('Issue #6: Delivery-status store in KV', () => {
       expect(thrownError).toBeDefined();
     });
 
-    it('indexes and looks up providerId round-trip with pid:<providerId> key mapping', async () => {
+    it('indexes and looks up providerId round-trip with pid:<provider>:<providerId> key mapping', async () => {
       const store: StatusStore = kvStatusStore(kv);
 
       const providerId = 'wamid.HBgL9876543210';
@@ -176,18 +176,22 @@ describe('Issue #6: Delivery-status store in KV', () => {
 
       await store.indexProviderId(providerId, ref);
 
-      // Direct KV inspection: key must use "pid:<providerId>" prefix
-      const rawStored = await kv.get(`pid:${providerId}`);
+      // Direct KV inspection: the key is scoped to the provider's own id space, so two providers
+      // minting the same bare id index separately instead of overwriting one another.
+      const rawStored = await kv.get(`pid:${ref.provider}:${providerId}`);
       expect(rawStored).not.toBeNull();
       const parsedStored = JSON.parse(rawStored as string) as ProviderRef;
       expect(parsedStored).toEqual(ref);
 
       // StatusStore#lookupProviderId retrieval
-      const lookup = await store.lookupProviderId(providerId);
+      const lookup = await store.lookupProviderId(providerId, ref.provider);
       expect(lookup).toEqual(ref);
 
+      // The same id under a different provider is a different key, so it does not resolve.
+      expect(await store.lookupProviderId(providerId, 'twilio-sms')).toBeNull();
+
       // Non-existent providerId returns null
-      const nonExistent = await store.lookupProviderId('wamid.nonexistent');
+      const nonExistent = await store.lookupProviderId('wamid.nonexistent', ref.provider);
       expect(nonExistent).toBeNull();
     });
 

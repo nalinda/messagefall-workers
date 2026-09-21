@@ -189,15 +189,25 @@ function isStatusProgression(att: Attempt, event: StatusEvent): boolean {
 }
 
 /**
- * Whether `att` is the attempt a status event/reference is about: either it already carries the
- * event's own `providerId`, or it is the attempt on the same channel and provider the reference
- * resolved to (the only match available before an attempt has a `providerId` indexed at all).
+ * Whether `att` is the attempt a status event/reference is about.
+ *
+ * A provider id is only unique inside its own vendor's id space, so the provider is part of the
+ * identity, never the bare id alone: several attempts on one message can carry the same
+ * `providerId` (the console provider mints `console_<messageId>` on every channel, and two real
+ * vendors can collide by coincidence). Matching on the id alone let a status event for one
+ * channel's attempt overwrite an unrelated attempt on another — including an always-on channel's
+ * webhook rewriting a chain attempt and driving a bogus fallback advance, which the always-on
+ * contract forbids outright.
+ *
+ * So the provider must match, and then either the attempt already carries the event's own
+ * `providerId`, or it is the attempt on the channel the reference resolved to (the only match
+ * available before an attempt has a `providerId` indexed at all).
  */
 function isMatchingAttempt(att: Attempt, event: StatusEvent, ref: ProviderRef): boolean {
-  return (
-    att.providerId === event.providerId ||
-    (att.channel === ref.channel && att.provider === ref.provider)
-  );
+  if (att.provider !== ref.provider) {
+    return false;
+  }
+  return att.providerId === event.providerId || att.channel === ref.channel;
 }
 
 /**
@@ -312,10 +322,13 @@ async function resolveWebhookSensitive(
  */
 async function handleSingleEvent(
   event: StatusEvent,
+  providerName: string,
   store: StatusStore,
   options: WebhookDispatchOptions
 ): Promise<{ wasHandled: boolean }> {
-  const ref = await store.lookupProviderId(event.providerId);
+  // Scoped to the provider the webhook arrived for: the same bare id can belong to a different
+  // attempt of the same message under another provider. See `StatusStore.indexProviderId`.
+  const ref = await store.lookupProviderId(event.providerId, providerName);
   if (!ref) {
     return { wasHandled: false };
   }
@@ -388,11 +401,12 @@ async function handleSingleEvent(
  */
 async function applyOneEvent(
   event: StatusEvent,
+  providerName: string,
   store: StatusStore | null,
   options: WebhookDispatchOptions
 ): Promise<{ wasHandled: boolean }> {
   if (store) {
-    return handleSingleEvent(event, store, options);
+    return handleSingleEvent(event, providerName, store, options);
   }
   if (options.onStatus) {
     await options.onStatus(event);
@@ -410,7 +424,8 @@ async function applyOneEvent(
  * `failed` takes exactly the path a real vendor callback takes — including driving fallback.
  *
  * @param events - The parsed status events.
- * @param providerName - Name of the provider the events came from, for the unmatched-event log.
+ * @param providerName - Name of the provider the events came from. It scopes the provider-id
+ *   lookup to that provider's own id space (and labels the unmatched-event log).
  * @param options - Webhook dispatch configuration options.
  */
 export async function applyStatusEvents(
@@ -427,7 +442,7 @@ export async function applyStatusEvents(
     // record, a KV fault or a throwing `onStatusApplied`. So every per-event failure is logged and
     // the next event is tried, on the inline path exactly as on the `ctx.waitUntil` one.
     try {
-      const { wasHandled } = await applyOneEvent(event, store, options);
+      const { wasHandled } = await applyOneEvent(event, providerName, store, options);
       if (!wasHandled) {
         unknownCount++;
       }
