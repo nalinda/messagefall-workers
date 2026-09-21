@@ -6,6 +6,11 @@ import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
 
 import {
+  registeredMessagingOptions,
+  registerMessagingOptions,
+  resetMessagingOptions,
+} from '../../src/core/timer.js';
+import {
   createMessaging,
   defineTemplates,
   type Provider,
@@ -315,6 +320,37 @@ describe('createMessaging.handleWebhook concurrency', () => {
     const record = await messaging.status(id);
     expect(record!.chain.attempts).toHaveLength(2);
     expect(record!.chain.attempts.map((attempt) => attempt.channel)).toEqual(['whatsapp', 'sms']);
+  });
+});
+
+describe('registerMessagingOptions', () => {
+  // The registry is a module-level singleton the FallbackTimer's alarm reads its configuration
+  // from, and it is last-call-wins. Overwriting it used to be silent, so a second
+  // createMessaging with its own templates or providers quietly redirected every alarm in the
+  // isolate to the wrong configuration.
+  it('warns when a different options object replaces the registered one, and stays quiet otherwise', () => {
+    const first = { templates, providers: () => ({ sms: stubSms('first') }) };
+    const second = { templates, providers: () => ({ sms: stubSms('second') }) };
+    resetMessagingOptions();
+    const captured = captureConsole(['warn']);
+
+    try {
+      registerMessagingOptions(first);
+      // What createMessaging does on every request: the same object, so nothing to say.
+      registerMessagingOptions(first);
+      expect(captured.logs.filter((line) => line.includes('timer.options-replaced'))).toHaveLength(
+        0
+      );
+
+      registerMessagingOptions(second);
+      expect(captured.logs.filter((line) => line.includes('timer.options-replaced'))).toHaveLength(
+        1
+      );
+      expect(registeredMessagingOptions()).toBe(second);
+    } finally {
+      captured.restore();
+      resetMessagingOptions();
+    }
   });
 });
 

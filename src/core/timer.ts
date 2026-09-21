@@ -216,12 +216,21 @@ const registry: { options: MessagingOptions | undefined } = { options: undefined
  * `const`, as in the README's quick start — not lazily inside a request handler. Otherwise the
  * alarm finds no options and throws (keeping its storage for the platform's retry).
  *
+ * Replacing one options object with a *different* one writes a warn-level
+ * `timer.options-replaced` line, so the constraint above is visible in the logs rather than
+ * silently violated: without it, a second `createMessaging` with its own templates or providers
+ * would quietly redirect every alarm in the isolate to the wrong configuration. Re-registering
+ * the same object — which `createMessaging` does on every request — says nothing.
+ *
  * @param options - The options the Worker was configured with.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function registerMessagingOptions<T extends Templates<any>>(
   options: MessagingOptions<T>
 ): void {
+  if (registry.options !== undefined && registry.options !== options) {
+    logger.warn('timer.options-replaced');
+  }
   registry.options = options;
 }
 

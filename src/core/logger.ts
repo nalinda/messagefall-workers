@@ -49,6 +49,7 @@ export type LogEvent =
   | 'timer.cancelled'
   | 'timer.gave-up'
   | 'timer.off'
+  | 'timer.options-replaced'
   | 'timer.unconfigured';
 
 /**
