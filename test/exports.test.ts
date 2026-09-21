@@ -11,7 +11,7 @@ import path from 'node:path';
 
 import { beforeAll, describe, expect, it } from 'bun:test';
 
-import { buildDist, walkImportGraph } from './helpers/bundle-isolation.js';
+import { buildDist, reachableProviderFiles, walkImportGraph } from './helpers/bundle-isolation.js';
 
 // These tests exercise what a consumer installs: the `package.json#exports`
 // map and the dist files it points at, not the TypeScript sources. dist is
@@ -170,6 +170,9 @@ describe('Entry points export documented functions', () => {
       'applyStatusEvents',
       'assertNoOtpWhatsAppText',
       'chainStatus',
+      // Every provider ships behind its own `./providers/<name>` subpath; none is re-exported
+      // from `src/providers/index.ts`, which the root entry pulls in for its types.
+      'consoleProvider',
       // #10 scopes `createLogger` to `src/core/logger.ts`; the root entry's documented
       // interface (#1) is `createMessaging`, `createMessagingApp`, `defineTemplates` and types.
       'createLogger',
@@ -271,29 +274,26 @@ describe('Entry points export documented functions', () => {
     expect(typeof provider.metaWhatsApp).toBe('function');
   });
 
-  it('keeps meta-whatsapp out of the root bundle: nothing reachable from another entry imports it (Issue #4)', () => {
-    const pkg = readPackageJson();
+  // Issue #4 asked this of meta-whatsapp, but it holds of every provider: `src/providers/index.ts`
+  // is reachable from the root entry, so re-exporting any provider there would put it in the
+  // bundle of every consumer that imports `createMessaging`. Enumerating the built provider
+  // directories means a provider added later is covered without anyone remembering to add it.
+  it('keeps every provider out of every bundle but its own (Issue #4)', () => {
     const providerTarget = exportTarget('./providers/*');
     const providerDirs = fs
       .readdirSync(distFile('./dist/providers'), { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && entry.name !== 'meta-whatsapp')
+      .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
       // `_shared` holds helpers the providers deep-import; it has no index.js, so the
       // `./providers/*` wildcard does not resolve it and it is not an entry point.
       .filter((name) => fs.existsSync(distFile(providerTarget.import.replace('*', () => name))));
 
-    const roots = [
-      ...Object.entries(pkg.exports)
-        .filter(([key]) => key !== './providers/*')
-        .map(([, target]) => target.import),
-      ...providerDirs.map((name) => providerTarget.import.replace('*', () => name)),
-    ];
+    expect(providerDirs).toContain('console');
+    expect(providerDirs).toContain('meta-whatsapp');
 
-    const reachable = walkImportGraph(roots.map((relative) => distFile(relative)));
-    const offenders = [...reachable].filter((file) =>
-      file.includes(path.join('providers', 'meta-whatsapp') + path.sep)
-    );
-    expect(offenders).toEqual([]);
+    for (const name of providerDirs) {
+      expect([name, reachableProviderFiles(name)]).toEqual([name, []]);
+    }
   });
 
   it('does not publish ./providers/_shared as an entry point: it is internal to the providers', () => {
