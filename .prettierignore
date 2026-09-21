@@ -1,0 +1,5 @@
+dist/
+**/*.snap
+bun.lock
+bun.lock.bak
+coverage/

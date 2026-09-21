@@ -2,11 +2,11 @@
 
 Outbound messaging for Cloudflare Workers. Send over WhatsApp first and fall back to SMS when delivery fails or times out, send email alongside or instead, define templates once with typed inputs, receive delivery-status webhooks, and let other Workers send through a service binding.
 
-The name is the feature: a message *falls* from the preferred channel to the next one, driven by real delivery status rather than hope.
+The name is the feature: a message _falls_ from the preferred channel to the next one, driven by real delivery status rather than hope.
 
 It is deliberately small. Every provider, including WhatsApp, is a plugin behind one contract: a `send` function and, if the provider reports delivery, a webhook handler. Built-in providers cover the common vendors; a local SMS gateway is ten lines. State lives in KV, with an optional Durable Object for timed fallback. Nothing runs outside your Worker.
 
-> **Status:** pre-release. The API described here is the target for 0.1.0 and may change before then.
+> **Status:** `0.1.0`, the first release — see the [CHANGELOG](CHANGELOG.md) for what it contains. It is not published to npm (see [Installation](#installation)), and the API may still change in a `0.x` line.
 
 ## Contents
 
@@ -40,7 +40,7 @@ On Workers that has some specific shape:
 - **Vendors change.** A gateway that is cheapest this year is not next year. Swapping one should touch a config line, not the pipeline.
 - **Codes must never be logged.** A one-time code passing through a messaging layer is a secret in transit.
 
-This package handles those four things and leaves the rest to you.
+This package handles those five things and leaves the rest to you.
 
 ## Features
 
@@ -59,9 +59,27 @@ This package handles those four things and leaves the rest to you.
 
 ## Installation
 
+Not on npm, and the package is marked `private`. The published entry points all
+resolve into `dist/`, which is not committed, so a package-manager install
+straight from a git URL would give you a package with nothing to import. Clone
+it and build it instead:
+
 ```sh
-npm install messagefall-workers
+git clone https://github.com/nalinda/messagefall-workers.git
+cd messagefall-workers
+bun install
+bun run build
 ```
+
+Then depend on that checkout from your Worker, by path:
+
+```sh
+npm install ../messagefall-workers
+```
+
+Rebuild the checkout (`bun run build`) after you pull. A tagged, installable
+release is what the `0.x` line is working towards; until then this is the
+supported way in.
 
 No other runtime dependencies. Hono is an optional peer dependency for the ready-made app.
 
@@ -78,21 +96,21 @@ A Worker that sends WhatsApp with SMS fallback through a local gateway, and rece
   "compatibility_date": "2026-07-16",
   "kv_namespaces": [{ "binding": "MESSAGES_KV", "id": "<kv-id>" }],
   "durable_objects": {
-    "bindings": [{ "name": "FALLBACK_TIMER", "class_name": "FallbackTimer" }]
+    "bindings": [{ "name": "FALLBACK_TIMER", "class_name": "FallbackTimer" }],
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["FallbackTimer"] }]
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["FallbackTimer"] }],
 }
 ```
 
 Secrets, set with `wrangler secret put`:
 
-| Secret | Purpose |
-| --- | --- |
-| `WHATSAPP_TOKEN` | Meta Cloud API access token. |
-| `WHATSAPP_PHONE_NUMBER_ID` | The sending number's id. |
-| `WHATSAPP_APP_SECRET` | Verifies webhook signatures. |
-| `WHATSAPP_VERIFY_TOKEN` | Answers Meta's webhook verification handshake. |
-| `SMS_GATEWAY_URL`, `SMS_GATEWAY_KEY` | Whatever your SMS gateway needs. |
+| Secret                                                          | Purpose                                                              |
+| --------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `WHATSAPP_TOKEN`                                                | Meta Cloud API access token.                                         |
+| `WHATSAPP_PHONE_NUMBER_ID`                                      | The sending number's id.                                             |
+| `WHATSAPP_APP_SECRET`                                           | Verifies webhook signatures.                                         |
+| `WHATSAPP_VERIFY_TOKEN`                                         | Answers Meta's webhook verification handshake.                       |
+| `SMS_GATEWAY_URL`, `SMS_GATEWAY_KEY`                            | Whatever your SMS gateway needs.                                     |
 | `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` | OAuth credentials for the sending Gmail account, scope `gmail.send`. |
 
 **src/templates.ts**
@@ -106,12 +124,11 @@ export const templates = defineTemplates({
     input: z.object({ code: z.string().length(6) }),
     kind: 'otp',
     whatsapp: {
-      template: 'login_code',            // approved authentication template
+      template: 'login_code', // approved authentication template
       language: { en: 'en', si: 'si_LK', ta: 'ta_LK' },
       params: ({ code }) => [code],
     },
-    sms: ({ code }, locale) =>
-      locale === 'si' ? `ඔබගේ කේතය ${code}` : `Your code is ${code}`,
+    sms: ({ code }, locale) => (locale === 'si' ? `ඔබගේ කේතය ${code}` : `Your code is ${code}`),
   },
   matchFound: {
     input: z.object({ title: z.string(), url: z.string().url() }),
@@ -129,7 +146,8 @@ export const templates = defineTemplates({
 **src/index.ts**
 
 ```ts
-import { createMessagingApp, type MessagingEnv } from 'messagefall-workers';
+import { createMessagingApp } from 'messagefall-workers/app';
+import { type MessagingEnv } from 'messagefall-workers';
 import { metaWhatsApp } from 'messagefall-workers/providers/meta-whatsapp';
 import { httpSms } from 'messagefall-workers/providers/http-sms';
 import { gmail } from 'messagefall-workers/providers/gmail';
@@ -138,32 +156,44 @@ import { templates } from './templates';
 export { FallbackTimer } from 'messagefall-workers/durable';
 
 type Env = MessagingEnv & {
-  SMS_GATEWAY_URL: string; SMS_GATEWAY_KEY: string;
-  GMAIL_CLIENT_ID: string; GMAIL_CLIENT_SECRET: string; GMAIL_REFRESH_TOKEN: string;
+  WHATSAPP_TOKEN: string;
+  WHATSAPP_PHONE_NUMBER_ID: string;
+  WHATSAPP_APP_SECRET: string;
+  WHATSAPP_VERIFY_TOKEN: string;
+  SMS_GATEWAY_URL: string;
+  SMS_GATEWAY_KEY: string;
+  GMAIL_CLIENT_ID: string;
+  GMAIL_CLIENT_SECRET: string;
+  GMAIL_REFRESH_TOKEN: string;
 };
 
 export default createMessagingApp<Env>({
   templates,
-  providers: (env) => ({
-    whatsapp: metaWhatsApp({
-      token: env.WHATSAPP_TOKEN,
-      phoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID,
-      appSecret: env.WHATSAPP_APP_SECRET,
-      verifyToken: env.WHATSAPP_VERIFY_TOKEN,
-    }),
-    sms: httpSms({
-      url: env.SMS_GATEWAY_URL,
-      headers: { authorization: `Bearer ${env.SMS_GATEWAY_KEY}` },
-      body: ({ to, text }) => ({ to, text }),
-      messageId: (json) => json.id,
-    }),
-    email: gmail({
-      clientId: env.GMAIL_CLIENT_ID,
-      clientSecret: env.GMAIL_CLIENT_SECRET,
-      refreshToken: env.GMAIL_REFRESH_TOKEN,
-      from: 'no-reply@example.com',
-    }),
-  }),
+  // The factory is always handed a `MessagingEnv`, whose custom bindings are `unknown`.
+  // Narrow it once to your own `Env` and every secret below reads as a `string`.
+  providers: (env) => {
+    const e = env as Env;
+    return {
+      whatsapp: metaWhatsApp({
+        token: e.WHATSAPP_TOKEN,
+        phoneNumberId: e.WHATSAPP_PHONE_NUMBER_ID,
+        appSecret: e.WHATSAPP_APP_SECRET,
+        verifyToken: e.WHATSAPP_VERIFY_TOKEN,
+      }),
+      sms: httpSms({
+        url: e.SMS_GATEWAY_URL,
+        headers: { authorization: `Bearer ${e.SMS_GATEWAY_KEY}` },
+        body: ({ to, text }) => ({ to, text }),
+        messageId: (json) => (json as { id?: string }).id,
+      }),
+      email: gmail({
+        clientId: e.GMAIL_CLIENT_ID,
+        clientSecret: e.GMAIL_CLIENT_SECRET,
+        refreshToken: e.GMAIL_REFRESH_TOKEN,
+        from: 'no-reply@example.com',
+      }),
+    };
+  },
   delivery: {
     fallback: ['whatsapp', 'sms'],
     always: ['email'],
@@ -174,11 +204,12 @@ export default createMessagingApp<Env>({
 
 That Worker now serves:
 
-| Route | Purpose |
-| --- | --- |
-| `POST /send` | Send a template to a recipient. |
-| `GET /status/:id` | Delivery status of a message. |
-| `GET|POST /webhooks/:provider` | Delivery-status callbacks, dispatched to the named provider. |
+| Route                      | Purpose                                                      |
+| -------------------------- | ------------------------------------------------------------ |
+| `POST /send`               | Send a template to a recipient.                              |
+| `GET /status/:id`          | Delivery status of a message.                                |
+| `GET /webhooks/:provider`  | Subscription handshake for the named provider.               |
+| `POST /webhooks/:provider` | Delivery-status callbacks, dispatched to the named provider. |
 
 Sending:
 
@@ -205,7 +236,11 @@ The chain runs like this:
 5. If the alarm fires and the chain's current attempt is still `sent`, the next channel is tried.
 6. When no chain channels remain, the chain is marked `failed` with the last error. `always` channels do not affect the chain's outcome.
 
-Without the Durable Object binding, steps 3 and 5 do not happen: chain fallback is driven only by explicit failure statuses. That is enough for notifications. For one-time codes you want the timer, because "no status yet" after thirty seconds is the common failure mode, not an explicit rejection.
+Without the Durable Object binding, steps 3 and 5 do not happen: chain fallback is driven only by explicit failure statuses, and the app logs one `timer.off` line on its first request so the missing binding is visible. That is enough for notifications. For one-time codes you want the timer, because "no status yet" after thirty seconds is the common failure mode, not an explicit rejection.
+
+The timer is one Durable Object per message, named by the message id. Its alarm re-creates the messaging core from the options passed to `createMessagingApp` (or `createMessaging`) in the same isolate, and an isolate woken only by an alarm runs nothing but module evaluation before the handler. So `FallbackTimer` must be exported from the same Worker module that calls `createMessagingApp`, and that call must run at module top level (`const app = createMessagingApp({...})` at module scope, as the quick start does), not lazily inside a request handler; the last registration in an isolate wins, so configure one set of options per Worker. If an alarm fires with no options registered it throws and keeps its state for the platform's retry. A chain with only one channel, or a `'all'` policy, never arms it: there is nothing a timeout could move on to.
+
+One case beyond steps 3 and 5: the timer is armed before the first attempt is dispatched (for one-time codes the dispatch runs in `ctx.waitUntil` after the response), so an alarm can find the chain still `pending` — no attempt recorded yet. It does not treat that as terminal. It re-schedules itself for another timeout, up to three times (`MAX_PENDING_RECHECKS`), and advances normally once the chain shows `sent`; only after those re-checks does it give up, log `timer.gave-up` and clear its storage. A chain that is `delivered`, `read` or `failed` when the alarm fires is only cleaned up.
 
 ### Overriding the policy
 
@@ -218,15 +253,21 @@ The policy resolves in this order, most specific wins:
 Each level may set `fallback`, `always`, or both; unset parts inherit from the next level. Two shorthands exist:
 
 - `delivery: 'all'` sends every channel the template defines in parallel, with no chain.
-- `delivery: { fallback: ['sms'] , always: [] }` sends SMS only, ignoring the default's email.
+- `delivery: { fallback: ['sms'], always: [] }` sends SMS only, ignoring the default's email.
 
 ```ts
+// `messages` here is the client from `createMessagingClient` (see "Sending from another
+// Worker" below); the core sender created by `createMessaging` takes one object instead.
+const messages = createMessagingClient<typeof templates>({ binding: env.MESSAGES });
+
 // default is WhatsApp -> SMS, always email
-await messages.send('accountLocked', { to, locale, input, delivery: 'all' });          // all three at once
-await messages.send('loginCode',     { to, locale, input, delivery: { always: [] } }); // chain only, no email
+await messages.send('matchFound', { to, locale, input, delivery: 'all' }); // all three at once
+await messages.send('matchFound', { to, locale, input, delivery: { always: [] } }); // chain only, no email
 ```
 
 A channel that appears in both `fallback` and `always` is sent once, as part of `always`. A template that defines none of the resolved channels is a send-time error with a clear message.
+
+Send calls carry `to` (the E.164 phone number) and an optional `email` field (`{ to, email?, ... }`) so a template can reach an inbox. When the resolved policy includes `email` and no `email` address is provided, the email channel is dropped from the policy with a logged `send.channel-skipped` event rather than failing the send, and phone channels proceed normally. The one exception is when dropping it would leave nothing to send on — an email-only template called without an address: that throws `PolicyError`, the same fault an unsatisfiable policy throws, rather than creating a record that would sit `pending` for ever with no provider ever called.
 
 Fallback never re-renders with a different input. The same input renders each channel's version of the same template.
 
@@ -234,16 +275,16 @@ Fallback never re-renders with a different input. The same input renders each ch
 
 `defineTemplates` takes a record of templates. Each has:
 
-| Field | Required | Description |
-| --- | --- | --- |
-| `input` | yes | Any [Standard Schema](https://standardschema.dev) validator (Zod, Valibot, ArkType). Drives the type of `send`. |
-| `kind` | yes | `'otp'` or `'notification'`. Selects the fallback timeout and the logging rule. |
-| `whatsapp` | no | Meta template name, language per locale, and a function from input to the template's parameters. Or `text` for free-form messages inside a 24-hour service window. |
-| `sms` | no | Function from input and locale to text. |
-| `email` | no | Subject, text and optional HTML, each a function of input and locale. |
-| `delivery` | no | Policy override for this template: `{ fallback?, always? }` or `'all'`. See [Overriding the policy](#overriding-the-policy). |
+| Field      | Required | Description                                                                                                                                                        |
+| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `input`    | yes      | Any [Standard Schema](https://standardschema.dev) validator (Zod, Valibot, ArkType). Drives the type of `send`.                                                    |
+| `kind`     | yes      | `'otp'` or `'notification'`. Selects the fallback timeout and the logging rule.                                                                                    |
+| `whatsapp` | no       | Meta template name, language per locale, and a function from input to the template's parameters. Or `text` for free-form messages inside a 24-hour service window. |
+| `sms`      | no       | Function from input and locale to text.                                                                                                                            |
+| `email`    | no       | Subject, text and optional HTML, each a function of input and locale.                                                                                              |
+| `delivery` | no       | Policy override for this template: `{ fallback?, always? }` or `'all'`. See [Overriding the policy](#overriding-the-policy).                                       |
 
-A template with only `sms` defined skips WhatsApp regardless of the policy's `fallback`. Sending to a template that defines no channel in the order is a configuration error at startup, not at send time.
+A template with only `sms` defined skips WhatsApp regardless of the policy's `fallback`. Sending to a template that defines no channel in the resolved order is a send-time `PolicyError` with a clear message (mapped to `422` by the Hono app), not a startup error: the resolved policy depends on the call, so no startup check can see it coming.
 
 Meta requires one-time codes to use an approved **authentication-category** template. The package does not submit templates for you; it does refuse to send a `kind: 'otp'` template over WhatsApp as free text.
 
@@ -253,20 +294,21 @@ A provider is one object that knows how to send on one channel and, optionally, 
 
 ```ts
 interface Provider<Rendered> {
-  name: string;                                   // used in /webhooks/:name and in status records
+  name: string; // used in /webhooks/:name and in status records
   channel: 'whatsapp' | 'sms' | 'email';
-  send(message: Rendered & { to: string; messageId: string }): Promise<
-    | { ok: true; providerId?: string }
-    | { ok: false; error: string; retryable?: boolean }
-  >;
+  send(
+    message: Rendered & { to: string; messageId: string }
+  ): Promise<{ ok: true; providerId?: string } | { ok: false; error: string; retryable?: boolean }>;
   webhook?: {
-    verify?(request: Request): Promise<Response | null>;  // e.g. Meta's GET handshake
-    parse(request: Request): Promise<StatusEvent[]>;      // must check the signature; throw to reject
+    verify?(request: Request): Promise<Response | null>; // e.g. Meta's GET handshake
+    parse(request: Request, options?: WebhookParseOptions): Promise<StatusEvent[]>; // must check the signature; throw to reject
   };
 }
 ```
 
 `StatusEvent` is `{ providerId, status: 'sent' | 'delivered' | 'read' | 'failed', error?, at }`. The package correlates `providerId` back to the attempt and drives fallback from there. A provider with no `webhook` still works; its attempts simply stay `sent` until the chain timeout.
+
+`WebhookParseOptions` is `{ devUnsigned?: boolean }`. The dispatcher sets `devUnsigned: true` only when `MESSAGING_DEV_UNSIGNED=true` and the request arrived on localhost; a `parse` that wants to support the local-dev signature bypass must check it and skip verification when set.
 
 ### Built in
 
@@ -274,12 +316,12 @@ Each provider is its own entry point so unused vendors never reach your bundle.
 
 Shipped in 0.1.0:
 
-| Import | Channel | Delivery status |
-| --- | --- | --- |
-| `messagefall-workers/providers/meta-whatsapp` | whatsapp | webhook, signed with the app secret |
-| `messagefall-workers/providers/http-sms` | sms | none, or a `webhook.parse` you supply |
-| `messagefall-workers/providers/gmail` | email | none |
-| `messagefall-workers/providers/console` | any | simulated, for development |
+| Import                                        | Channel  | Delivery status                       |
+| --------------------------------------------- | -------- | ------------------------------------- |
+| `messagefall-workers/providers/meta-whatsapp` | whatsapp | webhook, signed with the app secret   |
+| `messagefall-workers/providers/http-sms`      | sms      | none, or a `webhook.parse` you supply |
+| `messagefall-workers/providers/gmail`         | email    | none                                  |
+| `messagefall-workers/providers/console`       | any      | simulated, for development            |
 
 Planned as separate entry points after 0.1.0: `twilio-whatsapp`, `twilio-sms`, `vonage-sms`, `resend`, `postmark`, `cloudflare-email`, and `route()` for several providers on one channel.
 
@@ -303,7 +345,7 @@ Templates with `kind: 'otp'` get four behaviours:
 
 - The send is dispatched under `ctx.waitUntil` and `POST /send` returns as soon as the message is accepted and recorded, so response time does not reveal whether a number exists.
 - The chain timeout is the `otp` value, defaulting to thirty seconds. `always` channels for an OTP template are allowed but unusual; most codes want the chain only.
-- Rendered bodies and inputs are never written to logs, status records, or error messages. Only the message id, channel, provider id and status are stored.
+- Rendered bodies and inputs are never written to logs. Only the message id, channel, provider id and status are stored on the status record. Vendor error strings are scrubbed before they reach a record; see Known limitations in the CHANGELOG for the one case a bare-value OTP parameter can defeat that.
 - Codes are never queued. If every channel fails, the status is `failed` and the caller decides what to do.
 
 The package does not generate or verify codes. Pair it with your auth layer, which owns the code, and hand this package only the delivery.
@@ -317,21 +359,58 @@ Every send gets a message id. `GET /status/:id` returns:
   "id": "msg_01J...",
   "template": "loginCode",
   "kind": "otp",
+  "policy": { "fallback": ["whatsapp", "sms"], "always": ["email"] },
   "chain": {
     "status": "sent",
     "attempts": [
-      { "channel": "whatsapp", "providerId": "wamid.HBg...", "status": "failed", "at": "..." },
-      { "channel": "sms", "providerId": "8f2c...", "status": "sent", "at": "..." }
+      {
+        "channel": "whatsapp",
+        "provider": "meta-whatsapp",
+        "providerId": "wamid.HBg...",
+        "status": "failed",
+        "at": "..."
+      },
+      {
+        "channel": "sms",
+        "provider": "http-sms",
+        "providerId": "8f2c...",
+        "status": "sent",
+        "at": "..."
+      }
     ]
   },
   "always": [
-    { "channel": "email", "providerId": "re_...", "status": "delivered", "at": "..." }
+    {
+      "channel": "email",
+      "provider": "gmail",
+      "providerId": "re_...",
+      "status": "delivered",
+      "at": "..."
+    }
   ],
-  "status": "sent"
+  "status": "sent",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:03.500Z",
+  "sealed": true
 }
 ```
 
+Each attempt names the `provider` it was dispatched through, which is also the `<name>` in that
+provider's `/webhooks/<name>` route — so an incoming delivery receipt can be traced back to the
+attempt it belongs to. `policy` is the delivery policy as resolved for this send.
+
+`sealed` is an internal marker: it records that this chain's fallback processing has already run
+to its end, so a repeated webhook or timer cannot advance it again. Consumers should ignore it.
+
 The top-level `status` is the chain's status, or the worst of the `always` attempts when there is no chain. Records live in KV with a TTL, seven days by default. There is no history beyond that; if you want reporting, subscribe with `onStatus` in the configuration and write wherever you like.
+
+### Known gap: the render input is stored unencrypted
+
+The status record itself holds no message content, but the fallback chain has to be able to re-render the message on the next channel once the first one fails. So every send with a chain writes its **render input** to a second KV key, `in:<id>`, and hands the same payload to the fallback timer. That payload is the raw input you passed to `send`, plus the recipient and locale — for an `otp` template it therefore contains **the code itself, in plaintext**.
+
+It is stored **unencrypted**, for the duration of the chain timeout, and deleted as soon as the chain reaches a terminal state. The key's TTL is the chain timeout rounded up to whole seconds, floored at KV's sixty-second minimum — so **sixty seconds for `otp`** (whose thirty-second timeout is shorter than KV will accept) and five minutes for `notification`, by default. Anyone who can read that KV namespace can read the code while the key is there.
+
+Encrypting `in:<id>` is a known gap, **deliberately deferred past 0.1.0**. Until it is closed, treat the messaging Worker's KV namespace as holding secrets: do not share it with anything that does not need it, and keep the chain timeouts no longer than your fallback actually requires.
 
 ## Sending from another Worker
 
@@ -350,6 +429,7 @@ const messages = createMessagingClient<typeof templates>({ binding: env.MESSAGES
 
 await messages.send('matchFound', {
   to: '+94771234567',
+  email: 'user@example.com', // optional: required if resolved policy includes email, otherwise email is skipped
   locale: 'en',
   input: { title: 'Bicycle, Kandy', url: 'https://example.com/m/123' },
   delivery: 'all', // optional per-send override
@@ -360,30 +440,32 @@ Service-binding calls stay inside Cloudflare's network. The API Worker never hol
 
 ## Configuration
 
-`createMessagingApp(options)` returns a Hono app. `createMessaging(env, options)` returns the underlying sender for use in any framework.
+`createMessagingApp(options)` returns a Hono app and is imported from the `messagefall-workers/app` entry point — it is deliberately not on the root barrel, so the root entry never reaches for the optional `hono` peer. `createMessaging(env, options)` returns the underlying sender for use in any framework.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `templates` | `Templates` | required | From `defineTemplates`. |
-| `providers` | `(env) => { whatsapp?, sms?, email? }` | required | One provider per channel, built from bindings per request. |
-| `delivery.fallback` | `Channel[]` | `['whatsapp', 'sms']` | Ordered chain. Each channel is tried only if the previous failed or timed out. |
-| `delivery.always` | `Channel[]` | `[]` | Channels sent in parallel with the chain on every message. |
-| `delivery.timeout` | `{ otp?: number; notification?: number }` | `{ otp: 30000, notification: 300000 }` | Milliseconds before the chain moves to the next channel when no status has arrived. Needs the Durable Object binding. |
-| `kv` | `KVNamespace` | `env.MESSAGES_KV` | Status store. |
-| `timer` | `DurableObjectNamespace` | `env.FALLBACK_TIMER` | Optional. Enables timed fallback. |
-| `statusTtl` | `number` | `604800` | Seconds to keep status records. |
-| `onStatus` | `(event) => void \| Promise<void>` | none | Called on every status change. Receives ids and statuses, never bodies. |
-| `basePath` | `string` | `'/'` | Path prefix for the routes. |
+| Option              | Type                                      | Default                                | Description                                                                                                           |
+| ------------------- | ----------------------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `templates`         | `Templates`                               | required                               | From `defineTemplates`.                                                                                               |
+| `providers`         | `(env) => { whatsapp?, sms?, email? }`    | required                               | One provider per channel, built from bindings per request.                                                            |
+| `delivery.fallback` | `Channel[]`                               | `['whatsapp', 'sms']`                  | Ordered chain. Each channel is tried only if the previous failed or timed out.                                        |
+| `delivery.always`   | `Channel[]`                               | `[]`                                   | Channels sent in parallel with the chain on every message.                                                            |
+| `delivery.timeout`  | `{ otp?: number; notification?: number }` | `{ otp: 30000, notification: 300000 }` | Milliseconds before the chain moves to the next channel when no status has arrived. Needs the Durable Object binding. |
+| `kv`                | `KVNamespace`                             | `env.MESSAGES_KV`                      | Status store.                                                                                                         |
+| `timer`             | `DurableObjectNamespace`                  | `env.FALLBACK_TIMER`                   | Optional. Enables timed fallback.                                                                                     |
+| `statusTtl`         | `number`                                  | `604800`                               | Seconds to keep status records.                                                                                       |
+| `onStatus`          | `(event) => void \| Promise<void>`        | none                                   | Called on every status change. Receives ids and statuses, never bodies.                                               |
+| `basePath`          | `string`                                  | `'/'`                                  | Path prefix for the routes.                                                                                           |
+
+The `providers` factory always receives a `MessagingEnv`, whose custom bindings are typed `unknown` — the `<Env>` type parameter on `createMessagingApp` types the Hono bindings only, never this factory. A Worker with typed bindings narrows the argument itself (`const e = env as Env`) before reading its secrets, as the quick start does.
 
 ## Routing and webhooks
 
 Every provider that reports delivery gets its own route at `/webhooks/<provider name>`. Point each vendor's callback there:
 
-| Provider | Vendor setting |
-| --- | --- |
+| Provider        | Vendor setting                                                                                                                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `meta-whatsapp` | Meta app dashboard, webhook URL `<public-url>/webhooks/meta-whatsapp`, subscribe to `messages`. The `GET` handshake uses `WHATSAPP_VERIFY_TOKEN`; `POST` is verified with `WHATSAPP_APP_SECRET`. |
-| `http-sms` | Only if you supplied `webhook.parse`: point the gateway's delivery-report URL at `<public-url>/webhooks/http-sms`. |
-| `gmail` | None. Gmail reports no delivery status. |
+| `http-sms`      | Only if you supplied `webhook.parse`: point the gateway's delivery-report URL at `<public-url>/webhooks/http-sms`.                                                                               |
+| `gmail`         | None. Gmail reports no delivery status.                                                                                                                                                          |
 
 A request to `/webhooks/<name>` for a provider that is not configured returns 404. A provider whose `parse` throws returns 401. Unsigned payloads are never accepted outside development.
 
@@ -395,16 +477,16 @@ The webhook routes are the only routes that need to be public. `/send` and `/sta
 
 - Use the `console` provider for each channel during development. It prints the recipient and channel, deliberately not the body for `otp` templates, and can simulate a delivered or failed status after a delay so fallback is exercised without any vendor.
 - Vendor webhooks cannot reach localhost. `POST /webhooks/<provider>` accepts an unsigned payload when `MESSAGING_DEV_UNSIGNED=true` is set, so you can replay a status event from a file. Never set that in production.
-- The `examples/basic` directory has a runnable Worker with console providers and a script that replays failed and delivered statuses to exercise fallback.
+- The `examples/basic` directory has a runnable Worker with console providers, and a README section ("Post a Webhook Delivery Status") with curl commands that replay failed and delivered statuses to exercise fallback.
 
 ## Compatibility
 
-| Dependency | Version |
-| --- | --- |
-| wrangler | ^4 |
-| hono (optional, for `createMessagingApp`) | ^4 |
-| Standard Schema validators | Zod ^3.23 / ^4, Valibot, ArkType |
-| Meta Cloud API | Graph v23 by default, configurable |
+| Dependency                                | Version                            |
+| ----------------------------------------- | ---------------------------------- |
+| wrangler                                  | ^4                                 |
+| hono (optional, for `createMessagingApp`) | ^4                                 |
+| Standard Schema validators                | Zod ^3.23 / ^4, Valibot, ArkType   |
+| Meta Cloud API                            | Graph v23 by default, configurable |
 
 No Node compatibility flag is required.
 

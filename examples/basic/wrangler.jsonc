@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "messagefall-basic-example",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-16",
+  // Lets the unsigned webhook curls in this example's README be accepted. The library refuses
+  // this bypass on any host that is not loopback (localhost, 127.0.0.1, [::1]), so it cannot
+  // weaken a deployed Worker — but do not copy it into a real config.
+  "vars": {
+    "MESSAGING_DEV_UNSIGNED": "true",
+  },
+  "kv_namespaces": [
+    {
+      "binding": "MESSAGES_KV",
+      "id": "messages-kv-local",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "FALLBACK_TIMER",
+        "class_name": "FallbackTimer",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["FallbackTimer"],
+    },
+  ],
+}
