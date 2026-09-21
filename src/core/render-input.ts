@@ -15,7 +15,10 @@
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 
+import { createLogger } from './logger.js';
 import type { FallbackTimerClient } from './timer.js';
+
+const defaultLogger = createLogger();
 
 /**
  * Everything the fallback path needs to re-render a message on the next channel.
@@ -156,9 +159,10 @@ export async function releaseChain(
   id: string,
   fallback: readonly unknown[]
 ): Promise<void> {
-  if (isTimedChain(fallback)) {
+  if (isTimedChain(fallback) && typeof timer?.cancel === 'function') {
     try {
-      await timer?.cancel?.(id);
+      await timer.cancel(id);
+      defaultLogger.info('timer.cancelled', { id });
     } catch {
       // Best-effort cancellation
     }

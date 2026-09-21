@@ -717,6 +717,7 @@ async function stashChainInput(
   if (isTimedChain(policy.fallback) && typeof deps.timer?.arm === 'function') {
     try {
       await deps.timer.arm(id, timeoutMs, inputPayload);
+      defaultLogger.info('timer.armed', { id, kind: req.template.kind });
     } catch {
       defaultLogger.warn('timer.arm-failed', { id, kind: req.template.kind });
     }
@@ -748,6 +749,8 @@ export async function runSend(
 
   const { policy, hasSkippedEmail } = resolveEffectivePolicy(deps.defaults, req);
   const id = newMessageId();
+
+  defaultLogger.info('send.start', { id, template: req.templateName, kind: req.template.kind });
 
   if (hasSkippedEmail) {
     defaultLogger.info('send.channel-skipped', {

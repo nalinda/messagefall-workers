@@ -337,6 +337,18 @@ async function handleSingleEvent(
     return result.updatedRecord;
   });
 
+  // Only when the event actually moved the attempt forward: a redelivered or out-of-order event
+  // `applyStatusUpdate` dropped changed nothing, and logging it as applied would tell an
+  // operator a status changed when it did not.
+  if (applied.hasChanged) {
+    defaultLogger.info('webhook.applied', {
+      id: ref.id,
+      channel: ref.channel,
+      provider: ref.provider,
+      status: scrubbedEvent.status,
+    });
+  }
+
   if (options.onStatus) {
     await options.onStatus(scrubbedEvent, ref);
   }

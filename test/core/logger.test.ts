@@ -107,13 +107,13 @@ describe('Issue #10: No message bodies in logs, enforced in code', () => {
     it('type-level test: allow-listed events compile with LogFields; non-allow-listed events and free-form fields fail', () => {
       // 1. Allow-listed events are accepted
       type TestSendStartValid = Expect<Extends<'send.start', LogEvent>>;
-      type TestSendAttemptValid = Expect<Extends<'send.attempt', LogEvent>>;
+      type TestSendIndexFailedValid = Expect<Extends<'send.index-failed', LogEvent>>;
       type TestWebhookAppliedValid = Expect<Extends<'webhook.applied', LogEvent>>;
       type TestFallbackAdvanceValid = Expect<Extends<'fallback.advance', LogEvent>>;
       type TestTimerArmedValid = Expect<Extends<'timer.armed', LogEvent>>;
 
       assertType<TestSendStartValid>(true);
-      assertType<TestSendAttemptValid>(true);
+      assertType<TestSendIndexFailedValid>(true);
       assertType<TestWebhookAppliedValid>(true);
       assertType<TestFallbackAdvanceValid>(true);
       assertType<TestTimerArmedValid>(true);
@@ -159,7 +159,11 @@ describe('Issue #10: No message bodies in logs, enforced in code', () => {
 
       logger.info('send.start', { id: 'msg_01JABC', template: 'authOtp', kind: 'otp' });
       logger.warn('fallback.advance', { id: 'msg_01JABC', channel: 'sms', count: 1 });
-      logger.error('send.attempt', { id: 'msg_01JABC', provider: 'failing-sms', errorCode: '500' });
+      logger.error('send.index-failed', {
+        id: 'msg_01JABC',
+        provider: 'failing-sms',
+        errorCode: '500',
+      });
 
       expect(sinkLines).toHaveLength(3);
 
@@ -177,7 +181,7 @@ describe('Issue #10: No message bodies in logs, enforced in code', () => {
       expect(parsed1['level']).toBe('warn');
 
       const parsed2 = JSON.parse(sinkLines[2]) as Record<string, unknown>;
-      expect(parsed2['event']).toBe('send.attempt');
+      expect(parsed2['event']).toBe('send.index-failed');
       expect(parsed2['id']).toBe('msg_01JABC');
       expect(parsed2['errorCode']).toBe('500');
       expect(parsed2['level']).toBe('error');

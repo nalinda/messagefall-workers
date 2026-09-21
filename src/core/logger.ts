@@ -35,7 +35,6 @@ export interface LogFields {
  */
 export type LogEvent =
   | 'send.start'
-  | 'send.attempt'
   | 'send.persist-failed'
   | 'send.observer-failed'
   | 'send.index-failed'
