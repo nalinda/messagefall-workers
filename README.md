@@ -262,7 +262,7 @@ const messages = createMessagingClient<typeof templates>({ binding: env.MESSAGES
 
 // default is WhatsApp -> SMS, always email
 await messages.send('matchFound', { to, locale, input, delivery: 'all' }); // all three at once
-await messages.send('loginCode', { to, locale, input, delivery: { always: [] } }); // chain only, no email
+await messages.send('matchFound', { to, locale, input, delivery: { always: [] } }); // chain only, no email
 ```
 
 A channel that appears in both `fallback` and `always` is sent once, as part of `always`. A template that defines none of the resolved channels is a send-time error with a clear message.
