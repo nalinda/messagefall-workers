@@ -847,6 +847,83 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
       expect(updated?.status).toBe('delivered');
       expect(statusApplied).toHaveLength(0);
     });
+
+    it('reads a late delivered for a superseded earlier channel as the whole chain delivered', async () => {
+      // The chain moved past WhatsApp (failed) onto SMS (still in flight) before WhatsApp's own
+      // `delivered` callback arrived. The upgrade is applied to that earlier attempt (per the
+      // table above), and because the message demonstrably arrived, the CHAIN is delivered —
+      // even though the last attempt on the record still reads `sent`. Deriving the chain from
+      // the last attempt alone reported `sent` here, and `failed` once SMS failed too: the wrong
+      // terminal outcome for `GET /status/:id`, and the wrong answer to "may this chain still
+      // fall back?".
+      const store = kvStatusStore(kv);
+      const messageId = 'msg_01J9LATEDELIVERED00000001';
+      const waProviderId = 'wamid.late_delivered_earlier_channel';
+
+      await store.create({
+        id: messageId,
+        template: 'loginCode',
+        kind: 'otp',
+        policy: { fallback: ['whatsapp', 'sms'], always: [] },
+        chain: {
+          status: 'sent',
+          attempts: [
+            {
+              channel: 'whatsapp',
+              provider: 'meta-wa',
+              providerId: waProviderId,
+              status: 'failed',
+              error: 'vendor timed out',
+              at: '2026-09-20T12:00:30.000Z',
+            },
+            {
+              channel: 'sms',
+              provider: 'twilio-sms',
+              providerId: 'SM_late_delivered_sms',
+              status: 'sent',
+              at: '2026-09-20T12:01:00.000Z',
+            },
+          ],
+        },
+        always: [],
+        status: 'sent',
+        createdAt: RECORDED_AT,
+        updatedAt: '2026-09-20T12:01:00.000Z',
+      });
+      await store.indexProviderId(waProviderId, {
+        id: messageId,
+        channel: 'whatsapp',
+        provider: 'meta-wa',
+      });
+
+      const statusApplied: StatusApplied[] = [];
+      const handleWebhook = createWebhookHandler({
+        providers: {
+          whatsapp: providerEmitting('meta-wa', {
+            providerId: waProviderId,
+            status: 'delivered',
+            at: '2026-09-20T12:02:00.000Z',
+          }),
+        },
+        kv,
+        onStatusApplied: (event) => {
+          statusApplied.push(event);
+        },
+      });
+
+      await handleWebhook('meta-wa', statusPost());
+
+      const updated = await store.get(messageId);
+      expect(updated?.chain.attempts[0].status).toBe('delivered');
+      // The in-flight SMS attempt is untouched: nothing was heard about it.
+      expect(updated?.chain.attempts[1].status).toBe('sent');
+      expect(updated?.chain.status).toBe('delivered');
+      expect(updated?.status).toBe('delivered');
+      // The record handed to `onStatusApplied` is what the fallback bridge decides termination
+      // from, so it has to carry the derived chain status, not the triggering event's.
+      expect(statusApplied).toHaveLength(1);
+      expect(statusApplied[0].record.chain.status).toBe('delivered');
+    });
   });
 
   describe('Unknown Provider ID Handling', () => {

@@ -226,7 +226,14 @@ async function handleChainStatusApplied<T extends Templates<Record<string, Templ
     return;
   }
 
-  if (isTerminalChainStatus(event.status)) {
+  // Terminality is read off the record this event was just applied to, never off the event
+  // itself. The two genuinely differ: a `delivered` callback for a superseded earlier channel is
+  // a real late upgrade of that attempt (see `isStatusProgression`), but it is `chainStatus` —
+  // which weighs every attempt, not just the triggering one — that decides whether the chain as a
+  // whole is finished. Releasing on the event alone would tear down the fallback timer and the
+  // stored render input of a chain that is still `pending` with channels left to try, leaving a
+  // later failure with nothing to rebuild the next attempt from.
+  if (isTerminalChainStatus(record.chain.status)) {
     // The chain is terminal: nothing is left to fall back to, so drop the timer (if this chain
     // ever armed one) and the input.
     await releaseChain(resolveTimer(env, options.timer), kv, id, record.policy.fallback);

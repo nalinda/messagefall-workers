@@ -14,8 +14,10 @@ import {
   createMessaging,
   defineTemplates,
   type Provider,
+  type RenderedEmail,
   type RenderedSms,
   type RenderedWhatsApp,
+  type StatusEvent,
 } from '../../src/index.js';
 import { consoleProvider } from '../../src/providers/console/index.js';
 import {
@@ -33,6 +35,34 @@ function stubSms(name: string): Provider<RenderedSms> & { calls: number } {
     send: () => {
       provider.calls += 1;
       return Promise.resolve({ ok: true as const, providerId: `${name}-1` });
+    },
+  };
+  return provider;
+}
+
+/**
+ * A provider whose webhook replays whatever events the test has queued, so a test can drive the
+ * exact vendor callback ordering it needs.
+ */
+function queueingProvider<R>(
+  name: string,
+  channel: 'whatsapp' | 'sms' | 'email'
+): Provider<R> & { queue: StatusEvent[]; calls: number } {
+  const provider = {
+    name,
+    channel,
+    queue: [] as StatusEvent[],
+    calls: 0,
+    send: () => {
+      provider.calls += 1;
+      return Promise.resolve({ ok: true as const, providerId: `${name}-1` });
+    },
+    webhook: {
+      parse: (): Promise<StatusEvent[]> => {
+        const events = [...provider.queue];
+        provider.queue.length = 0;
+        return Promise.resolve(events);
+      },
     },
   };
   return provider;
@@ -359,6 +389,100 @@ describe('createMessaging.handleWebhook concurrency', () => {
     const record = await messaging.status(id);
     expect(record!.chain.attempts).toHaveLength(2);
     expect(record!.chain.attempts.map((attempt) => attempt.channel)).toEqual(['whatsapp', 'sms']);
+  });
+});
+
+describe('createMessaging late confirmation for a superseded channel', () => {
+  // A `delivered` callback for a channel the chain has already fallen back past is real news
+  // about that attempt (the webhook transition table accepts it as an upgrade), and it means the
+  // message arrived. Two things used to go wrong once it landed: the chain's status was still
+  // derived from the LAST attempt, so a delivered chain reported `sent` and then `failed`; and
+  // the fallback bridge decided the chain was finished from the triggering EVENT's status rather
+  // than from the record, so any terminal event released the timer and the `in:<id>` render
+  // input regardless of what the chain as a whole said.
+  it('reports the chain delivered and never falls back again after the later channel also fails', async () => {
+    const otpTemplates = defineTemplates({
+      loginCode: {
+        input: z.object({ code: z.string() }),
+        kind: 'otp',
+        whatsapp: {
+          template: 'auth_code',
+          language: 'en',
+          params: ({ code }: { code: string }) => [code],
+        },
+        sms: ({ code }: { code: string }) => `Your code is ${code}`,
+        email: {
+          subject: () => 'Your code',
+          text: ({ code }: { code: string }) => `Your code is ${code}`,
+        },
+      },
+    });
+
+    const whatsapp = queueingProvider<RenderedWhatsApp>('wa', 'whatsapp');
+    const sms = queueingProvider<RenderedSms>('sms', 'sms');
+    const email = queueingProvider<RenderedEmail>('email', 'email');
+
+    const messaging = createMessaging(newEnv(), {
+      templates: otpTemplates,
+      providers: () => ({ whatsapp, sms, email }),
+      delivery: { fallback: ['whatsapp', 'sms', 'email'], always: [] },
+    });
+
+    const { id } = await messaging.send({
+      template: 'loginCode',
+      to: '+14155550123',
+      email: 'user@example.com',
+      locale: 'en',
+      input: { code: '123456' },
+    });
+
+    const deliver = (provider: string): Promise<Response> =>
+      messaging.handleWebhook(
+        provider,
+        new Request(`https://worker.local/webhooks/${provider}`, { method: 'POST' })
+      );
+
+    // WhatsApp fails: the chain falls back to SMS, which is now genuinely in flight.
+    whatsapp.queue.push({
+      providerId: 'wa-1',
+      status: 'failed',
+      error: 'undeliverable',
+      at: '2026-09-20T00:00:01.000Z',
+    });
+    await deliver('wa');
+    expect(sms.calls).toBe(1);
+
+    // WhatsApp's `delivered` finally arrives, for that same superseded attempt.
+    whatsapp.queue.push({
+      providerId: 'wa-1',
+      status: 'delivered',
+      at: '2026-09-20T00:00:02.000Z',
+    });
+    await deliver('wa');
+
+    const afterUpgrade = await messaging.status(id);
+    expect(afterUpgrade!.chain.attempts.map((attempt) => attempt.status)).toEqual([
+      'delivered',
+      'sent',
+    ]);
+    expect(afterUpgrade!.chain.status).toBe('delivered');
+    expect(afterUpgrade!.status).toBe('delivered');
+
+    // The SMS attempt then fails. The message was already delivered, so the chain must not walk
+    // on to email — and it must not report itself failed either.
+    sms.queue.push({
+      providerId: 'sms-1',
+      status: 'failed',
+      error: 'carrier rejected',
+      at: '2026-09-20T00:00:03.000Z',
+    });
+    await deliver('sms');
+
+    const final = await messaging.status(id);
+    expect(email.calls).toBe(0);
+    expect(final!.chain.attempts.map((attempt) => attempt.channel)).toEqual(['whatsapp', 'sms']);
+    expect(final!.chain.status).toBe('delivered');
+    expect(final!.status).toBe('delivered');
   });
 });
 

@@ -236,10 +236,43 @@ export interface ChainProgress {
 }
 
 /**
+ * The best confirmation any attempt on the chain carries: `read` beats `delivered`, and anything
+ * else is no confirmation at all.
+ */
+function confirmedDelivery(attempts: Attempt[]): 'delivered' | 'read' | undefined {
+  let best: 'delivered' | 'read' | undefined;
+  for (const attempt of attempts) {
+    if (attempt.status === 'read') {
+      return 'read';
+    }
+    if (attempt.status === 'delivered') {
+      best = 'delivered';
+    }
+  }
+  return best;
+}
+
+/**
  * The chain's status right now, from the attempts on the record plus, when known, the walk's
  * actual progress (attempts whose write was lost still count as attempted). A `failed` tail is
  * terminal only once every configured fallback channel has been attempted; until then the chain
  * is `pending`, because the next channel has yet to be tried.
+ *
+ * A `delivered` / `read` on ANY attempt — not just the last — is the chain's answer. The chain
+ * exists to get one message to one recipient, so the moment any channel confirms delivery the
+ * chain has succeeded, whatever a later or superseded attempt says. This matters because an
+ * earlier attempt can be confirmed *after* the walk has moved on: a chain can fail over from
+ * WhatsApp to SMS and only then receive WhatsApp's `delivered` callback, which `isStatusProgression`
+ * accepts as a genuine late upgrade. Reading only the last attempt would report that chain as
+ * `sent` (or, once SMS also fails, `failed`) even though the message demonstrably arrived — the
+ * wrong terminal outcome for a caller polling `GET /status/:id`, and the wrong input to the
+ * fallback walk's own "is this chain still live?" decision.
+ *
+ * The corollary is that such a chain is terminal, and so is released (timer cancelled, render
+ * input dropped) even while a later attempt is still `sent`: a delivered chain must never fall
+ * back again, which is exactly what `shouldSkipAdvancement` already enforces for
+ * `delivered` / `read`. Nothing is released while the chain could still legitimately advance,
+ * because a `failed` tail with channels left to try derives `pending`, not a terminal status.
  *
  * This is THE answer to "what is this chain's status"; do not derive it a second way. Both
  * writers use it: the send pipeline's `attemptRecorder` after each synchronous attempt, and the
@@ -261,6 +294,10 @@ export function chainStatus(
 ): MessageRecord['chain']['status'] {
   if (fallback.length === 0) {
     return 'pending';
+  }
+  const confirmed = confirmedDelivery(attempts);
+  if (confirmed !== undefined) {
+    return confirmed;
   }
   const attempted = Math.max(attempts.length, progress?.attempted ?? 0);
   const last = progress?.last ?? attempts.at(-1)?.status;
