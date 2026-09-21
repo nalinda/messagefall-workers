@@ -14,9 +14,11 @@ import { describe, expect, it, spyOn } from 'bun:test';
 import { z } from 'zod';
 
 import { createMessaging } from '../../src/core/messaging.js';
+import { PolicyError } from '../../src/core/policy.js';
 import { consoleProvider } from '../../src/providers/console/index.js';
 import type { RenderedEmail, RenderedSms, RenderedWhatsApp } from '../../src/providers/types.js';
 import { definedChannels, defineTemplates, render } from '../../src/templates.js';
+import { rejection } from '../helpers/client.js';
 import { captureConsole, newEnv, recordingProvider } from '../helpers/messaging.js';
 
 const TO = '+14155550123';
@@ -375,6 +377,35 @@ describe('Issue #11: Email channel rendering', () => {
         const record = await messaging.status(id);
         expect(record!.policy).toEqual({ fallback: ['whatsapp'], always: [] });
         expect(record!.always).toHaveLength(0);
+      } finally {
+        capturedConsole.restore();
+      }
+    });
+
+    it('throws PolicyError rather than stranding the message when email is the only channel and no address was supplied', async () => {
+      const email = recordingProvider<RenderedEmail>('email', 'rec-email');
+      const capturedConsole = captureConsole(['log', 'info', 'warn', 'error']);
+
+      try {
+        const messaging = createMessaging(newEnv(), {
+          templates: emailCatalog,
+          providers: () => ({ email }),
+          delivery: { fallback: ['email'], always: [] },
+        });
+
+        // Without this the send would create a record, return its id and call no provider,
+        // leaving the message `pending` for ever with nothing able to move it.
+        const error = await rejection(
+          messaging.send({
+            template: 'emailOnlyNotification',
+            to: TO,
+            locale: 'en',
+            input: { subject: 'Hello', body: 'Body' },
+          })
+        );
+        expect(error).toBeInstanceOf(PolicyError);
+        expect((error as PolicyError).templateName).toBe('emailOnlyNotification');
+        expect(email.calls).toHaveLength(0);
       } finally {
         capturedConsole.restore();
       }

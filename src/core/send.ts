@@ -25,7 +25,12 @@ import {
   validateInput,
 } from '../templates.js';
 import { createLogger } from './logger.js';
-import { type DeliveryOverride, type DeliveryPolicy, resolveDelivery } from './policy.js';
+import {
+  type DeliveryOverride,
+  type DeliveryPolicy,
+  PolicyError,
+  resolveDelivery,
+} from './policy.js';
 import { renderedContent, scrubError } from './redact.js';
 import { isTimedChain, releaseChain, type RenderInput, renderInputKey } from './render-input.js';
 import {
@@ -638,12 +643,33 @@ function resolveEffectivePolicy(
     initialPolicy.fallback.includes('email') || initialPolicy.always.includes('email');
   const hasSkippedEmail = hasEmailInPolicy && !hasEmail;
 
-  const policy: DeliveryPolicy = hasSkippedEmail
-    ? {
-        fallback: initialPolicy.fallback.filter((ch) => ch !== 'email'),
-        always: initialPolicy.always.filter((ch) => ch !== 'email'),
-      }
-    : initialPolicy;
+  if (!hasSkippedEmail) {
+    return { policy: initialPolicy, hasSkippedEmail };
+  }
+
+  const policy: DeliveryPolicy = {
+    fallback: initialPolicy.fallback.filter((ch) => ch !== 'email'),
+    always: initialPolicy.always.filter((ch) => ch !== 'email'),
+  };
+
+  // Dropping the unaddressed email channel can empty the policy outright — an email-only
+  // template sent with no address. That is the same "nothing to deliver on" fault
+  // `resolveDelivery` throws for, and it runs before this filter, so it is raised here instead.
+  // Proceeding would create a record, return its id and call no provider, leaving the message
+  // `pending` for ever with nothing that could ever move it.
+  if (policy.fallback.length === 0 && policy.always.length === 0) {
+    throw new PolicyError({
+      templateName: req.templateName,
+      defaults,
+      template: req.template.delivery,
+      send: req.delivery,
+      defined: definedChannels(req.template),
+      beforeFilter: initialPolicy,
+      message:
+        `No delivery channels available for template "${req.templateName}": its only resolved ` +
+        `channel is email and no email address was supplied.`,
+    });
+  }
 
   return { policy, hasSkippedEmail };
 }
