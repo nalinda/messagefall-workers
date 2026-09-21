@@ -22,8 +22,12 @@ Initial release of `messagefall-workers`: an outbound messaging library for Clou
   - `console`: Development provider with terminal output, webhook event simulation, and bypass support (`/providers/console`).
   - `stub`: In-memory test provider contract implementation for unit testing (`/providers/stub`).
 - **Webhook Dispatch**: Provider-owned webhook verification and ingestion routes (`/webhooks/<provider>`) that correlate external delivery receipts back to original message IDs and advance fallback chains.
-- **Hono Application**: Ready-to-use HTTP app wrapper (`createMessagingApp`) exposing endpoints for message sending (`/send`), delivery status queries (`/status/:id`), and provider webhooks.
+- **Hono Application**: Ready-to-use HTTP app wrapper (`createMessagingApp`) exposing endpoints for message sending (`/send`), delivery status queries (`/status/:id`), and provider webhooks. Published as its own entry point, `messagefall-workers/app`, so the root entry never resolves the optional `hono` peer dependency.
 - **Typed Client**: `createMessagingClient` for type-safe Worker-to-Worker messaging across Cloudflare Service Bindings, sharing the template catalog.
 - **Structured Logging & Redaction**: Built-in JSON logger with automatic parameter and code redaction ensuring one-time passwords (OTPs) and sensitive bodies are never leaked to logs.
 - **Example Worker**: Minimal standalone reference implementation under `examples/basic` demonstrating full multi-provider configuration with local development simulation.
 - **Integration Tests**: Comprehensive test suite using Miniflare and `wrangler dev` verifying end-to-end send pipelines, webhook callbacks, and fallback behaviors.
+
+### Known limitations
+
+- The render input the fallback chain needs (`in:<id>` in KV) is stored **unencrypted** for the duration of the chain timeout. For an OTP template that payload contains the code in plaintext. Encrypting it is deferred past 0.1.0; see the README's Delivery status section.
