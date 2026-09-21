@@ -13,7 +13,7 @@ import { withAdvanceLock } from './advance-lock.js';
 import { advanceChain } from './fallback.js';
 import { DEFAULT_POLICY, type DeliveryOverride, type DeliveryPolicy } from './policy.js';
 import { validateProviderSet } from './provider-set.js';
-import { releaseChain } from './render-input.js';
+import { sealAndReleaseChain } from './render-input.js';
 import {
   notifyStatus,
   type ProviderSet,
@@ -220,7 +220,8 @@ async function handleChainStatusApplied<T extends Templates<Record<string, Templ
   record: MessageRecord,
   env: MessagingEnv,
   options: MessagingOptions<T>,
-  kv: KVNamespace
+  kv: KVNamespace,
+  store: StatusStore
 ): Promise<void> {
   if (event.status === 'failed') {
     // A chain some attempt has already confirmed `delivered` / `read` never falls back again:
@@ -245,9 +246,16 @@ async function handleChainStatusApplied<T extends Templates<Record<string, Templ
   // stored render input of a chain that is still `pending` with channels left to try, leaving a
   // later failure with nothing to rebuild the next attempt from.
   if (isTerminalChainStatus(record.chain.status)) {
-    // The chain is terminal: nothing is left to fall back to, so drop the timer (if this chain
-    // ever armed one) and the input.
-    await releaseChain(resolveTimer(env, options.timer), kv, id, record.policy.fallback);
+    // The chain is terminal: nothing is left to fall back to, so seal the record and drop the
+    // timer (if this chain ever armed one) and the input — through the one helper every
+    // terminal-release path shares, so the `sealed` flag and the teardown cannot drift apart.
+    await sealAndReleaseChain(
+      store,
+      resolveTimer(env, options.timer),
+      kv,
+      id,
+      record.policy.fallback
+    );
   }
 }
 
@@ -353,7 +361,9 @@ function wiredCore<T extends Templates<Record<string, TemplateDef<unknown>>>>(
           ref ? notifyStatus(options.onStatus, { ...ref, status: raw.status }) : undefined
       : undefined,
     onStatusApplied: ({ id, part, event, record }) =>
-      part === 'chain' ? handleChainStatusApplied(id, event, record, env, options, kv) : undefined,
+      part === 'chain'
+        ? handleChainStatusApplied(id, event, record, env, options, kv, store)
+        : undefined,
   };
   // The hook closes over `webhookOptions`, so the wired set can only be installed on it after it
   // exists; `applyStatusEvents` reads `providers` when a status actually fires.

@@ -146,6 +146,47 @@ describe('createMessaging.handleWebhook', () => {
     const unknown = await messaging.handleWebhook('nope', new Request('https://worker.local/x'));
     expect(unknown.status).toBe(404);
   });
+
+  // A chain torn down by a terminal webhook goes through the same seal-and-release helper as
+  // every other terminal path: `releaseChain`'s cancel is best-effort, so only `sealed` stops a
+  // cancel that was lost from letting a later alarm fire a second terminal event.
+  it('seals the record when a delivered webhook ends the chain', async () => {
+    const provider: Provider<RenderedSms> = {
+      name: 'sealing-sms',
+      channel: 'sms',
+      send: () => Promise.resolve({ ok: true, providerId: 'sealing-1' }),
+      webhook: {
+        parse: async (request) => {
+          const body = (await request.json()) as { id: string; status: 'delivered' };
+          return [{ providerId: body.id, status: body.status, at: '2026-09-20T00:00:00.000Z' }];
+        },
+      },
+    };
+    const messaging = createMessaging(newEnv(), {
+      templates,
+      providers: () => ({ sms: provider }),
+    });
+
+    const { id } = await messaging.send({
+      template: 'ping',
+      to: '+14155550123',
+      locale: 'en',
+      input: undefined,
+    });
+    expect((await messaging.status(id))!.sealed).toBeUndefined();
+
+    await messaging.handleWebhook(
+      'sealing-sms',
+      new Request('https://worker.local/webhooks/sealing-sms', {
+        method: 'POST',
+        body: JSON.stringify({ id: 'sealing-1', status: 'delivered' }),
+      })
+    );
+
+    const record = await messaging.status(id);
+    expect(record!.chain.status).toBe('delivered');
+    expect(record!.sealed).toBe(true);
+  });
 });
 
 describe('createMessaging.handleWebhook observer failures', () => {
