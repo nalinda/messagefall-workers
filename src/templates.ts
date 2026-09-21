@@ -282,10 +282,6 @@ function formatIssuePath(path?: StandardSchemaIssue['path']): string {
  * @throws {TemplateValidationError} If the input fails the schema.
  */
 export function validateInput<In>(def: TemplateDef<In>, input: unknown): In {
-  return validateSchema(def, input);
-}
-
-function validateSchema<In>(def: TemplateDef<In>, input: unknown): In {
   assertStandardSchema(def.input);
   const result = def.input['~standard'].validate(input);
   if (result instanceof Promise) {

@@ -1,8 +1,12 @@
 /**
  * Core messaging types for messagefall-workers.
  *
- * Re-exported wholesale by the root barrel, so this file is the type half of the public API:
- * each list below is one sub-issue's documented interface. Derivations the core shares between
+ * Re-exported wholesale by the root barrel, so this file is the public API's own surface: the
+ * types below — each list one sub-issue's documented interface — and, through the re-exports at
+ * the end of the file, the runtime entry points that go with them (`advanceChain`,
+ * `resolveDelivery`, `kvStatusStore`, `handleWebhook`, `validateEnv`, `defineTemplates`,
+ * `render`, …). Despite the file's name this is where to look for what a consumer can reach, not
+ * only in the module that defines a symbol. Derivations the core shares between
  * its own modules — `chainStatus`, `deriveOverallStatus`, `createWebhookHandler`,
  * `applyStatusEvents`, `renderValidated`, the redaction engine — are deliberately absent. They
  * are imported by relative path inside `src/`, which is what an internal seam looks like here.
