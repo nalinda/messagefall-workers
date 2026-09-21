@@ -345,7 +345,7 @@ Templates with `kind: 'otp'` get four behaviours:
 
 - The send is dispatched under `ctx.waitUntil` and `POST /send` returns as soon as the message is accepted and recorded, so response time does not reveal whether a number exists.
 - The chain timeout is the `otp` value, defaulting to thirty seconds. `always` channels for an OTP template are allowed but unusual; most codes want the chain only.
-- Rendered bodies and inputs are never written to logs, status records, or error messages. Only the message id, channel, provider id and status are stored.
+- Rendered bodies and inputs are never written to logs. Only the message id, channel, provider id and status are stored on the status record. Vendor error strings are scrubbed before they reach a record; see Known limitations in the CHANGELOG for the one case a bare-value OTP parameter can defeat that.
 - Codes are never queued. If every channel fails, the status is `failed` and the caller decides what to do.
 
 The package does not generate or verify codes. Pair it with your auth layer, which owns the code, and hand this package only the delivery.
