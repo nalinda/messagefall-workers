@@ -11,6 +11,11 @@ This is a complete, runnable Cloudflare Worker demonstrating `messagefall-worker
 
 ## Running Locally
 
+This example imports `messagefall-workers` but declares no dependency on it: inside this
+repository it resolves through the root `tsconfig.json`'s `paths` mapping, straight to the
+library's TypeScript source rather than to the built package. Copying these files out of the repo
+therefore needs the package installed first — see the root README's install instructions.
+
 Run the example with `wrangler dev`:
 
 ```sh
