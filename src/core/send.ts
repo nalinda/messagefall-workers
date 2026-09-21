@@ -212,6 +212,22 @@ async function callProvider(
 }
 
 /**
+ * Why this channel cannot be dispatched at all, or `undefined` when it can.
+ *
+ * `email` is validated once at the send door, and the send path drops the email channel outright
+ * when no address was supplied. The asynchronous fallback path is a second door: it rebuilds the
+ * request from whatever input it could recover, which may carry no email address at all. Rather
+ * than address the message to something that cannot be an email address — the recipient's phone
+ * number, say — the attempt is recorded failed, the same treatment `finalizeMissingInput` gives
+ * an unrecoverable recipient.
+ */
+function undispatchableReason(req: ValidatedSendRequest, channel: Channel): string | undefined {
+  return channel === 'email' && !isEmailAddress(req.email ?? '')
+    ? 'No email address is available for the email channel'
+    : undefined;
+}
+
+/**
  * Renders and sends one channel, retrying a retryable failure exactly once.
  */
 async function attemptChannel(
@@ -231,6 +247,10 @@ async function attemptChannel(
     };
   }
   const base = { channel, provider: provider.name };
+  const undispatchable = undispatchableReason(req, channel);
+  if (undispatchable) {
+    return { ...base, status: 'failed', error: undispatchable, at: new Date().toISOString() };
+  }
   let payload: AnyRendered & OutboundMeta;
   try {
     const rendered: AnyRendered = renderValidated(

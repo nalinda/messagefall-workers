@@ -978,6 +978,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         JSON.stringify({
           input: { code: '887766' },
           to: '+94770000014',
+          email: 'recipient14@example.com',
           locale: 'en',
         })
       );
@@ -998,6 +999,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       expect(emailProvider.calls).toHaveLength(1);
 
       const emailCall = emailProvider.calls[0].message as RenderedEmail & OutboundMeta;
+      expect(emailCall.to).toBe('recipient14@example.com');
       expect(emailCall.subject).toBe('Your verification code');
       expect(emailCall.text).toBe('Your security code is 887766');
 
@@ -1020,6 +1022,60 @@ describe('Issue #7: Fallback on failed delivery status', () => {
 
       expect(updatedRecord?.chain.status).toBe('sent');
       expect(updatedRecord?.status).toBe('sent');
+    });
+
+    it('records the email channel failed rather than emailing the phone number when no address was recovered', async () => {
+      const waProvider = createRecordingProvider('meta-wa', 'whatsapp');
+      const emailProvider = createRecordingProvider('postmark', 'email', () =>
+        Promise.resolve({ ok: true, providerId: 'email_ok_014b' })
+      );
+
+      const messageId = 'msg_01J9FB0000000000000000014B';
+      await store.create({
+        id: messageId,
+        template: 'otpVerification',
+        kind: 'otp',
+        policy: { fallback: ['whatsapp', 'email'], always: [] },
+        chain: {
+          status: 'failed',
+          attempts: [
+            {
+              channel: 'whatsapp',
+              provider: 'meta-wa',
+              providerId: 'wa_014b',
+              status: 'failed',
+              error: 'WhatsApp phone not registered',
+              at: '2026-09-20T10:00:00.000Z',
+            },
+          ],
+        },
+        always: [],
+        status: 'failed',
+        createdAt: '2026-09-20T10:00:00.000Z',
+        updatedAt: '2026-09-20T10:00:05.000Z',
+      });
+
+      // The recovered input carries the phone number and no email address at all.
+      await kv.put(
+        `in:${messageId}`,
+        JSON.stringify({ input: { code: '887766' }, to: '+94770000014', locale: 'en' })
+      );
+
+      await advanceChain({
+        id: messageId,
+        reason: 'failed',
+        env: { MESSAGES_KV: kv },
+        options: { templates: testTemplates, providers: [waProvider, emailProvider] },
+        store,
+      });
+
+      expect(emailProvider.calls).toHaveLength(0);
+
+      const updatedRecord = await store.get(messageId);
+      expect(updatedRecord?.chain.attempts).toHaveLength(2);
+      expect(updatedRecord?.chain.attempts[1].channel).toBe('email');
+      expect(updatedRecord?.chain.attempts[1].status).toBe('failed');
+      expect(updatedRecord?.chain.status).toBe('failed');
     });
 
     it('sets chain.status = "failed" when all subsequent fallback providers fail immediately', async () => {

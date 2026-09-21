@@ -345,7 +345,10 @@ function rebuildRequest(
     template: template ?? missingTemplate(record.kind),
     // Guaranteed by `isRenderable`: an advance with no recoverable recipient never gets here.
     to: payload.to,
-    email: payload.email ?? payload.to,
+    // Never defaulted to `payload.to`: an advance onto the email channel with no recovered
+    // address would otherwise hand an email provider an E.164 phone number. Absent, the channel
+    // is recorded as a failed attempt instead (see `attemptChannel`).
+    ...(payload.email !== undefined && { email: payload.email }),
     locale,
     input: payload.input,
     validatedInput: template ? validateInput(template, payload.input) : payload.input,
