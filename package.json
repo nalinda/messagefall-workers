@@ -1,6 +1,7 @@
 {
   "name": "messagefall-workers",
   "version": "0.1.0",
+  "private": true,
   "description": "Outbound messaging for Cloudflare Workers: WhatsApp first with SMS fallback, email, typed templates, delivery-status webhooks, and a client for Worker-to-Worker sends",
   "type": "module",
   "license": "MIT",

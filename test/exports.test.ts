@@ -26,6 +26,7 @@ interface PackageJson {
   dependencies?: Record<string, string>;
   exports: Record<string, ExportTarget>;
   files: string[];
+  private?: boolean;
 }
 
 function readPackageJson(): PackageJson {
@@ -103,6 +104,11 @@ describe('package.json#exports', () => {
   it('declares no runtime dependencies', () => {
     const pkg = readPackageJson();
     expect(pkg.dependencies).toBeUndefined();
+  });
+
+  it('marks package as private to prevent accidental npm publish', () => {
+    const pkg = readPackageJson();
+    expect(pkg.private).toBe(true);
   });
 
   it('publishes dist, and every export target is a file the build produces', () => {
@@ -279,5 +285,14 @@ describe('Node runtime package resolution', () => {
       encoding: 'utf8',
     });
     expect(result.status).toBe(0);
+  });
+});
+
+describe('CHANGELOG.md', () => {
+  it('exists at the repo root and contains a 0.1.0 heading', () => {
+    const changelogPath = path.join(rootDir, 'CHANGELOG.md');
+    expect(fs.existsSync(changelogPath)).toBe(true);
+    const changelog = fs.readFileSync(changelogPath, 'utf8');
+    expect(changelog).toMatch(/##\s+\[?0\.1\.0\]?/);
   });
 });
