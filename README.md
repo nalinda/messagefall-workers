@@ -339,6 +339,14 @@ Every send gets a message id. `GET /status/:id` returns:
 
 The top-level `status` is the chain's status, or the worst of the `always` attempts when there is no chain. Records live in KV with a TTL, seven days by default. There is no history beyond that; if you want reporting, subscribe with `onStatus` in the configuration and write wherever you like.
 
+### Known gap: the render input is stored unencrypted
+
+The status record itself holds no message content, but the fallback chain has to be able to re-render the message on the next channel once the first one fails. So every send with a chain writes its **render input** to a second KV key, `in:<id>`, and hands the same payload to the fallback timer. That payload is the raw input you passed to `send`, plus the recipient and locale — for an `otp` template it therefore contains **the code itself, in plaintext**.
+
+It is stored **unencrypted**, for the duration of the chain timeout (the key's TTL: thirty seconds for `otp` and five minutes for `notification` by default), and deleted as soon as the chain reaches a terminal state. Anyone who can read that KV namespace can read the code while the key is there.
+
+Encrypting `in:<id>` is a known gap, **deliberately deferred past 0.1.0**. Until it is closed, treat the messaging Worker's KV namespace as holding secrets: do not share it with anything that does not need it, and keep the chain timeouts no longer than your fallback actually requires.
+
 ## Sending from another Worker
 
 Bind the messaging Worker as a service and use the client with the same template catalog, so sends are typed end to end:
