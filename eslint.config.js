@@ -69,7 +69,9 @@ export default [
     // register their specs by calling `describe`/`it` at module scope, which is a top-level
     // side effect by construction — including in the shared helpers under `test/helpers/`,
     // which export fixtures AND carry a self-test (see the testing guidelines in
-    // `src/providers/README.md`) so they show up in the runner's output.
+    // `src/providers/README.md`) so they show up in the runner's output — registered, and run,
+    // with whichever spec imports the helper, since these files are not matched by the test
+    // glob themselves.
     files: ['test/**/*.ts'],
     rules: {
       'unicorn/no-top-level-side-effects': 'off',

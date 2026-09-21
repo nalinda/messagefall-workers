@@ -126,6 +126,11 @@ the `ProviderSet` a deployment builds from its env:
 - Shared fixtures and helpers live in `test/helpers/`, and each one carries a self-test — a
   `describe` of its own with at least an "it loads" case. A helper with no `describe` never
   appears in the runner's output, which makes it look like a spec that silently failed to run.
+  Helper files are not matched by `bun test`'s own file glob (`*.test.ts` and friends), so the
+  self-test registers and runs with whichever spec imports the helper and is counted under that
+  spec's file, not one of its own. It is real coverage — break an assertion in one and the run
+  goes red — but a helper no spec imports, directly or through another helper, is a helper whose
+  self-test never runs.
 - No message bodies in logs. Enforced two ways: `createLogger` (`src/core/logger.ts`) is the only
   writer, and its `LogFields` is a closed set of identifier and telemetry fields — there is no
   field a body, code, subject or parameter could be passed in, so content is prohibited at
