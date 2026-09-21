@@ -1284,6 +1284,67 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       expect(smsAttempt.error).toContain('Render input is no longer available');
       expect(updated?.chain.status).toBe('failed');
     });
+
+    it('seals the chain instead of throwing when the recovered input no longer validates', async () => {
+      const smsProvider = recordingProvider('sms', 'twilio-sms');
+
+      const messageId = 'msg_01J9FB00000000000000000018';
+      await store.create({
+        id: messageId,
+        template: 'otpVerification',
+        kind: 'otp',
+        policy: { fallback: ['whatsapp', 'sms'], always: [] },
+        chain: {
+          status: 'pending',
+          attempts: [
+            {
+              channel: 'whatsapp',
+              provider: 'meta-wa',
+              status: 'failed',
+              error: 'WA rejected',
+              at: '2026-09-20T10:00:00.000Z',
+            },
+          ],
+        },
+        always: [],
+        status: 'pending',
+        createdAt: '2026-09-20T10:00:00.000Z',
+        updatedAt: '2026-09-20T10:00:00.000Z',
+      });
+      mockTimer.arm(messageId, 30_000);
+
+      // A redeploy inside the chain's timeout window tightened the schema under an already
+      // stashed input: `otpVerification` wants six characters, the recovered code has five.
+      await advanceChain({
+        id: messageId,
+        reason: 'failed',
+        env: { MESSAGES_KV: kv },
+        options: {
+          templates: testTemplates,
+          providers: { sms: smsProvider },
+          timer: mockTimer,
+        },
+        store,
+        input: { input: { code: '12345' }, to: '+94770000018', locale: 'en' },
+      });
+
+      // Nothing is dispatched from an input that cannot be rendered.
+      expect(smsProvider.calls).toHaveLength(0);
+
+      const updated = await store.get(messageId);
+      expect(updated?.chain.attempts).toHaveLength(2);
+      const smsAttempt = updated!.chain.attempts[1];
+      expect(smsAttempt.channel).toBe('sms');
+      expect(smsAttempt.status).toBe('failed');
+      expect(smsAttempt.error).toContain('no longer satisfies the template schema');
+      // Scrubbed: neither the input nor the validation error's detail reaches the record.
+      expect(smsAttempt.error).not.toContain('12345');
+      expect(updated?.chain.status).toBe('failed');
+      // Released, not left stuck: sealed, timer cancelled, stashed input dropped.
+      expect(updated?.sealed).toBe(true);
+      expect(mockTimer.isCancelled(messageId)).toBe(true);
+      expect(await kv.get(`in:${messageId}`)).toBeNull();
+    });
   });
 
   describe('Custom Fallback Policies with Skipped Channels', () => {

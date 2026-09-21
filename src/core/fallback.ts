@@ -21,7 +21,7 @@ import type { MessagingEnv } from '../env.js';
 import type { Channel } from '../providers/types.js';
 import { getTemplate, type TemplateDef, validateInput } from '../templates.js';
 import type { StandardSchemaV1 } from '../types.js';
-import { createLogger } from './logger.js';
+import { createLogger, type LogEvent } from './logger.js';
 import type { MessagingOptions } from './messaging.js';
 import { toProviderSet } from './provider-set.js';
 import {
@@ -236,28 +236,58 @@ function providerNameFor(providers: ProviderSet, channel: Channel): string {
 }
 
 /**
- * Seals a chain whose render input can no longer be recovered — neither the timer nor the
- * `in:<id>` KV entry has it, because the entry expired before the `failed` status arrived.
- *
- * There is nothing to render from and nowhere to address it, so the next channel is recorded as
- * a failed attempt and the chain released. It is NOT dispatched: a payload rebuilt from nothing
- * carries a blank recipient, and a real gateway would accept it.
+ * The two ways a recovered render input can turn out to be unusable, with the scrubbed message
+ * each one records on the attempt. Neither carries any part of the input or of the validation
+ * error: a status record is readable over `/status/:id`.
  */
-async function finalizeMissingInput(
+interface UnusableInput {
+  event: LogEvent;
+  error: string;
+}
+
+const INPUT_LOST: UnusableInput = {
+  event: 'fallback.input-lost',
+  error: 'Render input is no longer available; the message cannot be rebuilt for fallback',
+};
+
+const INPUT_INVALID: UnusableInput = {
+  event: 'fallback.input-invalid',
+  error:
+    'Render input no longer satisfies the template schema; the message cannot be rebuilt for fallback',
+};
+
+/**
+ * Seals a chain whose render input cannot be used — either it can no longer be recovered
+ * (neither the timer nor the `in:<id>` KV entry has it, because the entry expired before the
+ * `failed` status arrived), or it no longer validates against the template's schema, which a
+ * redeploy that tightened that schema inside the chain's timeout window will do.
+ *
+ * There is nothing to render from, so the next channel is recorded as a failed attempt and the
+ * chain released. It is NOT dispatched: a payload rebuilt from nothing carries a blank
+ * recipient, and a real gateway would accept it.
+ *
+ * The two reasons keep separate event names because the operator's next move differs — a lost
+ * input points at the TTL or the timer, an invalid one at a schema change — but the treatment
+ * has to be the same either way: an advance that simply threw would leave the chain neither
+ * advanced nor sealed with its timer still armed, and on the Durable Object alarm path it would
+ * come back as a platform retry that can never succeed.
+ */
+async function finalizeUnusableInput(
   args: AdvanceChainArgs,
   record: MessageRecord,
   providers: ProviderSet,
   nextChannel: Channel,
-  kv: KVNamespace | undefined
+  kv: KVNamespace | undefined,
+  reason: UnusableInput
 ): Promise<void> {
-  logger.warn('fallback.input-lost', { id: args.id, kind: record.kind, channel: nextChannel });
+  logger.warn(reason.event, { id: args.id, kind: record.kind, channel: nextChannel });
   const recorder = attemptRecorder(sendDeps(args, providers, record), args.id, record.policy);
   await recorder.record(
     {
       channel: nextChannel,
       provider: providerNameFor(providers, nextChannel),
       status: 'failed',
-      error: 'Render input is no longer available; the message cannot be rebuilt for fallback',
+      error: reason.error,
       at: new Date().toISOString(),
     },
     'chain',
@@ -384,24 +414,28 @@ export async function advanceChain(args: AdvanceChainArgs): Promise<void> {
   const payload = await resolveInputPayload(args, kv);
   const providers = toProviderSet(args.options.providers);
   if (!isRenderable(payload)) {
-    await finalizeMissingInput(args, initialRecord, providers, nextChannels[0], kv);
+    await finalizeUnusableInput(args, initialRecord, providers, nextChannels[0], kv, INPUT_LOST);
     return;
   }
 
   const template = getTemplate(args.options.templates, initialRecord.template);
+  // `rebuildRequest` revalidates the stashed input, so it can throw here where every other
+  // failure in this module is best-effort. Treated exactly as a lost input: recorded, released.
+  let request: ValidatedSendRequest;
+  try {
+    request = rebuildRequest(initialRecord, template, payload);
+  } catch {
+    await finalizeUnusableInput(args, initialRecord, providers, nextChannels[0], kv, INPUT_INVALID);
+    return;
+  }
+
   const recorder = attemptRecorder(
     sendDeps(args, providers, initialRecord),
     args.id,
     initialRecord.policy
   );
 
-  const attempts = await runChain(
-    rebuildRequest(initialRecord, template, payload),
-    args.id,
-    providers,
-    nextChannels,
-    recorder
-  );
+  const attempts = await runChain(request, args.id, providers, nextChannels, recorder);
 
   const last = attempts.at(-1);
   if (!last || last.status === 'failed') {
