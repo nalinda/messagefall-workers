@@ -20,7 +20,6 @@ Initial release of `messagefall-workers`: an outbound messaging library for Clou
   - `http-sms`: Configurable HTTP SMS gateway provider supporting custom endpoints, authentication headers, and JSON/form payloads (`/providers/http-sms`).
   - `gmail`: Direct OAuth-authenticated Gmail API provider for outbound email (`/providers/gmail`).
   - `console`: Development provider with terminal output, webhook event simulation, and bypass support (`/providers/console`).
-  - `stub`: In-memory test provider contract implementation for unit testing (`/providers/stub`).
 - **Webhook Dispatch**: Provider-owned webhook verification and ingestion routes (`/webhooks/<provider>`) that correlate external delivery receipts back to original message IDs and advance fallback chains.
 - **Hono Application**: Ready-to-use HTTP app wrapper (`createMessagingApp`) exposing endpoints for message sending (`/send`), delivery status queries (`/status/:id`), and provider webhooks. Published as its own entry point, `messagefall-workers/app`, so the root entry never resolves the optional `hono` peer dependency.
 - **Typed Client**: `createMessagingClient` for type-safe Worker-to-Worker messaging across Cloudflare Service Bindings, sharing the template catalog.

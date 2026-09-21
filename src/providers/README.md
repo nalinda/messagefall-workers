@@ -84,7 +84,6 @@ the `ProviderSet` a deployment builds from its env:
 - `gmail`: Gmail API (send with an OAuth refresh token)
 - `http-sms`: Generic HTTP SMS gateway skeleton
 - `console`: Development mode, logs to console
-- `stub`: In-memory provider for tests and local runs
 
 ## Built-in Providers (to be implemented)
 

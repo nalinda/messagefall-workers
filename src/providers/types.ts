@@ -202,19 +202,10 @@ export interface Provider<R = unknown> {
     parse(request: Request, options?: WebhookParseOptions): Promise<StatusEvent[]>;
   };
   /**
-   * Optional direct status lookup by message ID.
-   */
-  status?(messageId: string): Promise<unknown>;
-  /**
-   * Optional custom webhook/status request handler.
-   */
-  statusHandler?(request: Request): Promise<Response> | Response;
-  /**
-   * Optional internal hook for simulated status delivery.
+   * Optional internal hook for simulated status delivery. Assigned by the core, not by the
+   * provider author: `createMessaging` installs it on a provider that offers simulated
+   * statuses (the console provider's `simulate` option) so those take the same path a real
+   * vendor callback takes.
    */
   onSimulatedStatus?(event: StatusEvent): void;
-  /**
-   * Optional legacy provider identifier.
-   */
-  id?: string;
 }

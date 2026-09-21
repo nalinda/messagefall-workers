@@ -119,8 +119,8 @@ describe('package.json#exports', () => {
 
     for (const [key, target] of Object.entries(pkg.exports)) {
       if (key === './providers/*') {
-        const dts = target.types.replace('*', 'stub');
-        const esm = target.import.replace('*', 'stub');
+        const dts = target.types.replace('*', 'console');
+        const esm = target.import.replace('*', 'console');
         expect(fs.existsSync(distFile(dts))).toBe(true);
         expect(fs.existsSync(distFile(esm))).toBe(true);
       } else {
@@ -218,9 +218,9 @@ describe('Entry points export documented functions', () => {
     expect(typeof durable.FallbackTimer).toBe('function');
   });
 
-  it('exports stub provider from the built ./providers/stub entry point', async () => {
-    const provider = await loadExport('./providers/stub');
-    expect(typeof provider.StubProvider).toBe('function');
+  it('exports the console provider from the built ./providers/console entry point', async () => {
+    const provider = await loadExport('./providers/console');
+    expect(typeof provider.consoleProvider).toBe('function');
   });
 
   it('exports httpSms provider from the built ./providers/http-sms entry point', async () => {
@@ -284,19 +284,19 @@ describe('Entry points export documented functions', () => {
 });
 
 describe('Node runtime package resolution', () => {
-  it('resolves messagefall-workers, ./client, ./durable, ./providers/stub, and ./providers/http-sms via package.json exports', () => {
+  it('resolves messagefall-workers, ./client, ./durable, ./providers/console, and ./providers/http-sms via package.json exports', () => {
     const script = `
       Promise.all([
         import('messagefall-workers'),
         import('messagefall-workers/client'),
         import('messagefall-workers/durable'),
-        import('messagefall-workers/providers/stub'),
+        import('messagefall-workers/providers/console'),
         import('messagefall-workers/providers/http-sms'),
-      ]).then(([root, client, durable, stub, httpSmsMod]) => {
+      ]).then(([root, client, durable, consoleMod, httpSmsMod]) => {
         if (typeof root.createMessaging !== 'function') process.exit(1);
         if (typeof client.createMessagingClient !== 'function') process.exit(2);
         if (typeof durable.FallbackTimer !== 'function') process.exit(3);
-        if (typeof stub.StubProvider !== 'function') process.exit(4);
+        if (typeof consoleMod.consoleProvider !== 'function') process.exit(4);
         if (typeof httpSmsMod.httpSms !== 'function') process.exit(5);
         process.exit(0);
       }).catch((err) => {
