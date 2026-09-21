@@ -6,15 +6,23 @@
  * - GET variant with query parameters built from url as a function.
  * - ok and retryable mappers override the defaults; 4xx is non-retryable by default, 429 and 5xx retryable, thrown fetch retryable.
  * - A caller-supplied webhook.parse is exposed and dispatches through provider contract.
- * - Not present in the root bundle when unused.
+ * - Not present in the root bundle when unused (walk the built import graph).
  */
 
-import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 
 import { createMessaging } from '../../src/index.js';
 import { httpSms } from '../../src/providers/http-sms/index.js';
 import type { OutboundMeta, RenderedSms, StatusEvent } from '../../src/providers/types.js';
+import { buildDist, reachableProviderFiles } from '../helpers/bundle-isolation.js';
 import { newEnv, pingTemplates } from '../helpers/messaging.js';
+
+// The isolation check below walks the built import graph, so dist must exist and be current —
+// rebuilt here rather than assumed, since bun gives no cross-file ordering guarantee that some
+// other test file already built it.
+beforeAll(() => {
+  buildDist();
+});
 
 describe('httpSms provider', () => {
   let fetchSpy: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>>;
@@ -375,5 +383,9 @@ describe('httpSms provider', () => {
     const root = await import('../../src/index.js');
     // Ensure httpSms is not exported directly from root package to maintain bundle isolation
     expect((root as Record<string, unknown>).httpSms).toBeUndefined();
+  });
+
+  it('is not reachable from other entry points when unused in built output', () => {
+    expect(reachableProviderFiles('http-sms')).toEqual([]);
   });
 });

@@ -18,15 +18,13 @@
  * - Not present in the root bundle when unused (walk the built import graph).
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
-
-import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { z } from 'zod';
 
 import { createMessaging, defineTemplates } from '../../src/index.js';
 import { gmail, type GmailConfig } from '../../src/providers/gmail/index.js';
 import type { OutboundMeta, RenderedEmail } from '../../src/providers/types.js';
+import { buildDist, reachableProviderFiles } from '../helpers/bundle-isolation.js';
 import { decodeBase64Url, decodeRfc2047 } from '../helpers/gmail.js';
 import { memoryKV, newEnv } from '../helpers/messaging.js';
 
@@ -35,36 +33,12 @@ interface CapturedRequest {
   init: RequestInit | undefined;
 }
 
-const rootDir = path.resolve(import.meta.dir, '../..');
-
-function relativeImportsOf(file: string): string[] {
-  const source = fs.readFileSync(file, 'utf8');
-  const staticSpecifier = /\bfrom\s*['"]([^'"]+)['"]/g;
-  const dynamicSpecifier = /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
-  const bareSpecifier = /\bimport\s+['"]([^'"]+)['"]/g;
-
-  const specifiers = [
-    ...source.matchAll(staticSpecifier),
-    ...source.matchAll(dynamicSpecifier),
-    ...source.matchAll(bareSpecifier),
-  ].map((match) => match[1]);
-
-  return specifiers
-    .filter((specifier) => specifier.startsWith('.'))
-    .map((specifier) => path.resolve(path.dirname(file), specifier));
-}
-
-function walkImportGraph(roots: string[]): Set<string> {
-  const seen = new Set<string>();
-  const queue = [...roots];
-  for (let file = queue.pop(); file !== undefined; file = queue.pop()) {
-    if (seen.has(file)) continue;
-    if (!fs.existsSync(file)) continue;
-    seen.add(file);
-    queue.push(...relativeImportsOf(file));
-  }
-  return seen;
-}
+// The isolation check below walks the built import graph, so dist must exist and be current —
+// rebuilt here rather than assumed, since bun gives no cross-file ordering guarantee that some
+// other test file already built it.
+beforeAll(() => {
+  buildDist();
+});
 
 describe('Gmail provider (Issue #20)', () => {
   let fetchSpy: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>>;
@@ -648,23 +622,6 @@ describe('Gmail provider (Issue #20)', () => {
   });
 
   it('is not reachable from other entry points when unused in built output', () => {
-    const distProvidersDir = path.join(rootDir, 'dist/providers');
-    if (!fs.existsSync(distProvidersDir)) {
-      return; // dist not built yet in pure red phase
-    }
-
-    const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8')) as {
-      exports: Record<string, { import: string }>;
-    };
-
-    const roots = Object.entries(pkg.exports)
-      .filter(([key]) => key !== './providers/*')
-      .map(([, target]) => path.join(rootDir, target.import));
-
-    const reachable = walkImportGraph(roots);
-    const offenders = [...reachable].filter((file) =>
-      file.includes(path.join('providers', 'gmail') + path.sep)
-    );
-    expect(offenders).toEqual([]);
+    expect(reachableProviderFiles('gmail')).toEqual([]);
   });
 });
