@@ -100,34 +100,35 @@ function postGmailSend(token: string, raw: string): Promise<Response> {
   });
 }
 
+/**
+ * Sends `raw`, refreshing the token once on a 401.
+ *
+ * Returns the Gmail `Response` for the caller to map, or a ready-made failing {@link SendResult}
+ * when the exchange never produced one. The two are distinguishable by `instanceof Response`, so
+ * neither case needs an optional field nor a non-null assertion at the call site.
+ */
 async function sendWithToken(
   tokenManager: GmailTokenManager,
   raw: string
-): Promise<{ response?: Response; errorResult?: SendResult }> {
+): Promise<Response | SendResult> {
+  const failed = (err: unknown): SendResult => ({
+    ok: false,
+    error: errorMessage(err),
+    retryable: true,
+  });
+
   let token: string;
   try {
     token = await tokenManager.getToken();
   } catch (err) {
-    return {
-      errorResult: {
-        ok: false,
-        error: errorMessage(err),
-        retryable: true,
-      },
-    };
+    return failed(err);
   }
 
   let response: Response;
   try {
     response = await postGmailSend(token, raw);
   } catch (err) {
-    return {
-      errorResult: {
-        ok: false,
-        error: errorMessage(err),
-        retryable: true,
-      },
-    };
+    return failed(err);
   }
 
   if (response.status === 401) {
@@ -136,17 +137,11 @@ async function sendWithToken(
       token = await tokenManager.getToken();
       response = await postGmailSend(token, raw);
     } catch (err) {
-      return {
-        errorResult: {
-          ok: false,
-          error: errorMessage(err),
-          retryable: true,
-        },
-      };
+      return failed(err);
     }
   }
 
-  return { response };
+  return response;
 }
 
 async function mapSendResponse(response: Response): Promise<SendResult> {
@@ -196,13 +191,9 @@ export function gmail(c: GmailConfig): Provider<RenderedEmail> {
       });
 
       const raw = encodeBase64Url(mime);
-      const { response, errorResult } = await sendWithToken(tokenManager, raw);
+      const sent = await sendWithToken(tokenManager, raw);
 
-      if (errorResult !== undefined) {
-        return errorResult;
-      }
-
-      return mapSendResponse(response!);
+      return sent instanceof Response ? mapSendResponse(sent) : sent;
     },
   };
 }
