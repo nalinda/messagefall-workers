@@ -49,6 +49,7 @@
     "ts-check": "tsc --noEmit",
     "test": "bun test",
     "test:exports": "bun test test/exports.test.ts",
+    "test:integration": "bun test test/integration/integration.test.ts",
     "prepare": "husky"
   },
   "eslintConfig": {
