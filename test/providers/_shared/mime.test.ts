@@ -165,4 +165,47 @@ describe('MIME message builder (Issue #20)', () => {
     expect(Number.isNaN(parsedTime)).toBe(false);
     expect(new Date(parsedTime).toISOString()).toBe(testDate.toISOString());
   });
+
+  describe('header injection', () => {
+    // From and To are interpolated verbatim, so a line break in either would end the header
+    // and let the caller append their own — a Bcc:, or a whole second body.
+    it.each([
+      ['To', 'victim@example.com\r\nBcc: attacker@evil.example'],
+      ['To', 'victim@example.com\nBcc: attacker@evil.example'],
+      ['To', 'victim@example.com\rBcc: attacker@evil.example'],
+    ])('throws rather than injecting a header through %s', (_field, value) => {
+      expect(() =>
+        buildMimeMessage({
+          from: 'sender@example.com',
+          to: value,
+          subject: 'Hello',
+          text: 'Body',
+        }),
+      ).toThrow(/line break/);
+    });
+
+    it('throws rather than injecting a header through From', () => {
+      expect(() =>
+        buildMimeMessage({
+          from: 'sender@example.com\r\nBcc: attacker@evil.example',
+          to: 'recipient@example.com',
+          subject: 'Hello',
+          text: 'Body',
+        }),
+      ).toThrow(/line break/);
+    });
+
+    it('RFC 2047-encodes a subject containing a line break instead of emitting it raw', () => {
+      const mime = buildMimeMessage({
+        from: 'sender@example.com',
+        to: 'recipient@example.com',
+        subject: 'Hello\r\nBcc: attacker@evil.example',
+        text: 'Body',
+      });
+
+      const headerBlock = mime.slice(0, mime.indexOf('\r\n\r\n'));
+      expect(headerBlock).not.toContain('Bcc:');
+      expect(headerBlock).toContain('=?UTF-8?B?');
+    });
+  });
 });

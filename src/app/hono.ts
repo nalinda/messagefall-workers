@@ -13,7 +13,7 @@ import {
   UnknownTemplateError,
 } from '../core/messaging.js';
 import { PolicyError } from '../core/policy.js';
-import { RecipientError, type SendContext } from '../core/send.js';
+import { EmailRecipientError, RecipientError, type SendContext } from '../core/send.js';
 import { announceTimerOff, registerMessagingOptions } from '../core/timer.js';
 import { type MessagingEnv, validateEnv } from '../env.js';
 import { TemplateValidationError } from '../templates.js';
@@ -42,22 +42,27 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * Which HTTP status each send fault maps to. Matched by constructor first and by `name` second,
+ * so an error that crossed a module boundary (a second copy of the package in the graph, a
+ * structured-clone across a service binding) is still classified rather than becoming a 500.
+ */
+const SEND_ERROR_STATUS: ReadonlyArray<{
+  type: new (...args: never[]) => Error;
+  status: 400 | 404 | 422;
+}> = [
+  { type: UnknownTemplateError, status: 404 },
+  { type: PolicyError, status: 422 },
+  { type: TemplateValidationError, status: 400 },
+  { type: RecipientError, status: 400 },
+  { type: EmailRecipientError, status: 400 },
+];
+
 function mapSendError(err: unknown): { status: 400 | 404 | 422; message: string } | null {
-  if (err instanceof UnknownTemplateError || isNamedError(err, 'UnknownTemplateError')) {
-    return { status: 404, message: errorMessage(err) };
-  }
-  if (err instanceof PolicyError || isNamedError(err, 'PolicyError')) {
-    return { status: 422, message: errorMessage(err) };
-  }
-  if (
-    err instanceof TemplateValidationError ||
-    isNamedError(err, 'TemplateValidationError') ||
-    err instanceof RecipientError ||
-    isNamedError(err, 'RecipientError')
-  ) {
-    return { status: 400, message: errorMessage(err) };
-  }
-  return null;
+  const match = SEND_ERROR_STATUS.find(
+    ({ type }) => err instanceof type || isNamedError(err, type.name)
+  );
+  return match ? { status: match.status, message: errorMessage(err) } : null;
 }
 
 function normalizeBasePath(basePath?: string): string {

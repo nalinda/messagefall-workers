@@ -65,6 +65,18 @@ const emailCatalog = defineTemplates({
   },
 });
 
+function messagingWithEmail(): ReturnType<typeof createMessaging> {
+  return createMessaging(newEnv(), {
+    templates: emailCatalog,
+    providers: () => ({
+      whatsapp: recordingProvider<RenderedWhatsApp>('whatsapp', 'wa'),
+      sms: recordingProvider<RenderedSms>('sms', 'sms-provider'),
+      email: recordingProvider<RenderedEmail>('email', 'email-provider'),
+    }),
+    delivery: { fallback: ['whatsapp'], always: ['email'] },
+  });
+}
+
 describe('Issue #11: Email channel rendering', () => {
   describe('RenderedEmail shape and template rendering', () => {
     it('produces { subject, text } with html absent when template does not define html', () => {
@@ -398,6 +410,52 @@ describe('Issue #11: Email channel rendering', () => {
       const record = await messaging.status(id);
       expect(record!.policy).toEqual({ fallback: ['whatsapp', 'sms'], always: [] });
       expect(record!.always).toHaveLength(0);
+    });
+  });
+
+  describe('email recipient validation (header injection)', () => {
+    // `email` becomes the To: header of a MIME message. Validating it here, at the one door it
+    // comes in through, covers every email provider rather than each provider's own builder.
+    it.each([
+      ['a CRLF injecting Bcc', 'victim@example.com\r\nBcc: attacker@evil.example'],
+      ['a bare LF', 'victim@example.com\nBcc: attacker@evil.example'],
+      ['a bare CR', 'victim@example.com\rBcc: attacker@evil.example'],
+      ['an address list', 'victim@example.com, attacker@evil.example'],
+      ['a display name', 'Victim <victim@example.com>'],
+      ['no domain', 'victim'],
+      ['no local part', '@example.com'],
+    ])('rejects %s before any provider is called', async (_label, email) => {
+      const messaging = messagingWithEmail();
+
+      let caught: unknown;
+      try {
+        await messaging.send({
+          template: 'orderWithHtml',
+          to: TO,
+          email,
+          locale: 'en',
+          input: { name: 'Mallory', orderId: 'ORD-700' },
+        });
+      } catch (error) {
+        caught = error;
+      }
+
+      expect((caught as Error | undefined)?.name).toBe('EmailRecipientError');
+    });
+
+    it('accepts an ordinary address and a plus-addressed one', async () => {
+      for (const email of ['alice@example.com', 'alice+tag@mail.example.co.uk']) {
+        const messaging = messagingWithEmail();
+        const { id } = await messaging.send({
+          template: 'orderWithHtml',
+          to: TO,
+          email,
+          locale: 'en',
+          input: { name: 'Alice', orderId: 'ORD-701' },
+        });
+        const record = await messaging.status(id);
+        expect(record!.always[0]).toMatchObject({ channel: 'email', status: 'sent' });
+      }
     });
   });
 });

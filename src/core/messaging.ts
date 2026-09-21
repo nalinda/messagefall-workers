@@ -34,7 +34,7 @@ import { applyStatusEvents, createWebhookHandler, type WebhookDispatchOptions } 
 
 export { ProviderConfigError } from './provider-set.js';
 export type { ProviderSet, SendContext, StatusCallbackEvent } from './send.js';
-export { E164, RecipientError } from './send.js';
+export { E164, EmailRecipientError, isEmailAddress, RecipientError } from './send.js';
 
 /**
  * Options accepted by createMessaging.

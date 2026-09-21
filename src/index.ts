@@ -19,6 +19,8 @@ export * from './core/logger.js';
 export {
   createMessaging,
   E164,
+  EmailRecipientError,
+  isEmailAddress,
   type Messaging,
   MessagingConfigError,
   type MessagingOptions,

@@ -52,6 +52,42 @@ export const NO_PROVIDER = 'none';
 export const E164 = /^\+[1-9]\d{1,14}$/;
 
 /**
+ * The local part of an email address: no whitespace, quoting or address-list punctuation.
+ */
+const EMAIL_LOCAL = /^[^\s@,;:<>"\\()[\]]+$/;
+
+/**
+ * One label of an email domain.
+ */
+const EMAIL_DOMAIN_LABEL = /^[a-z0-9-]+$/i;
+
+/**
+ * Whether `value` is a single plain email address this package will put in a `To:` header.
+ *
+ * Deliberately stricter than RFC 5322 permits, and checked structurally rather than with one
+ * regex so there is nothing to backtrack over. `email` becomes the `To:` header of a MIME
+ * message, so anything that could end or extend that header — a CR, an LF, a comma, a
+ * semicolon, an angle bracket — must never reach the builder: a value like
+ * `a@b.com\r\nBcc: victim@x.com` would otherwise inject headers into the outgoing message.
+ * Callers with a display name or a list of recipients are asked for one plain address instead.
+ *
+ * @param value - The candidate address.
+ * @returns True when the address is a single plain address with a dotted domain.
+ */
+export function isEmailAddress(value: string): boolean {
+  const at = value.indexOf('@');
+  if (at <= 0 || at !== value.lastIndexOf('@')) {
+    return false;
+  }
+  const labels = value.slice(at + 1).split('.');
+  return (
+    EMAIL_LOCAL.test(value.slice(0, at)) &&
+    labels.length > 1 &&
+    labels.every((label) => EMAIL_DOMAIN_LABEL.test(label))
+  );
+}
+
+/**
  * Thrown when `to` is not an E.164 phone number.
  */
 export class RecipientError extends Error {
@@ -61,6 +97,22 @@ export class RecipientError extends Error {
     super('Recipient must be an E.164 phone number (e.g. +14155550123)');
     this.name = 'RecipientError';
     this.to = to;
+  }
+}
+
+/**
+ * Thrown when `email` is not a plain email address this package will put in a `To:` header.
+ */
+export class EmailRecipientError extends Error {
+  readonly email: string;
+
+  constructor(email: string) {
+    super(
+      'Email recipient must be a single plain address (e.g. user@example.com), ' +
+        'with no line breaks, display name or address list'
+    );
+    this.name = 'EmailRecipientError';
+    this.email = email;
   }
 }
 
@@ -563,6 +615,12 @@ export async function notifyStatus(
 function validateSendRequest(req: SendRequest): void {
   if (!E164.test(req.to)) {
     throw new RecipientError(req.to);
+  }
+  // Checked here, at the one door `email` comes in through, rather than in each email
+  // provider's MIME builder — so every provider is covered by construction. An absent or blank
+  // email means "no email channel" (see `resolveEffectivePolicy`) and is not a fault.
+  if (req.email !== undefined && req.email.trim().length > 0 && !isEmailAddress(req.email)) {
+    throw new EmailRecipientError(req.email);
   }
   assertNoOtpWhatsAppText(req.templateName, req.template);
 }

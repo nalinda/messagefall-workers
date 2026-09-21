@@ -25,10 +25,25 @@ export interface HarnessOptions {
   entrypoint?: string;
 }
 
-function getRandomPort(): number {
+/**
+ * Ports are handed out from one randomly-seeded counter rather than drawn independently, so
+ * several harnesses started in the same run cannot collide with each other — a `bind(): Address
+ * already in use` from wrangler shows up as a flaky test with a baffling message.
+ */
+const portCounter = ((): { next: () => number } => {
   const buf = new Uint32Array(1);
   crypto.getRandomValues(buf);
-  return 8800 + (buf[0] % 1000);
+  let port = 8800 + (buf[0] % 1000);
+  return {
+    next: (): number => {
+      port += 1;
+      return port - 1;
+    },
+  };
+})();
+
+function getRandomPort(): number {
+  return portCounter.next();
 }
 
 function hasRows(db: Database, table: string): boolean {

@@ -73,6 +73,26 @@ function encodeSubject(subject: string): string {
 }
 
 /**
+ * Guards an unencoded header value against header injection.
+ *
+ * `From:` and `To:` are interpolated into the header block verbatim, so a CR or LF in either
+ * ends the header and lets the caller append arbitrary ones — a `Bcc:`, or a second body. The
+ * send pipeline rejects such an address long before it reaches here (`EMAIL_ADDRESS` in
+ * `core/send.ts`); this is the last line of defence for a provider built directly against this
+ * builder. It throws rather than silently stripping: a message addressed to something other
+ * than what the caller asked for is worse than no message.
+ *
+ * `Subject:` needs no guard — {@link encodeSubject} RFC 2047-encodes anything that is not
+ * ASCII-printable, and CR and LF are not.
+ */
+function assertNoHeaderBreak(name: string, value: string): string {
+  if (/[\n\r]/.test(value)) {
+    throw new Error(`mime: the ${name} header value must not contain a line break`);
+  }
+  return value;
+}
+
+/**
  * Normalizes all line endings (CRLF, LF, CR) to strict CRLF (\r\n).
  */
 function normalizeCrlf(str: string): string {
@@ -94,8 +114,8 @@ export function buildMimeMessage(options: MimeMessageOptions): string {
   const subjectStr = encodeSubject(options.subject);
 
   const headers = [
-    `From: ${options.from}`,
-    `To: ${options.to}`,
+    `From: ${assertNoHeaderBreak('From', options.from)}`,
+    `To: ${assertNoHeaderBreak('To', options.to)}`,
     `Subject: ${subjectStr}`,
     `Date: ${dateStr}`,
     'MIME-Version: 1.0',
