@@ -121,6 +121,42 @@ describe('validateEnv startup validation (Issue #13)', () => {
     expect(() => validateEnv(env, options)).toThrow(/MESSAGES_KV/);
   });
 
+  it('accepts an env without MESSAGES_KV when options.kv supplies the namespace', () => {
+    const env = {};
+
+    const options = {
+      kv: memoryKV(),
+      templates: pingTemplates,
+      providers: () => ({
+        sms: {
+          name: 'valid-sms',
+          channel: 'sms' as const,
+          send: () => Promise.resolve({ ok: true as const }),
+        },
+      }),
+    };
+
+    expect(() => validateEnv(env, options)).not.toThrow();
+  });
+
+  it('throws an error when options.kv is not a valid KVNamespace', () => {
+    const env = {};
+
+    const options = {
+      kv: 'not-a-kv-namespace' as unknown as KVNamespace,
+      templates: pingTemplates,
+      providers: () => ({
+        sms: {
+          name: 'valid-sms',
+          channel: 'sms' as const,
+          send: () => Promise.resolve({ ok: true as const }),
+        },
+      }),
+    };
+
+    expect(() => validateEnv(env, options)).toThrow(/options\.kv must be a valid KVNamespace/);
+  });
+
   it('throws an error when FALLBACK_TIMER is present but not a namespace', () => {
     const env = {
       MESSAGES_KV: memoryKV(),

@@ -23,16 +23,35 @@ export interface MessagingEnv {
   [key: string]: unknown;
 }
 
-function checkKvNamespace(val: unknown): string | null {
+function checkKvNamespace(val: unknown, name: string): string | null {
   if (
     !isRecord(val) ||
     typeof val.get !== 'function' ||
     typeof val.put !== 'function' ||
     typeof val.delete !== 'function'
   ) {
-    return 'MESSAGES_KV must be a valid KVNamespace';
+    return `${name} must be a valid KVNamespace`;
   }
   return null;
+}
+
+/**
+ * The KV namespace the messaging core will actually use, validated from the same two sources and
+ * in the same order `createMessaging` resolves them: `options.kv` first, `env.MESSAGES_KV` only
+ * as the default. Checking the binding unconditionally would refuse to start a Worker configured
+ * with the documented `kv` override — one that never touches `MESSAGES_KV` — so the missing
+ * binding is only a problem when neither source supplies a namespace.
+ */
+function validateKvSource(env: unknown, optionsKv: unknown): string[] {
+  if (optionsKv !== undefined) {
+    const problem = checkKvNamespace(optionsKv, 'options.kv');
+    return problem ? [problem] : [];
+  }
+  if (!isRecord(env) || !('MESSAGES_KV' in env) || env.MESSAGES_KV === undefined) {
+    return ['Missing required binding MESSAGES_KV'];
+  }
+  const problem = checkKvNamespace(env.MESSAGES_KV, 'MESSAGES_KV');
+  return problem ? [problem] : [];
 }
 
 /**
@@ -154,16 +173,7 @@ export function validateEnv(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   options: MessagingOptions<any>
 ): asserts env is MessagingEnv {
-  const problems: string[] = [];
-
-  if (!isRecord(env) || !('MESSAGES_KV' in env) || env.MESSAGES_KV === undefined) {
-    problems.push('Missing required binding MESSAGES_KV');
-  } else {
-    const kvError = checkKvNamespace(env.MESSAGES_KV);
-    if (kvError) {
-      problems.push(kvError);
-    }
-  }
+  const problems: string[] = [...validateKvSource(env, options.kv)];
 
   if (isRecord(env) && 'FALLBACK_TIMER' in env) {
     const timerError = checkFallbackTimer(env.FALLBACK_TIMER);
