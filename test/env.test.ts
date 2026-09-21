@@ -15,6 +15,7 @@
 import type { DurableObjectNamespace, KVNamespace } from '@cloudflare/workers-types';
 import { describe, expect, it } from 'bun:test';
 
+import type { MessagingOptions } from '../src/core/messaging.js';
 import { type MessagingEnv, validateEnv } from '../src/env.js';
 import type { Channel, Provider } from '../src/providers/types.js';
 import type { Templates } from '../src/templates.js';
@@ -185,6 +186,68 @@ describe('validateEnv startup validation (Issue #13)', () => {
     };
 
     expect(() => validateEnv(env, options)).toThrow(/delivery/i);
+  });
+
+  // The failure messages ARE this module's product: a regression in any of them turns a loud
+  // startup failure into a silent misconfiguration, so each branch asserts its own fragment
+  // rather than sharing one broad `/delivery/i`.
+  it.each([
+    ['fallback is not an array', { fallback: 'sms' }, /fallback must be an array/],
+    ['always is not an array', { always: 'sms' }, /always must be an array/],
+    ['timeout is not an object', { timeout: 30_000 }, /timeout must be an object/],
+    ['timeout.otp is not a number', { timeout: { otp: '30s' } }, /timeout\.otp must be a number/],
+    [
+      'timeout.notification is not a number',
+      { timeout: { notification: NaN } },
+      /timeout\.notification must be a number/,
+    ],
+  ])('reports the specific problem when %s', (_label, delivery, expected) => {
+    const env: MessagingEnv = {
+      MESSAGES_KV: memoryKV(),
+    };
+
+    const options = {
+      templates: pingTemplates,
+      providers: () => ({
+        sms: {
+          name: 'valid-sms',
+          channel: 'sms' as const,
+          send: () => Promise.resolve({ ok: true as const }),
+        },
+      }),
+      delivery,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as unknown as MessagingOptions<any>;
+
+    expect(() => validateEnv(env, options)).toThrow(expected);
+  });
+
+  it.each([
+    ['providers is not a function', 'not-a-function', /providers option must be a function/],
+    [
+      'the providers function throws while being evaluated',
+      () => {
+        throw new Error('secret binding missing');
+      },
+      /providers function threw an error during evaluation: secret binding missing/,
+    ],
+    [
+      'the providers function returns a non-object',
+      () => 'not-a-provider-set',
+      /providers function must return an object/,
+    ],
+  ])('reports the specific problem when %s', (_label, providers, expected) => {
+    const env: MessagingEnv = {
+      MESSAGES_KV: memoryKV(),
+    };
+
+    const options = {
+      templates: pingTemplates,
+      providers,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as unknown as MessagingOptions<any>;
+
+    expect(() => validateEnv(env, options)).toThrow(expected);
   });
 
   it('throws an error when a template fails definition-time validation', () => {
