@@ -10,6 +10,8 @@
  * @module
  */
 
+import { getTemplate, type TemplateDef, type Templates } from '../templates.js';
+
 /**
  * The shortest value worth redacting, in characters.
  *
@@ -180,23 +182,6 @@ export function renderedContent(payload: unknown): unknown[] {
   return content;
 }
 
-/**
- * One entry of a `Templates<T>` catalogue: the one shape the public API produces, an object
- * keyed by template name.
- */
-function getTemplateDefinition(
-  templates: unknown,
-  templateName: string
-): Record<string, unknown> | undefined {
-  if (!templates || typeof templates !== 'object') {
-    return undefined;
-  }
-  const definition = Reflect.get(templates, templateName) as unknown;
-  return definition && typeof definition === 'object'
-    ? (definition as Record<string, unknown>)
-    : undefined;
-}
-
 type RenderFn = (input: unknown) => unknown;
 
 /**
@@ -207,7 +192,7 @@ type RenderFn = (input: unknown) => unknown;
  * `subject`/`text`/`html`) do the rendering. Probing only the top-level function-valued channels
  * would leave the marker-proxy recovery dead for two of the three channels.
  */
-function collectRenderFunctions(templateDef: Record<string, unknown>): RenderFn[] {
+function collectRenderFunctions(templateDef: TemplateDef<unknown>): RenderFn[] {
   const { sms, whatsapp, email } = templateDef as {
     sms?: unknown;
     whatsapp?: unknown;
@@ -246,18 +231,19 @@ function renderedPatternStrings(rendered: unknown): string[] {
 /**
  * Extracts sensitive strings and parameter values from template definitions given an error message.
  *
- * @param templates - Template catalog or definitions map.
+ * @param templates - Template catalog.
  * @param templateName - Name of the template.
  * @param error - Raw vendor error string.
  * @returns Array of extracted sensitive substrings.
  */
 export function extractTemplateSensitiveStrings(
-  templates: unknown,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  templates: Templates<any> | undefined,
   templateName: string,
   error: string
 ): string[] {
   if (!templates || !templateName || !error) return [];
-  const templateDef = getTemplateDefinition(templates, templateName);
+  const templateDef = getTemplate(templates, templateName);
   if (!templateDef) return [];
 
   const sensitive: string[] = [];

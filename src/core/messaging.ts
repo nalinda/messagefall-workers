@@ -332,9 +332,7 @@ function wiredCore<T extends Templates<Record<string, TemplateDef<unknown>>>>(
     // batch or the webhook response.
     onStatus: options.onStatus
       ? (raw, ref) =>
-          ref
-            ? notifyStatus(options.onStatus, { ...ref, status: (raw as StatusEvent).status })
-            : undefined
+          ref ? notifyStatus(options.onStatus, { ...ref, status: raw.status }) : undefined
       : undefined,
     onStatusApplied: ({ id, part, event, record }) =>
       part === 'chain' ? handleChainStatusApplied(id, event, record, env, options, kv) : undefined,

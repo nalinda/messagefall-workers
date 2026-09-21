@@ -19,7 +19,7 @@ import type { KVNamespace } from '@cloudflare/workers-types';
 
 import type { MessagingEnv } from '../env.js';
 import type { Channel } from '../providers/types.js';
-import { type TemplateDef, validateInput } from '../templates.js';
+import { getTemplate, type TemplateDef, validateInput } from '../templates.js';
 import type { StandardSchemaV1 } from '../types.js';
 import { createLogger } from './logger.js';
 import type { MessagingOptions } from './messaging.js';
@@ -160,19 +160,6 @@ async function resolveInputPayload(
  */
 function isRenderable(payload: RenderInput | undefined): payload is RenderInput & { to: string } {
   return payload !== undefined && typeof payload.to === 'string' && payload.to.length > 0;
-}
-
-function resolveTemplate(
-  templates: AdvanceChainArgs['options']['templates'],
-  templateName: string
-): TemplateDef<unknown> | undefined {
-  if (!templates) {
-    return undefined;
-  }
-  // A `Templates<T>` catalogue is the one shape the public API produces: an object keyed by name,
-  // each entry carrying its own input type. The walk only ever renders through `validateInput`,
-  // which takes the erased `TemplateDef<unknown>`.
-  return Reflect.get(templates, templateName) as TemplateDef<unknown> | undefined;
 }
 
 function shouldSkipAdvancement(
@@ -384,7 +371,7 @@ export async function advanceChain(args: AdvanceChainArgs): Promise<void> {
     return;
   }
 
-  const template = resolveTemplate(args.options.templates, initialRecord.template);
+  const template = getTemplate(args.options.templates, initialRecord.template);
   const recorder = attemptRecorder(
     sendDeps(args, providers, initialRecord),
     args.id,

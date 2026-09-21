@@ -8,6 +8,7 @@
 import type { ExecutionContext, KVNamespace } from '@cloudflare/workers-types';
 
 import type { Channel, Provider, StatusEvent } from '../providers/types.js';
+import type { Templates } from '../templates.js';
 import { createLogger } from './logger.js';
 import { extractTemplateSensitiveStrings, scrubError } from './redact.js';
 import { asRenderInput, renderInputKey } from './render-input.js';
@@ -67,12 +68,18 @@ export interface WebhookDispatchOptions {
   providers?: ProviderSet;
   kv?: KVNamespace;
   store?: StatusStore;
-  templates?: unknown;
+  /**
+   * The template catalogue — the resolved `MessagingOptions.templates` — used to recover the
+   * rendered content a vendor error might otherwise echo back, when only the template name (not
+   * a `keyof T`) is known. See {@link extractTemplateSensitiveStrings}.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  templates?: Templates<any>;
   /**
    * Called with each parsed status event. When the event was matched to a message (a store is
    * configured and the providerId is indexed) the resolved `ProviderRef` is passed as well.
    */
-  onStatus?: (event: unknown, ref?: ProviderRef) => void | Promise<void>;
+  onStatus?: (event: StatusEvent, ref?: ProviderRef) => void | Promise<void>;
   onStatusApplied?: (event: StatusApplied) => void | Promise<void>;
   env?: Record<string, unknown>;
 }

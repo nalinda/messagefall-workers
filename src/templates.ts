@@ -80,6 +80,30 @@ export type Templates<
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 /**
+ * Looks up one entry of a `Templates<T>` catalogue by name, typed as the erased `TemplateDef`
+ * every consumer that only has a name (not a `keyof T`) actually needs.
+ *
+ * Shared by the webhook module's error scrubber (`redact.ts`, recovering a template to redact
+ * against from just its name) and the fallback advance path (`fallback.ts`, rebuilding a send
+ * from a stored `templateName`) — the two places a `Templates<T>` catalogue is looked up by a
+ * runtime string rather than a statically known key, so there's one lookup instead of two
+ * independent `Reflect.get` casts.
+ *
+ * @param templates - The catalogue, or `undefined` when the caller has none configured.
+ * @param templateName - The template's name in the catalogue.
+ * @returns The template definition, or `undefined` when there is no entry for that name.
+ */
+export function getTemplate(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  templates: Templates<any> | undefined,
+  templateName: string
+): TemplateDef<unknown> | undefined {
+  return templates
+    ? (Reflect.get(templates, templateName) as TemplateDef<unknown> | undefined)
+    : undefined;
+}
+
+/**
  * Validation error thrown when input fails schema validation.
  */
 export class TemplateValidationError extends Error {
