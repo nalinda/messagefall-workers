@@ -75,6 +75,34 @@ describe('createMessagingClient type-level specifications (Issue #12)', () => {
   const templates = defineTemplates(catalogDefs);
   type Catalog = typeof templates;
 
+  /**
+   * The client sends the catalogue's types must reject, written as real call sites.
+   *
+   * Never executed: `ts-check` covers `test/`, and each `@ts-expect-error` below is itself the
+   * assertion — the build fails if the error it marks stops happening. A `Not<Extends<...>>`
+   * assertion on a type alias cannot do that, and casting the bad argument through `as any`
+   * suppresses the very error the test claims to check for.
+   */
+  async function rejectedSends(client: MessagingClient<Catalog>): Promise<void> {
+    const envelope = { to: '+94770000001', locale: 'en' } as const;
+
+    // @ts-expect-error - "nonExistentTemplate" is not a template in the catalogue.
+    await client.send('nonExistentTemplate', { ...envelope, input: { code: '123456' } });
+
+    // @ts-expect-error - `wrongKey` is not a field of loginCode's input.
+    await client.send('loginCode', { ...envelope, input: { wrongKey: 'x' } });
+
+    // @ts-expect-error - loginCode's `code` is a string, not a number.
+    await client.send('loginCode', { ...envelope, input: { code: 123_456 } });
+
+    await client.send('loginCode', {
+      ...envelope,
+      input: { code: '123456' },
+      // @ts-expect-error - loginCode defines only the sms channel.
+      delivery: { always: ['whatsapp'] },
+    });
+  }
+
   it('verifies that a correctly typed send call compiles with exact input types', async () => {
     expect(templates).toBeDefined();
 
@@ -117,10 +145,10 @@ describe('createMessagingClient type-level specifications (Issue #12)', () => {
   });
 
   it('verifies that wrong template name is rejected at compile time', async () => {
-    // Keyof check rejects unknown template names
-    type UnknownTemplate = 'nonExistentTemplate';
-    type TestUnknownTemplateRejected = Expect<Not<Extends<UnknownTemplate, keyof Catalog>>>;
-    assertType<TestUnknownTemplateRejected>(true);
+    // The compile-time claim is asserted with `@ts-expect-error` on a real `client.send(...)`
+    // call in `rejectedSends` above. The `as any` below is only so this test can also exercise
+    // what the client does with the Worker's 404 answer at runtime.
+    expect(typeof rejectedSends).toBe('function');
 
     // Runtime assertion
     const fetcher = createMockFetcher(() => {
@@ -143,19 +171,9 @@ describe('createMessagingClient type-level specifications (Issue #12)', () => {
   });
 
   it('verifies that wrong input field or wrong type is rejected at compile time', async () => {
-    // Missing required field
-    type MissingFieldInput = { wrongKey: string };
-    type TestMissingFieldRejected = Expect<
-      Not<Extends<MissingFieldInput, InputOf<Catalog, 'loginCode'>>>
-    >;
-    assertType<TestMissingFieldRejected>(true);
-
-    // Wrong field type (number instead of string)
-    type WrongTypeInput = { code: number };
-    type TestWrongTypeRejected = Expect<
-      Not<Extends<WrongTypeInput, InputOf<Catalog, 'loginCode'>>>
-    >;
-    assertType<TestWrongTypeRejected>(true);
+    // Both rejections are asserted with `@ts-expect-error` on real `client.send(...)` calls in
+    // `rejectedSends` above; what remains here is what the client does with the Worker's 400.
+    expect(typeof rejectedSends).toBe('function');
 
     // Runtime assertion
     const fetcher = createMockFetcher(() => {

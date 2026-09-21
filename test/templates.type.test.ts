@@ -11,6 +11,7 @@
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
 
+import type { Messaging } from '../src/core/messaging.js';
 import type { Channel } from '../src/providers/types.js';
 import {
   defineTemplates,
@@ -21,7 +22,6 @@ import {
 
 // Type-level assertion helpers
 type Extends<A, B> = A extends B ? true : false;
-type Not<T extends boolean> = T extends true ? false : true;
 type Expect<T extends true> = T;
 type Equals<X, Y> = (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2
   ? true
@@ -29,6 +29,33 @@ type Equals<X, Y> = (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y 
 
 function assertType<T>(_value: T): void {
   // Compile-time type verification helper
+}
+
+const sendTypingCatalog = defineTemplates({
+  loginCode: {
+    input: z.object({ code: z.string() }),
+    kind: 'otp' as const,
+    sms: ({ code }: { code: string }) => `Code: ${code}`,
+  },
+});
+
+/**
+ * The sends the catalogue's types must reject, written as real call sites.
+ *
+ * Never executed: `ts-check` covers `test/`, and each `@ts-expect-error` below is itself the
+ * assertion — the build fails if the error it marks stops happening.
+ */
+async function rejectedSends(messaging: Messaging<typeof sendTypingCatalog>): Promise<void> {
+  const envelope = { to: '+94770000001', locale: 'en' } as const;
+
+  // @ts-expect-error - "nonExistentTemplate" is not a template in the catalogue.
+  await messaging.send({ template: 'nonExistentTemplate', ...envelope, input: { code: '123456' } });
+
+  // @ts-expect-error - `wrongField` is not a field of loginCode's input.
+  await messaging.send({ template: 'loginCode', ...envelope, input: { wrongField: 'x' } });
+
+  // @ts-expect-error - loginCode's `code` is a string, not a number.
+  await messaging.send({ template: 'loginCode', ...envelope, input: { code: 123_456 } });
 }
 
 describe('defineTemplates type-level specifications', () => {
@@ -116,26 +143,12 @@ describe('defineTemplates type-level specifications', () => {
     >;
     assertType<TestValidSend>(true);
 
-    // Verify wrong input field fails type check
-    type WrongFieldInput = { wrongField: string };
-    type TestWrongFieldRejected = Expect<
-      Not<Extends<WrongFieldInput, InputOf<CatalogType, 'loginCode'>>>
-    >;
-    assertType<TestWrongFieldRejected>(true);
-
-    // Verify wrong field type fails type check (e.g. number instead of string)
-    type WrongTypeInput = { code: number };
-    type TestWrongTypeRejected = Expect<
-      Not<Extends<WrongTypeInput, InputOf<CatalogType, 'loginCode'>>>
-    >;
-    assertType<TestWrongTypeRejected>(true);
-
-    // Verify wrong template name fails keyof check
-    type UnknownTemplateName = 'nonExistentTemplate';
-    type TestUnknownTemplateRejected = Expect<
-      Not<Extends<UnknownTemplateName, keyof CatalogType>>
-    >;
-    assertType<TestUnknownTemplateRejected>(true);
+    // The rejections are asserted with `@ts-expect-error` on real `messaging.send(...)` call
+    // sites in `rejectedSends` below, not on a helper type. `ts-check` runs over `test/`, so
+    // those assertions fail the build the day one of the type errors stops happening — which a
+    // `Not<Extends<...>>` assertion on a type alias cannot do.
+    expect(typeof rejectedSends).toBe('function');
+    expect(sendTypingCatalog.loginCode.kind).toBe('otp');
 
     // Runtime assertion: input the caller's own schema rejects fails during render. A short
     // code is NOT such an input — `z.string()` accepts it, and code format is the caller's
