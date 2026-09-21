@@ -4,10 +4,16 @@
  * Outbound messaging for Cloudflare Workers: WhatsApp first with SMS fallback,
  * email, typed templates, delivery-status webhooks, and a client for Worker-to-Worker sends.
  *
+ * The ready-made Hono app is NOT re-exported here: it lives behind its own
+ * `messagefall-workers/app` entry point. `hono` is an optional peer dependency, so a static
+ * re-export from this barrel would make `import 'messagefall-workers'` fail at module
+ * resolution for every consumer that has not installed it — taking `createMessaging`,
+ * `defineTemplates` and every type down with it. Keeping the app off the root barrel makes
+ * that failure mode impossible by construction.
+ *
  * @module
  */
 
-export * from './app/hono.js';
 export * from './core/fallback.js';
 export * from './core/logger.js';
 export {

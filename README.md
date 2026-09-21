@@ -128,7 +128,8 @@ export const templates = defineTemplates({
 **src/index.ts**
 
 ```ts
-import { createMessagingApp, type MessagingEnv } from 'messagefall-workers';
+import { createMessagingApp } from 'messagefall-workers/app';
+import { type MessagingEnv } from 'messagefall-workers';
 import { metaWhatsApp } from 'messagefall-workers/providers/meta-whatsapp';
 import { httpSms } from 'messagefall-workers/providers/http-sms';
 import { gmail } from 'messagefall-workers/providers/gmail';
@@ -366,7 +367,7 @@ Service-binding calls stay inside Cloudflare's network. The API Worker never hol
 
 ## Configuration
 
-`createMessagingApp(options)` returns a Hono app. `createMessaging(env, options)` returns the underlying sender for use in any framework.
+`createMessagingApp(options)` returns a Hono app and is imported from the `messagefall-workers/app` entry point — it is deliberately not on the root barrel, so the root entry never reaches for the optional `hono` peer. `createMessaging(env, options)` returns the underlying sender for use in any framework.
 
 | Option              | Type                                      | Default                                | Description                                                                                                           |
 | ------------------- | ----------------------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |

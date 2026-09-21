@@ -7,7 +7,8 @@
  * @module
  */
 
-import { createMessagingApp, type MessagingEnv } from 'messagefall-workers';
+import { type MessagingEnv } from 'messagefall-workers';
+import { createMessagingApp } from 'messagefall-workers/app';
 import { consoleProvider } from 'messagefall-workers/providers/console';
 
 import { templates } from './templates.js';

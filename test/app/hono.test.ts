@@ -10,9 +10,13 @@
  * - GET /status/:id returns 404 for unknown message ID.
  * - GET, POST /webhooks/:provider dispatches to handleWebhook(provider, request, ctx).
  * - basePath defaults to '/' and is normalised so '/messaging' and '/messaging/' behave identically.
- * - Importing the root entry without hono installed does not throw until createMessagingApp is called.
+ * - Importing the root entry without hono installed does not throw until createMessagingApp is
+ *   called: the root barrel never reaches ./app/hono.js, so `hono` is only resolved through the
+ *   separate `messagefall-workers/app` entry point.
  * - Startup validation runs on first request per isolate and reports all configuration problems.
  */
+
+import path from 'node:path';
 
 import type { ExecutionContext, KVNamespace } from '@cloudflare/workers-types';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -574,12 +578,20 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
     expect(rootRes.status).toBe(404);
   });
 
-  it('does not throw when importing root entry without hono until createMessagingApp is called', async () => {
+  it('keeps the Hono app off the root barrel so the root entry never resolves the optional peer', async () => {
     // Dynamic import of root entry point succeeds without requiring hono
     const root = (await import('../../src/index.js')) as Record<string, unknown>;
     expect(root).toBeDefined();
     expect(typeof root.createMessaging).toBe('function');
-    expect(typeof root.createMessagingApp).toBe('function');
+    expect(typeof root.defineTemplates).toBe('function');
+    // createMessagingApp lives behind `messagefall-workers/app` only: were it re-exported here,
+    // a consumer without `hono` installed could not import the root entry at all.
+    expect(root.createMessagingApp).toBeUndefined();
+
+    const source = await Bun.file(
+      path.join(import.meta.dir, '../../src/index.ts')
+    ).text();
+    expect(source).not.toContain('app/hono');
   });
 
   it('runs startup validation on first request per isolate and reports configuration errors', async () => {

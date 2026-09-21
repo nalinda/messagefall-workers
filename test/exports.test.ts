@@ -115,7 +115,7 @@ describe('package.json#exports', () => {
     const pkg = readPackageJson();
     expect(pkg.files).toContain('dist');
     const sortedKeys = Object.keys(pkg.exports).toSorted((a, b) => a.localeCompare(b));
-    expect(sortedKeys).toEqual(['.', './client', './durable', './providers/*']);
+    expect(sortedKeys).toEqual(['.', './app', './client', './durable', './providers/*']);
 
     for (const [key, target] of Object.entries(pkg.exports)) {
       if (key === './providers/*') {
@@ -167,9 +167,33 @@ describe('Entry points export documented functions', () => {
     expect(typeof root.createMessaging).toBe('function');
   });
 
-  it('exports createMessagingApp as a function from the built . entry point', async () => {
+  // `hono` is an optional peer, so the ready-made app is its own entry point and the root
+  // barrel must not pull it in: importing the root entry without `hono` installed has to work.
+  it('exports createMessagingApp from the built ./app entry point and not from .', async () => {
+    const app = await loadExport('./app');
+    expect(typeof app.createMessagingApp).toBe('function');
     const root = await loadExport('.');
-    expect(typeof root.createMessagingApp).toBe('function');
+    expect(root.createMessagingApp).toBeUndefined();
+  });
+
+  it('keeps hono out of every entry point but ./app', () => {
+    const pkg = readPackageJson();
+    const providerTarget = exportTarget('./providers/*');
+    const providerDirs = fs
+      .readdirSync(distFile('./dist/providers'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .filter((name) => fs.existsSync(distFile(providerTarget.import.replace('*', () => name))));
+    const roots = [
+      ...Object.entries(pkg.exports)
+        .filter(([key]) => key !== './providers/*' && key !== './app')
+        .map(([, target]) => target.import),
+      ...providerDirs.map((name) => providerTarget.import.replace('*', () => name)),
+    ];
+    const reachable = walkImportGraph(roots.map((relative) => distFile(relative)));
+    for (const file of reachable) {
+      expect(fs.readFileSync(file, 'utf8')).not.toMatch(/from\s*['"]hono['"]/);
+    }
   });
 
   it('exports defineTemplates as a function', async () => {

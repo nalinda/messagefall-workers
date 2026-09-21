@@ -15,6 +15,7 @@
     "noFallthroughCasesInSwitch": true,
     "paths": {
       "messagefall-workers": ["./src/index.ts"],
+      "messagefall-workers/app": ["./src/app/hono.ts"],
       "messagefall-workers/client": ["./src/client/index.ts"],
       "messagefall-workers/durable": ["./src/durable/index.ts"],
       "messagefall-workers/providers/*": ["./src/providers/*/index.ts"]
