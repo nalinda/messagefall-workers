@@ -1183,6 +1183,41 @@ describe('Issue #3: createMessaging send pipeline', () => {
       expect(observed).toEqual(['whatsapp:failed', 'sms:sent']);
       open();
     });
+
+    // ...but an async observer must still finish. On Workers an unawaited promise with pending
+    // I/O is cancelled as soon as the request is, so the notifications are handed to
+    // ctx.waitUntil: the send returns without them, and the request's lifetime covers them
+    // rather than truncating them mid-write.
+    it('hands an async onStatus to ctx.waitUntil so it completes after send() returns', async () => {
+      const sms = recordingProvider<RenderedSms>('sms', 'rec-sms', [{ ok: true }]);
+      const written: string[] = [];
+      const ctx = testContext();
+
+      const messaging = createMessaging(newEnv(), {
+        templates,
+        providers: () => ({ sms }),
+        delivery: { fallback: ['sms'], always: [] },
+        onStatus: async (event) => {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          written.push(`${event.channel}:${event.status}`);
+        },
+      });
+
+      const { id } = await messaging.send(
+        { template: 'smsOnly', to: TO, locale: 'en', input: { body: 'hello' } },
+        ctx
+      );
+
+      // Not blocked on: the observer is still sleeping when send() resolves.
+      expect(typeof id).toBe('string');
+      expect(written).toEqual([]);
+
+      // Handed to the context rather than dropped, so awaiting the request's background work
+      // is all it takes for the observer's write to land.
+      expect(ctx.promises.length).toBeGreaterThan(0);
+      await Promise.all(ctx.promises);
+      expect(written).toEqual(['sms:sent']);
+    });
   });
 
   describe('attempts are persisted as each provider settles', () => {

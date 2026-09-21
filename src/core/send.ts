@@ -330,10 +330,15 @@ export type RecordAttempt = (
  * from the walk's `progress`, for when a chain attempt's own write was lost. `progress` only
  * decides when no attempt on the record carries a confirmed delivery — a `delivered` / `read`
  * on any attempt is the chain's answer and short-circuits ahead of it.
+ *
+ * `settledObservers` is the handle on the `onStatus` notifications `record` started off the
+ * write queue: one promise covering all of them, so a caller with an ExecutionContext can put
+ * them inside the request's lifetime without waiting on them.
  */
 export interface AttemptRecorder {
   record: RecordAttempt;
   sealChain(progress: ChainProgress): Promise<void>;
+  settledObservers(): Promise<void>;
 }
 
 /**
@@ -437,6 +442,7 @@ export function attemptRecorder(
   policy: DeliveryPolicy
 ): AttemptRecorder {
   let queue: Promise<void> = Promise.resolve();
+  const observers: Promise<void>[] = [];
 
   const enqueue = (run: () => Promise<void>): Promise<void> => {
     // Chain the work regardless of an earlier failure so later attempts are still persisted;
@@ -491,13 +497,16 @@ export function attemptRecorder(
         );
         await indexAttempt(deps, id, attempt);
         // Observers run off the write queue: a slow onStatus must not stall the next attempt's
-        // record write or the chain seal. notifyStatus already contains the observer's errors.
-        void notifyStatus(deps.onStatus, {
-          id,
-          channel: attempt.channel,
-          provider: attempt.provider,
-          status: attempt.status,
-        });
+        // record write or the chain seal. Kept, not dropped: `settledObservers` is what puts
+        // them inside a request lifetime. notifyStatus already contains the observer's errors.
+        observers.push(
+          notifyStatus(deps.onStatus, {
+            id,
+            channel: attempt.channel,
+            provider: attempt.provider,
+            status: attempt.status,
+          })
+        );
       }),
     sealChain: (progress) =>
       enqueue(() =>
@@ -505,6 +514,15 @@ export function attemptRecorder(
           rederive(record, chainPart([...record.chain.attempts], progress), [...record.always])
         )
       ),
+    settledObservers: async () => {
+      // Drained rather than snapshotted: an observer can still be running when a later attempt
+      // adds its own, so keep taking whatever has accumulated until nothing is left.
+      while (observers.length > 0) {
+        const pending = [...observers];
+        observers.length = 0;
+        await Promise.all(pending);
+      }
+    },
   };
 }
 
@@ -538,11 +556,33 @@ async function cleanupExhaustedChain(
   }
 }
 
+/**
+ * Keeps the `onStatus` notifications this send started alive for as long as the platform will
+ * allow, without making anything wait on them.
+ *
+ * On Cloudflare Workers an unawaited promise with pending I/O is cancelled the moment the
+ * request finishes, which would truncate an async observer mid-write — the README documents
+ * `onStatus` as returning a promise and as called on every status change. `ctx.waitUntil` is the
+ * one mechanism that extends that lifetime without delaying the response, so the observers go
+ * there when the caller supplied a context. With no context there is no lifetime to extend and
+ * nothing may block the send (`onStatus` must never hold up the response or the write queue), so
+ * they are left to run on their own.
+ */
+function keepObserversAlive(recorder: AttemptRecorder, ctx?: SendContext): void {
+  const settled = recorder.settledObservers();
+  if (ctx) {
+    ctx.waitUntil(settled);
+  } else {
+    void settled;
+  }
+}
+
 async function deliver(
   deps: SendDeps,
   req: ValidatedSendRequest,
   id: string,
-  policy: DeliveryPolicy
+  policy: DeliveryPolicy,
+  ctx?: SendContext
 ): Promise<void> {
   const recorder = attemptRecorder(deps, id, policy);
   const chainTask =
@@ -558,6 +598,7 @@ async function deliver(
   // them, then surfaces the first persistence failure (provider failures never reject).
   const results = await Promise.allSettled([chainTask, ...alwaysTasks]);
   await cleanupExhaustedChain(deps, id, policy, results);
+  keepObserversAlive(recorder, ctx);
 
   const rejected = results.find((r) => r.status === 'rejected');
   if (rejected) {
@@ -576,10 +617,11 @@ async function deliverGuarded(
   deps: SendDeps,
   req: ValidatedSendRequest,
   id: string,
-  policy: DeliveryPolicy
+  policy: DeliveryPolicy,
+  ctx?: SendContext
 ): Promise<void> {
   try {
-    await deliver(deps, req, id, policy);
+    await deliver(deps, req, id, policy, ctx);
   } catch {
     logger.error('send.persist-failed', { id });
   }
@@ -799,9 +841,9 @@ export async function runSend(
   await stashChainInput(deps, req, id, policy);
 
   if (ctx && req.template.kind === 'otp') {
-    ctx.waitUntil(deliverGuarded(deps, validated, id, policy));
+    ctx.waitUntil(deliverGuarded(deps, validated, id, policy, ctx));
   } else {
-    await deliverGuarded(deps, validated, id, policy);
+    await deliverGuarded(deps, validated, id, policy, ctx);
   }
   return { id };
 }
