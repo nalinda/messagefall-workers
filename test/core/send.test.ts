@@ -1802,5 +1802,50 @@ describe('Issue #3: createMessaging send pipeline', () => {
       expect(inPut).toBeDefined();
       expect(inPut!.options?.expirationTtl).toBe(60);
     });
+
+    it('logs send.index-failed and still dispatches when the in:<id> write rejects', async () => {
+      const env = newEnv();
+      const kv = env.MESSAGES_KV as ReturnType<typeof memoryKV>;
+      const originalPut = kv.put.bind(kv);
+      kv.put = ((key: string, value: string) => {
+        if (key.startsWith('in:')) {
+          return Promise.reject(new Error('kv unavailable'));
+        }
+        return originalPut(key, value);
+      }) as typeof kv.put;
+
+      const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'rec-wa');
+      const sms = recordingProvider<RenderedSms>('sms', 'rec-sms');
+      const messaging = createMessaging(env, {
+        templates,
+        providers: () => ({ whatsapp: wa, sms }),
+        delivery: { fallback: ['whatsapp', 'sms'], always: [] },
+      });
+
+      const captured = captureConsole(['log', 'warn']);
+      let id: string;
+      try {
+        ({ id } = await messaging.send({
+          template: 'orderUpdate',
+          to: TO,
+          locale: 'en',
+          input: INPUT,
+        }));
+      } finally {
+        captured.restore();
+      }
+
+      // The send went out and was recorded as if the stash had succeeded.
+      expect(wa.calls).toHaveLength(1);
+      const record = await kvStatusStore(env.MESSAGES_KV).get(id);
+      expect(record?.status).toBe('sent');
+      // The failure is visible in the logs, once, without content.
+      const failures = captured.logs.filter((line) => line.includes('send.index-failed'));
+      expect(failures).toHaveLength(1);
+      expect(failures[0]).toContain(id);
+      for (const line of captured.logs) {
+        expect(line).not.toContain(INPUT.orderId);
+      }
+    });
   });
 });

@@ -688,8 +688,12 @@ function resolveEffectivePolicy(
  *
  * The `in:<id>` KV entry is written whenever there is a chain at all (a `failed` webhook can
  * advance it). The timer is armed only when the chain has somewhere to go after the first
- * channel: a single-channel chain or policy `'all'` has nothing a timeout could move on to. A
- * timer that cannot be armed is logged (without content) and never fails the send.
+ * channel: a single-channel chain or policy `'all'` has nothing a timeout could move on to.
+ *
+ * Both side-writes are best-effort: the status record already exists and no provider has been
+ * called yet, so rejecting here would orphan a `pending` record and send nothing at all. A stash
+ * or an arm that fails is logged (without content) and the send proceeds; a later fallback that
+ * cannot find the input degrades through `finalizeMissingInput` (`fallback.input-lost`).
  */
 async function stashChainInput(
   deps: SendDeps,
@@ -712,9 +716,13 @@ async function stashChainInput(
   };
   if (deps.kv) {
     const ttlSeconds = Math.max(60, Math.ceil(timeoutMs / 1000));
-    await deps.kv.put(renderInputKey(id), JSON.stringify(inputPayload), {
-      expirationTtl: ttlSeconds,
-    });
+    try {
+      await deps.kv.put(renderInputKey(id), JSON.stringify(inputPayload), {
+        expirationTtl: ttlSeconds,
+      });
+    } catch {
+      defaultLogger.warn('send.index-failed', { id, kind: req.template.kind });
+    }
   }
   if (isTimedChain(policy.fallback) && typeof deps.timer?.arm === 'function') {
     try {
