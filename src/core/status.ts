@@ -25,13 +25,13 @@ export interface FallbackTimerClient {
    * stashed value is whatever was written, so callers coerce it with `asRenderInput` rather
    * than trusting it to be a {@link RenderInput} envelope.
    */
-  getState?(messageId: string): { input?: unknown } | null;
+  armed?(messageId: string): { input?: unknown } | null;
   /**
    * Arms (or re-arms) the timer for a message, optionally carrying the render input the
    * fallback path will need when it fires. A Durable Object round-trip returns a promise; a
    * test double may be synchronous. Callers await either.
    */
-  setState?(messageId: string, timeoutMs: number, input?: RenderInput): void | Promise<void>;
+  arm?(messageId: string, timeoutMs: number, input?: RenderInput): void | Promise<void>;
   /**
    * Disarms the timer for a message; called once the chain reaches a terminal state.
    */

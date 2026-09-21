@@ -93,7 +93,7 @@ export class FallbackTimer extends DurableObjectBase<MessagingEnv> {
    */
   private self(): FallbackTimerClient {
     return {
-      setState: (id, timeoutMs, input) => this.arm(armArgs(id, timeoutMs, input)),
+      arm: (id, timeoutMs, input) => this.arm(armArgs(id, timeoutMs, input)),
       cancel: (id) => this.cancel(id),
     };
   }

@@ -707,9 +707,9 @@ async function stashChainInput(
       expirationTtl: ttlSeconds,
     });
   }
-  if (isTimedChain(policy.fallback) && typeof deps.timer?.setState === 'function') {
+  if (isTimedChain(policy.fallback) && typeof deps.timer?.arm === 'function') {
     try {
-      await deps.timer.setState(id, timeoutMs, inputPayload);
+      await deps.timer.arm(id, timeoutMs, inputPayload);
     } catch {
       defaultLogger.warn('timer.arm-failed', { id, kind: req.template.kind });
     }

@@ -143,7 +143,7 @@ export function namespaceTimerClient(ns: DurableObjectNamespace): FallbackTimerC
   let client = clientCache.get(ns);
   if (!client) {
     client = {
-      setState: (id, timeoutMs, input) => armTimer(ns, armArgs(id, timeoutMs, input)),
+      arm: (id, timeoutMs, input) => armTimer(ns, armArgs(id, timeoutMs, input)),
       cancel: (id) => cancelTimer(ns, id),
     };
     clientCache.set(ns, client);

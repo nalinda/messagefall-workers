@@ -28,8 +28,8 @@ export interface MockFallbackTimer {
   stateMap: Map<string, MockFallbackTimerState>;
   cancelled: string[];
   rearmed: Array<{ messageId: string; timeoutMs: number }>;
-  getState(messageId: string): MockFallbackTimerState | null;
-  setState(messageId: string, timeoutMs: number, input?: unknown): void;
+  armed(messageId: string): MockFallbackTimerState | null;
+  arm(messageId: string, timeoutMs: number, input?: unknown): void;
   cancel(messageId: string): void;
   isCancelled(messageId: string): boolean;
 }
@@ -48,10 +48,10 @@ export function createMockFallbackTimer(): MockFallbackTimer {
     stateMap,
     cancelled,
     rearmed,
-    getState(messageId: string): MockFallbackTimerState | null {
+    armed(messageId: string): MockFallbackTimerState | null {
       return stateMap.get(messageId) ?? null;
     },
-    setState(messageId: string, timeoutMs: number, input?: unknown): void {
+    arm(messageId: string, timeoutMs: number, input?: unknown): void {
       stateMap.set(messageId, {
         messageId,
         timeoutMs,

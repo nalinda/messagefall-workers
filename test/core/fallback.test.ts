@@ -445,7 +445,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         updatedAt: '2026-09-20T10:00:05.000Z',
       };
       await store.create(record);
-      mockTimer.setState(messageId, 10_000);
+      mockTimer.arm(messageId, 10_000);
 
       await advanceChain({
         id: messageId,

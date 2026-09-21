@@ -111,7 +111,7 @@ async function rearmTimer(
   inputPayload?: RenderInput
 ): Promise<void> {
   try {
-    await resolveTimer(env, optionsTimer)?.setState?.(id, timeoutMs, inputPayload);
+    await resolveTimer(env, optionsTimer)?.arm?.(id, timeoutMs, inputPayload);
   } catch {
     // Best-effort rearming
   }
@@ -128,10 +128,10 @@ function extractFromTimer(
   timer: FallbackTimerClient | undefined,
   id: string
 ): RenderInput | undefined {
-  if (typeof timer?.getState !== 'function') {
+  if (typeof timer?.armed !== 'function') {
     return undefined;
   }
-  const state = timer.getState(id);
+  const state = timer.armed(id);
   if (!state?.input) {
     return undefined;
   }
