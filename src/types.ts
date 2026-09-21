@@ -1,6 +1,12 @@
 /**
  * Core messaging types for messagefall-workers.
  *
+ * Re-exported wholesale by the root barrel, so this file is the type half of the public API:
+ * each list below is one sub-issue's documented interface. Derivations the core shares between
+ * its own modules — `chainStatus`, `deriveOverallStatus`, `createWebhookHandler`,
+ * `applyStatusEvents`, `renderValidated`, the redaction engine — are deliberately absent. They
+ * are imported by relative path inside `src/`, which is what an internal seam looks like here.
+ *
  * @module
  */
 
@@ -71,8 +77,8 @@ export type {
   StatusStore,
   StatusStoreOptions,
 } from './core/status.js';
-export { DEFAULT_STATUS_TTL, deriveOverallStatus, kvStatusStore } from './core/status.js';
+export { DEFAULT_STATUS_TTL, kvStatusStore, MessageRecordNotFoundError } from './core/status.js';
 export type { StatusApplied, WebhookDispatchOptions, WebhookHandler } from './core/webhook.js';
-export { createWebhookHandler, handleWebhook } from './core/webhook.js';
+export { handleWebhook } from './core/webhook.js';
 export type { MessagingEnv } from './env.js';
 export { validateEnv } from './env.js';

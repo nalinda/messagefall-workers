@@ -201,6 +201,69 @@ describe('Entry points export documented functions', () => {
     expect(typeof root.defineTemplates).toBe('function');
   });
 
+  // The root barrel used to `export *` its core modules, which published whatever they happened
+  // to export — derivations and helpers the core shares between its own files — as 0.1.0 API
+  // that could not then be changed without a major version. The barrel now lists each
+  // sub-issue's documented interface explicitly; these two assertions keep it that way.
+  it('keeps the core internals the modules share with each other off the root entry', async () => {
+    const root = await loadExport('.');
+    const internals = [
+      'applyStatusEvents',
+      'assertNoOtpWhatsAppText',
+      'chainStatus',
+      'createWebhookHandler',
+      'deriveOverallStatus',
+      'extractTemplateSensitiveStrings',
+      'isTerminalChainStatus',
+      'renderValidated',
+      'renderedContent',
+      'resolveTimer',
+      'scrubError',
+      'validateInput',
+      'validateTemplateDef',
+    ];
+    const exported = new Set(Object.keys(root));
+    for (const name of internals) {
+      expect(exported.has(name)).toBe(false);
+    }
+  });
+
+  it('exports the whole documented public surface from the root entry', async () => {
+    const root = await loadExport('.');
+    const documented = [
+      'CHANNELS',
+      'DEFAULT_POLICY',
+      'DEFAULT_STATUS_TTL',
+      'E164',
+      'EmailRecipientError',
+      'MessageRecordNotFoundError',
+      'MessagingConfigError',
+      'PolicyError',
+      'ProviderConfigError',
+      'RecipientError',
+      'TemplateValidationError',
+      'UnknownTemplateError',
+      'advanceChain',
+      'armTimer',
+      'cancelTimer',
+      'consoleProvider',
+      'createLogger',
+      'createMessaging',
+      'definedChannels',
+      'defineTemplates',
+      'handleWebhook',
+      'isEmailAddress',
+      'kvStatusStore',
+      'render',
+      'resolveDelivery',
+      'validateEnv',
+    ];
+    const exported = new Set(Object.keys(root));
+    for (const name of documented) {
+      expect(exported.has(name)).toBe(true);
+    }
+  });
+
   it('exports resolveDelivery, PolicyError, and DEFAULT_POLICY from the built . entry point', async () => {
     const root = await loadExport('.');
     expect(typeof root.resolveDelivery).toBe('function');
