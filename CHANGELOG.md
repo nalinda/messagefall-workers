@@ -23,7 +23,7 @@ Initial release of `messagefall-workers`: an outbound messaging library for Clou
 - **Webhook Dispatch**: Provider-owned webhook verification and ingestion routes (`/webhooks/<provider>`) that correlate external delivery receipts back to original message IDs and advance fallback chains.
 - **Hono Application**: Ready-to-use HTTP app wrapper (`createMessagingApp`) exposing endpoints for message sending (`/send`), delivery status queries (`/status/:id`), and provider webhooks. Published as its own entry point, `messagefall-workers/app`, so the root entry never resolves the optional `hono` peer dependency.
 - **Typed Client**: `createMessagingClient` for type-safe Worker-to-Worker messaging across Cloudflare Service Bindings, sharing the template catalog.
-- **Structured Logging & Redaction**: Built-in JSON logger with automatic parameter and code redaction ensuring one-time passwords (OTPs) and sensitive bodies are never leaked to logs.
+- **Structured Logging & Redaction**: Built-in JSON logger whose fields are a closed allow-list of identifiers and telemetry, so one-time passwords (OTPs), message bodies and template parameters cannot be passed to a log line at all; vendor error strings, which can quote that content back, are scrubbed separately before they are logged or persisted on a status record.
 - **Example Worker**: Minimal standalone reference implementation under `examples/basic` demonstrating full multi-provider configuration with local development simulation.
 - **Integration Tests**: Comprehensive test suite using Miniflare and `wrangler dev` verifying end-to-end send pipelines, webhook callbacks, and fallback behaviors.
 

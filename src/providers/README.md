@@ -121,8 +121,13 @@ the `ProviderSet` a deployment builds from its env:
   contract; a new provider should be added there.
 - Use a mock environment for local testing.
 - No message bodies in logs. Enforced two ways: `createLogger` (`src/core/logger.ts`) is the only
-  writer, and it redacts; and a lint rule bans raw `console.*` anywhere under `src/` except the
-  logger itself and the dev console provider — so a provider cannot route round the redaction.
+  writer, and its `LogFields` is a closed set of identifier and telemetry fields — there is no
+  field a body, code, subject or parameter could be passed in, so content is prohibited at
+  compile time rather than scrubbed at runtime; and a lint rule bans raw `console.*` anywhere
+  under `src/` except the logger itself and the dev console provider, so a provider cannot route
+  round that allow-list. Vendor error strings are a separate concern — they can quote the content
+  back at you, and the logger does nothing about it. Scrub them through `scrubError`
+  (`src/core/redact.ts`) before they are logged or persisted.
 
 ## Provider Status Mapping
 
