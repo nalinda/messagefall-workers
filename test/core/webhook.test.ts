@@ -6,7 +6,7 @@
  *   a parsed `delivered` event updates the correct attempt and overall status; `parse` throwing returns `401`;
  *   an unknown provider id is acknowledged with `200`.
  * - `StatusApplied` is emitted only for chain attempts.
- * - The dev bypass works on a `localhost` URL and is refused on any other host.
+ * - The dev bypass works on a `localhost`, `127.0.0.1` or `[::1]` URL and is refused on any other host.
  */
 
 import type { ExecutionContext, KVNamespace } from '@cloudflare/workers-types';
@@ -1647,6 +1647,17 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
 
       const updatedRecord = await store.get(messageId);
       expect(updatedRecord?.chain.attempts[0]?.status).toBe('delivered');
+
+      // The same loopback reached over IPv6, which is what `wrangler dev` hands the Worker
+      // there: `URL` reports the hostname bracketed, so a bare '::1' comparison would miss it.
+      const unsignedIpv6Request = new Request('http://[::1]:8787/webhooks/meta-wa', {
+        method: 'POST',
+        body: JSON.stringify({ id: providerId, status: 'delivered' }),
+        headers: { 'content-type': 'application/json' },
+      });
+
+      const ipv6Response = await handleWebhook('meta-wa', unsignedIpv6Request);
+      expect(ipv6Response.status).toBe(200);
     });
 
     it('REFUSES dev bypass and returns 401 on non-localhost URL even when MESSAGING_DEV_UNSIGNED is "true"', async () => {

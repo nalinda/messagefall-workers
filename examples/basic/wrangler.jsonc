@@ -4,8 +4,8 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-07-16",
   // Lets the unsigned webhook curls in this example's README be accepted. The library refuses
-  // this bypass on any host but localhost/127.0.0.1, so it cannot weaken a deployed Worker —
-  // but do not copy it into a real config.
+  // this bypass on any host that is not loopback (localhost, 127.0.0.1, [::1]), so it cannot
+  // weaken a deployed Worker — but do not copy it into a real config.
   "vars": {
     "MESSAGING_DEV_UNSIGNED": "true",
   },

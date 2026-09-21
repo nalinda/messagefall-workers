@@ -95,8 +95,15 @@ export type WebhookHandler = (
 ) => Promise<Response>;
 
 /**
+ * The hostnames the dev bypass treats as loopback. `[::1]` is the spelling `URL` reports for the
+ * IPv6 loopback — brackets included — which is what `wrangler dev` hands the Worker when it is
+ * reached over IPv6.
+ */
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/**
  * Checks whether the development bypass (MESSAGING_DEV_UNSIGNED) is permitted
- * for the incoming request. Bypass is strictly permitted only on localhost or 127.0.0.1.
+ * for the incoming request. Bypass is strictly permitted only on a loopback host.
  */
 function isDevBypassAllowed(request: Request, env?: Record<string, unknown>): boolean {
   if (!env || env.MESSAGING_DEV_UNSIGNED !== 'true') {
@@ -105,7 +112,7 @@ function isDevBypassAllowed(request: Request, env?: Record<string, unknown>): bo
   try {
     const url = new URL(request.url);
     const hostname = url.hostname.toLowerCase();
-    return hostname === 'localhost' || hostname === '127.0.0.1';
+    return LOOPBACK_HOSTS.has(hostname);
   } catch {
     return false;
   }

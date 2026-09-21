@@ -78,8 +78,8 @@ curl -X POST http://localhost:8787/send \
 
 These posts carry no vendor signature, so `wrangler.jsonc` sets
 `MESSAGING_DEV_UNSIGNED: "true"` for this example — without it the route answers `401`. The
-library only honours that bypass on `localhost`/`127.0.0.1`, so it stays local to `wrangler dev`;
-never set it in a real config.
+library only honours that bypass on a loopback host (`localhost`, `127.0.0.1`, `[::1]`), so it
+stays local to `wrangler dev`; never set it in a real config.
 
 Simulate a failed delivery for WhatsApp to trigger SMS fallback:
 
