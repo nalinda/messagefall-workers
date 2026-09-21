@@ -253,7 +253,7 @@ Fallback never re-renders with a different input. The same input renders each ch
 | `email`    | no       | Subject, text and optional HTML, each a function of input and locale.                                                                                              |
 | `delivery` | no       | Policy override for this template: `{ fallback?, always? }` or `'all'`. See [Overriding the policy](#overriding-the-policy).                                       |
 
-A template with only `sms` defined skips WhatsApp regardless of the policy's `fallback`. Sending to a template that defines no channel in the order is a configuration error at startup, not at send time.
+A template with only `sms` defined skips WhatsApp regardless of the policy's `fallback`. Sending to a template that defines no channel in the resolved order is a send-time `PolicyError` with a clear message (mapped to `422` by the Hono app), not a startup error: the resolved policy depends on the call, so no startup check can see it coming.
 
 Meta requires one-time codes to use an approved **authentication-category** template. The package does not submit templates for you; it does refuse to send a `kind: 'otp'` template over WhatsApp as free text.
 
