@@ -6,9 +6,12 @@
  * @module
  */
 
+// The one Meta parser, shared with the Meta provider rather than copied. The console provider is
+// what the example Worker and the integration suite run against, so a second implementation here
+// meant local testing stopped predicting production the moment the two drifted — which happened.
+import { parseStatuses as parseMetaStatuses } from '../_shared/meta-statuses.js';
 import type {
   Channel,
-  DeliveryStatus,
   OutboundMeta,
   Provider,
   RenderedEmail,
@@ -21,54 +24,6 @@ import type {
 
 export type ConsoleRendered =
   RenderedSms | RenderedWhatsApp | RenderedEmail | Record<string, unknown>;
-
-const STATUSES: ReadonlySet<string> = new Set<DeliveryStatus>([
-  'sent',
-  'delivered',
-  'read',
-  'failed',
-]);
-
-interface MetaWebhookStatus {
-  id?: unknown;
-  status?: unknown;
-  timestamp?: unknown;
-  errors?: { title?: unknown }[];
-}
-
-interface MetaWebhookPayload {
-  entry?: { changes?: { value?: { statuses?: MetaWebhookStatus[] } }[] }[];
-}
-
-function parseMetaStatuses(payload: unknown): StatusEvent[] {
-  const entries = (payload as MetaWebhookPayload | null)?.entry;
-  if (!Array.isArray(entries)) return [];
-
-  const statuses = entries
-    .flatMap((entry) => entry.changes ?? [])
-    .flatMap((change) => change.value?.statuses ?? []);
-
-  return statuses
-    .filter(
-      (s): s is MetaWebhookStatus & { id: string; status: string } =>
-        typeof s.id === 'string' && typeof s.status === 'string' && STATUSES.has(s.status)
-    )
-    .map((s) => {
-      const seconds = typeof s.timestamp === 'string' ? Number(s.timestamp) : s.timestamp;
-      const at =
-        typeof seconds === 'number' && Number.isFinite(seconds)
-          ? new Date(seconds * 1000).toISOString()
-          : new Date().toISOString();
-      const event: StatusEvent = {
-        providerId: s.id,
-        status: s.status as DeliveryStatus,
-        at,
-      };
-      const title = s.errors?.[0]?.title;
-      if (typeof title === 'string') event.error = title;
-      return event;
-    });
-}
 
 type ConsoleStatusBody = {
   providerId?: string;

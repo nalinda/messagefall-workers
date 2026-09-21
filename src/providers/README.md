@@ -99,8 +99,9 @@ the `ProviderSet` a deployment builds from its env:
 
 1. Create `src/providers/<provider-name>/index.ts`.
 2. Export a factory function returning an object satisfying `Provider<R>` for your channel.
-3. Reuse `_shared/http.ts` (`isRetryableStatus`, `formatHttpError`) and `_shared/mime.ts` rather
-   than restating them.
+3. Reuse `_shared/http.ts` (`isRetryableStatus`, `formatHttpError`), `_shared/mime.ts` and
+   `_shared/meta-statuses.ts` (`parseStatuses`, for a Meta-shaped status payload) rather than
+   restating them.
 4. Re-export it from `src/providers/index.ts` if it should be part of the default barrel. The
    `./providers/*` subpath export picks the directory up automatically.
 5. Add tests (see below) and make sure `bun run lint && bun run ts-check && bun test && bun run build`

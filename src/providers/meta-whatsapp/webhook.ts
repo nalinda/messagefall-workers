@@ -4,16 +4,11 @@
  * @module
  */
 
-import type { DeliveryStatus, StatusEvent } from '../types.js';
+import { parseStatuses } from '../_shared/meta-statuses.js';
+import type { StatusEvent } from '../types.js';
 
 const SIGNATURE_HEADER = 'x-hub-signature-256';
 const SIGNATURE_PREFIX = 'sha256=';
-const STATUSES: ReadonlySet<string> = new Set<DeliveryStatus>([
-  'sent',
-  'delivered',
-  'read',
-  'failed',
-]);
 
 const encoder = new TextEncoder();
 
@@ -113,69 +108,7 @@ export async function verifySignedBody(request: Request, appSecret: string): Pro
   return body;
 }
 
-interface WebhookStatus {
-  id?: unknown;
-  status?: unknown;
-  timestamp?: unknown;
-  errors?: { title?: unknown }[];
-}
-
-interface WebhookPayload {
-  entry?: { changes?: { value?: { statuses?: WebhookStatus[] } }[] }[];
-}
-
-/**
- * Convert a Meta epoch-seconds `timestamp` to ISO, or `null` when it is
- * missing, not numeric, or outside the `Date` range. The caller falls back
- * to the receipt time so a status whose `id` and `status` are known is
- * never lost over a malformed timestamp.
- */
-function toIsoTimestamp(timestamp: unknown): string | null {
-  // `Number('')` is 0, so an empty or whitespace-only string must be rejected
-  // before coercion rather than silently becoming the epoch.
-  if (typeof timestamp === 'string' && timestamp.trim().length === 0) return null;
-  const seconds = typeof timestamp === 'string' ? Number(timestamp) : timestamp;
-  if (typeof seconds !== 'number' || !Number.isFinite(seconds)) return null;
-  // Values beyond the Date range produce an invalid Date whose toISOString()
-  // throws; report it as unusable instead of rejecting the whole batch.
-  const date = new Date(seconds * 1000);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
-function toStatusEvent(status: WebhookStatus): StatusEvent | null {
-  if (typeof status.id !== 'string' || typeof status.status !== 'string') return null;
-  if (!STATUSES.has(status.status)) return null;
-  // A `failed` status with a malformed timestamp is still a failure the core
-  // must hear about; only a missing `id` leaves nothing to correlate against.
-  const at = toIsoTimestamp(status.timestamp) ?? new Date().toISOString();
-
-  const event: StatusEvent = {
-    providerId: status.id,
-    status: status.status as DeliveryStatus,
-    at,
-  };
-
-  const title = status.errors?.[0]?.title;
-  if (typeof title === 'string') event.error = title;
-
-  return event;
-}
-
-/**
- * Map a webhook payload's `entry[].changes[].value.statuses[]` to status
- * events. Changes without statuses (for example inbound messages) yield nothing.
- */
-export function parseStatuses(payload: unknown): StatusEvent[] {
-  const entries = (payload as WebhookPayload | null)?.entry;
-  if (!Array.isArray(entries)) return [];
-
-  const statuses = entries
-    .flatMap((entry) => entry.changes ?? [])
-    .flatMap((change) => change.value?.statuses ?? []);
-  return statuses
-    .map((status) => toStatusEvent(status))
-    .filter((event): event is StatusEvent => event !== null);
-}
+export { parseStatuses } from '../_shared/meta-statuses.js';
 
 function parseBody(body: string): StatusEvent[] {
   let payload: unknown;
