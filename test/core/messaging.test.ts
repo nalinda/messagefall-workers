@@ -257,6 +257,67 @@ describe('createMessaging simulated statuses', () => {
   });
 });
 
+describe('createMessaging.handleWebhook concurrency', () => {
+  // A vendor redelivering a `failed` webhook used to have two callbacks read the same record,
+  // both find the last chain attempt `failed` and both walk the chain — two attempts, and so two
+  // real sends, on the next channel. For an OTP that is the same one-time code sent twice.
+  it('advances the chain once when the same failed status is delivered twice concurrently', async () => {
+    const otpTemplates = defineTemplates({
+      loginCode: {
+        input: z.object({ code: z.string() }),
+        kind: 'otp',
+        whatsapp: {
+          template: 'auth_code',
+          language: 'en',
+          params: ({ code }: { code: string }) => [code],
+        },
+        sms: ({ code }: { code: string }) => `Your code is ${code}`,
+      },
+    });
+
+    const failedAt = '2026-09-20T00:00:00.000Z';
+    const whatsapp: Provider<RenderedWhatsApp> = {
+      name: 'wa',
+      channel: 'whatsapp',
+      send: () => Promise.resolve({ ok: true, providerId: 'wa-dup-1' }),
+      webhook: {
+        parse: () =>
+          Promise.resolve([
+            { providerId: 'wa-dup-1', status: 'failed' as const, error: 'undeliverable', at: failedAt },
+          ]),
+      },
+    };
+    const sms = stubSms('sms');
+
+    const messaging = createMessaging(newEnv(), {
+      templates: otpTemplates,
+      providers: () => ({ whatsapp, sms }),
+    });
+
+    const { id } = await messaging.send({
+      template: 'loginCode',
+      to: '+14155550123',
+      locale: 'en',
+      input: { code: '123456' },
+    });
+
+    const deliver = (): Promise<Response> =>
+      messaging.handleWebhook(
+        'wa',
+        new Request('https://worker.local/webhooks/wa', { method: 'POST' })
+      );
+    const [first, second] = await Promise.all([deliver(), deliver()]);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    // One advance, so one SMS send and one new attempt on the record.
+    expect(sms.calls).toBe(1);
+    const record = await messaging.status(id);
+    expect(record!.chain.attempts).toHaveLength(2);
+    expect(record!.chain.attempts.map((attempt) => attempt.channel)).toEqual(['whatsapp', 'sms']);
+  });
+});
+
 describe('defineTemplates', () => {
   it('returns the defined template catalog', () => {
     const templates = defineTemplates({

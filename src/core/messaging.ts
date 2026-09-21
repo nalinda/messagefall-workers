@@ -9,6 +9,7 @@ import type { DurableObjectNamespace, KVNamespace } from '@cloudflare/workers-ty
 import type { MessagingEnv } from '../env.js';
 import type { StatusEvent } from '../providers/types.js';
 import type { InputOf, TemplateDef, Templates } from '../templates.js';
+import { withAdvanceLock } from './advance-lock.js';
 import { advanceChain } from './fallback.js';
 import { DEFAULT_POLICY, type DeliveryOverride, type DeliveryPolicy } from './policy.js';
 import { validateProviderSet } from './provider-set.js';
@@ -174,6 +175,9 @@ export interface AdvanceChainRequest {
  * the `delivered` / `failed` webhook bridge and the `FallbackTimer` Durable Object share, so the
  * asynchronous path and the request path cannot drift apart.
  *
+ * Advances for one message are serialized through {@link withAdvanceLock}, so a redelivered
+ * `failed` webhook cannot walk the chain twice and put two sends on the next channel.
+ *
  * @param env - Worker bindings.
  * @param options - The messaging options the Worker was configured with.
  * @param request - Which chain to advance and why.
@@ -187,21 +191,23 @@ export async function advanceChainFor<T extends Templates<Record<string, Templat
   const kv = requireKv(env, options);
   const { providers } = wiredCore(env, options, kv);
   const store = statusStoreFor(env, options);
-  await advanceChain({
-    id: request.id,
-    reason: request.reason,
-    env,
-    options: {
-      templates: options.templates,
-      providers,
-      onStatus: options.onStatus,
-      delivery: options.delivery,
-      kv,
-      timer: request.timer ?? resolveTimer(env, options.timer),
-    },
-    store,
-    ...(request.input !== undefined && { input: request.input }),
-  });
+  await withAdvanceLock(kv, request.id, () =>
+    advanceChain({
+      id: request.id,
+      reason: request.reason,
+      env,
+      options: {
+        templates: options.templates,
+        providers,
+        onStatus: options.onStatus,
+        delivery: options.delivery,
+        kv,
+        timer: request.timer ?? resolveTimer(env, options.timer),
+      },
+      store,
+      ...(request.input !== undefined && { input: request.input }),
+    })
+  );
 }
 
 async function handleChainStatusApplied<T extends Templates<Record<string, TemplateDef<unknown>>>>(
