@@ -684,6 +684,88 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       expect(updatedRecord?.chain.attempts).toHaveLength(2);
     });
 
+    it('does not dispatch the same channel twice when the attempt write fails mid-advance', async () => {
+      // A lost `store.update` during the advance used to reject out of `advanceChain`. On the
+      // Durable Object alarm path that rejection escapes `alarm()`, which the platform retries
+      // against a record the lost write left looking pre-advance — so the retry walked the same
+      // channel and sent again. The advance must contain the failure and seal instead.
+      const waProvider = recordingProvider('whatsapp', 'meta-wa');
+      const smsProvider = recordingProvider('sms', 'twilio-sms');
+
+      const messageId = 'msg_01J9FB00000000000000000031';
+      const record: MessageRecord = {
+        id: messageId,
+        template: 'otpVerification',
+        kind: 'otp',
+        policy: { fallback: ['whatsapp', 'sms'], always: [] },
+        chain: {
+          status: 'failed',
+          attempts: [
+            {
+              channel: 'whatsapp',
+              provider: 'meta-wa',
+              providerId: 'wa_131',
+              status: 'failed',
+              error: 'WhatsApp undeliverable',
+              at: '2026-09-20T10:00:00.000Z',
+            },
+          ],
+        },
+        always: [],
+        status: 'failed',
+        createdAt: '2026-09-20T10:00:00.000Z',
+        updatedAt: '2026-09-20T10:00:05.000Z',
+      };
+      await store.create(record);
+
+      await kv.put(
+        `in:${messageId}`,
+        JSON.stringify({
+          input: { code: '313131' },
+          to: '+94770000031',
+          locale: 'en',
+        })
+      );
+
+      // Fails the attempt write and its one retry, then lets every later write (the chain seal)
+      // through: the write that records the SMS attempt is exactly the one that goes missing.
+      let updates = 0;
+      const flakyStore: StatusStore = {
+        ...store,
+        update: async (id, fn) => {
+          updates += 1;
+          if (updates <= 2) {
+            throw new Error('KV unavailable');
+          }
+          return store.update(id, fn);
+        },
+      };
+
+      const args: AdvanceChainArgs = {
+        id: messageId,
+        reason: 'failed',
+        env: { MESSAGES_KV: kv },
+        options: {
+          timer: mockTimer,
+          templates: testTemplates,
+          providers: { whatsapp: waProvider, sms: smsProvider },
+          fallbackTimeoutMs: 10_000,
+        },
+        store: flakyStore,
+      };
+
+      // The advance must not reject: a rejection is what the alarm retries on.
+      await advanceChain(args);
+      expect(smsProvider.calls).toHaveLength(1);
+
+      // The alarm retry the platform would run anyway.
+      await advanceChain(args);
+      expect(smsProvider.calls).toHaveLength(1);
+
+      const sealedRecord = await store.get(messageId);
+      expect(sealedRecord?.sealed).toBe(true);
+    });
+
     it('does nothing when chain.status is already delivered', async () => {
       const smsProvider = recordingProvider('sms', 'twilio-sms');
 

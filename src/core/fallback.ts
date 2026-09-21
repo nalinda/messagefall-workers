@@ -435,7 +435,23 @@ export async function advanceChain(args: AdvanceChainArgs): Promise<void> {
     initialRecord.policy
   );
 
-  const attempts = await runChain(request, args.id, providers, nextChannels, recorder);
+  // `runChain` surfaces its first persistence failure by throwing, but only once the walk has
+  // finished — the providers have already been called. `deliverGuarded` in `./send.js` contains
+  // that same throw on the synchronous path; contained here too, because on the Durable Object
+  // alarm path a rejection escaping `advanceChain` escapes `alarm()`, which the platform retries
+  // against storage that the lost write left looking pre-advance — so `shouldSkipAdvancement`
+  // would let the retry walk the SAME channel again and send a second time. Falling through to
+  // `release` instead seals the record, which is what makes that retry a no-op.
+  let attempts: Attempt[];
+  try {
+    attempts = await runChain(request, args.id, providers, nextChannels, recorder);
+  } catch {
+    logger.error('send.persist-failed', { id: args.id });
+    // Which channel accepted is exactly what the lost write cost us, so the chain cannot be
+    // re-armed for another fallback hop; release it rather than risk advancing on stale state.
+    await release(args, initialRecord, kv);
+    return;
+  }
 
   const last = attempts.at(-1);
   if (!last || last.status === 'failed') {
