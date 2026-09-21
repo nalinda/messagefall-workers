@@ -1,8 +1,10 @@
 /**
- * Basic example Worker using messagefall-workers with console providers.
+ * Integration-test entrypoint: the basic example Worker with a deliberately tiny chain timeout.
  *
- * Runs locally without vendor credentials, exports FallbackTimer for timed fallback,
- * and mounts createMessagingApp at top-level module scope.
+ * Only the scenario that tests the timer's alarm needs one. The example itself ships realistic
+ * defaults (30s / 300s), because an alarm that fires milliseconds after every send would make
+ * webhook-driven fallback untestable — the timer would produce the fallback attempt whether or
+ * not the webhook path worked at all — and would surprise anyone copying the quick start.
  *
  * @module
  */
@@ -11,7 +13,7 @@ import { type MessagingEnv } from 'messagefall-workers';
 import { createMessagingApp } from 'messagefall-workers/app';
 import { consoleProvider } from 'messagefall-workers/providers/console';
 
-import { templates } from './templates.js';
+import { templates } from '../../../examples/basic/src/templates.js';
 
 export { FallbackTimer } from 'messagefall-workers/durable';
 
@@ -25,10 +27,7 @@ const app = createMessagingApp<MessagingEnv>({
   delivery: {
     fallback: ['whatsapp', 'sms'],
     always: ['email'],
-    // The package defaults, stated explicitly so the example shows where they live. These are
-    // the values anyone copying this quick start wants. Tests that need the alarm to fire
-    // quickly point the harness at their own entrypoint instead of shrinking these.
-    timeout: { otp: 30_000, notification: 300_000 },
+    timeout: { otp: 250, notification: 250 },
   },
 });
 

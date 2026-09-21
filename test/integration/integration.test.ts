@@ -7,7 +7,10 @@
  * Scenarios covered:
  * 1. Send notification template (`orderUpdate`); record shows chain `whatsapp` and always `email`.
  * 2. Post a Meta-shaped `failed` status for WhatsApp attempt (dev bypass on); record shows SMS attempt.
- * 3. Send with first channel never reporting status; advance past timeout; SMS attempt appears from alarm.
+ * 3. Send with first channel never reporting status; advance past timeout; SMS attempt appears
+ *    from alarm. Runs against its own entrypoint with a 250ms chain timeout: the example ships
+ *    realistic timeouts, so only this scenario gets a fast alarm — and the webhook-driven
+ *    scenarios above cannot be passed by a timer firing behind their backs.
  * 4. Send OTP template (`loginCode`); response time under 100 ms via ctx.waitUntil; delivery still happens.
  * 5. Post `delivered` for SMS attempt; chain and overall status `delivered`; timer storage empty.
  * 7. POST /send with `delivery: 'all'` yields three parallel attempts.
@@ -16,9 +19,13 @@
  * @module
  */
 
+import path from 'node:path';
+
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 
 import { IntegrationHarness } from './harness.js';
+
+const FAST_TIMER_ENTRYPOINT = path.join(import.meta.dir, 'fixtures/fast-timer-worker.ts');
 
 const TEST_TIMEOUT = 15_000;
 const SETTLE_TIMEOUT = 2500;
@@ -26,6 +33,12 @@ const SETTLE_TIMEOUT = 2500;
 describe('Issue #15: Integration tests under wrangler dev', () => {
   let harness: IntegrationHarness;
   let harnessNoBypass: IntegrationHarness;
+  // Only scenario 3 wants a timer that fires in milliseconds; the example's own timeouts stay
+  // realistic so the webhook-driven scenarios really do test the webhook path.
+  let harnessFastTimer: IntegrationHarness;
+  // Scenario 5 asserts the timer left NO state behind, and that check reads the whole Durable
+  // Object directory — so it needs an instance no other scenario's still-armed timer writes to.
+  let harnessTimerCleanup: IntegrationHarness;
 
   beforeAll(async () => {
     harness = await IntegrationHarness.start({
@@ -34,10 +47,22 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
     harnessNoBypass = await IntegrationHarness.start({
       vars: { MESSAGING_DEV_UNSIGNED: 'false' },
     });
+    harnessFastTimer = await IntegrationHarness.start({
+      vars: { MESSAGING_DEV_UNSIGNED: 'true' },
+      entrypoint: FAST_TIMER_ENTRYPOINT,
+    });
+    harnessTimerCleanup = await IntegrationHarness.start({
+      vars: { MESSAGING_DEV_UNSIGNED: 'true' },
+    });
   });
 
   afterAll(async () => {
-    await Promise.all([harness.stop(), harnessNoBypass.stop()]);
+    await Promise.all([
+      harness.stop(),
+      harnessNoBypass.stop(),
+      harnessFastTimer.stop(),
+      harnessTimerCleanup.stop(),
+    ]);
   });
 
   it(
@@ -155,7 +180,7 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
     'Scenario 3: Send with first channel never reporting status; advance past timeout; SMS attempt appears from the alarm',
     async () => {
       // Send notification message without sending status webhook
-      const sendRes = await harness.send({
+      const sendRes = await harnessFastTimer.send({
         template: 'orderUpdate',
         to: '+94771234569',
         email: 'shopper3@example.com',
@@ -169,7 +194,7 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
       expect(sendRes.status).toBe(200);
       const { id } = (await sendRes.json()) as { id: string };
 
-      const initialRecord = await harness.waitForRecord(
+      const initialRecord = await harnessFastTimer.waitForRecord(
         id,
         (r) => r.chain.attempts.length === 1,
         SETTLE_TIMEOUT
@@ -178,7 +203,7 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
       expect(initialRecord.chain.attempts[0].status).toBe('sent');
 
       // Poll status endpoint with a deadline for the alarm to trigger and advance chain to SMS
-      const timedOutRecord = await harness.waitForRecord(
+      const timedOutRecord = await harnessFastTimer.waitForRecord(
         id,
         (r) => r.chain.attempts.length === 2,
         SETTLE_TIMEOUT
@@ -228,7 +253,7 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
     'Scenario 5: Post a delivered status for the SMS attempt; chain and overall status delivered; timer storage empty',
     async () => {
       // 1. Send message and advance to SMS
-      const sendRes = await harness.send({
+      const sendRes = await harnessTimerCleanup.send({
         template: 'orderUpdate',
         to: '+94771234570',
         email: 'shopper5@example.com',
@@ -240,7 +265,7 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
       });
       const { id } = (await sendRes.json()) as { id: string };
 
-      const initial = await harness.waitForRecord(
+      const initial = await harnessTimerCleanup.waitForRecord(
         id,
         (r) => r.chain.attempts.length === 1,
         SETTLE_TIMEOUT
@@ -248,12 +273,12 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
       const waProviderId = initial.chain.attempts[0].providerId ?? '';
 
       // Fail WhatsApp attempt
-      await harness.webhook('console-whatsapp', {
+      await harnessTimerCleanup.webhook('console-whatsapp', {
         providerId: waProviderId,
         status: 'failed',
       });
 
-      const advanced = await harness.waitForRecord(
+      const advanced = await harnessTimerCleanup.waitForRecord(
         id,
         (r) => r.chain.attempts.length === 2,
         SETTLE_TIMEOUT
@@ -261,14 +286,14 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
       const smsProviderId = advanced.chain.attempts[1].providerId ?? '';
 
       // 2. Deliver SMS attempt
-      const smsRes = await harness.webhook('console-sms', {
+      const smsRes = await harnessTimerCleanup.webhook('console-sms', {
         providerId: smsProviderId,
         status: 'delivered',
       });
       expect(smsRes.status).toBe(200);
 
       // 3. Chain and overall status are delivered
-      const settled = await harness.waitForRecord(
+      const settled = await harnessTimerCleanup.waitForRecord(
         id,
         (r) => r.chain.status === 'delivered',
         SETTLE_TIMEOUT
@@ -277,7 +302,7 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
       expect(settled.status).toBe('delivered');
 
       // 4. Timer storage empty
-      const isEmpty = harness.isTimerStorageEmpty();
+      const isEmpty = harnessTimerCleanup.isTimerStorageEmpty();
       expect(isEmpty).toBe(true);
     },
     TEST_TIMEOUT
