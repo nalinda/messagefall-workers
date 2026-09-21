@@ -230,7 +230,7 @@ async function callProvider(
  * when no address was supplied. The asynchronous fallback path is a second door: it rebuilds the
  * request from whatever input it could recover, which may carry no email address at all. Rather
  * than address the message to something that cannot be an email address — the recipient's phone
- * number, say — the attempt is recorded failed, the same treatment `finalizeMissingInput` gives
+ * number, say — the attempt is recorded failed, the same treatment `finalizeUnusableInput` gives
  * an unrecoverable recipient.
  */
 function undispatchableReason(req: ValidatedSendRequest, channel: Channel): string | undefined {
@@ -742,7 +742,7 @@ function resolveEffectivePolicy(
  * Both side-writes are best-effort: the status record already exists and no provider has been
  * called yet, so rejecting here would orphan a `pending` record and send nothing at all. A stash
  * or an arm that fails is logged (without content) and the send proceeds; a later fallback that
- * cannot find the input degrades through `finalizeMissingInput` (`fallback.input-lost`).
+ * cannot find the input degrades through `finalizeUnusableInput` (`fallback.input-lost`).
  *
  * Each of the two gets its own event name — `send.stash-failed` and `timer.arm-failed` — for the
  * same reason `indexAttempt` keeps `send.index-failed` to itself: the consequences differ (the

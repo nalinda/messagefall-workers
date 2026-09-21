@@ -131,8 +131,9 @@ the `ProviderSet` a deployment builds from its env:
   compile time rather than scrubbed at runtime; and a lint rule bans raw `console.*` anywhere
   under `src/` except the logger itself and the dev console provider, so a provider cannot route
   round that allow-list. Vendor error strings are a separate concern — they can quote the content
-  back at you, and the logger does nothing about it. Scrub them through `scrubError`
-  (`src/core/redact.ts`) before they are logged or persisted.
+  back at you, and the logger does nothing about it — but that is the core's job, not yours: every
+  vendor error a provider returns is run through `scrubError` (`src/core/redact.ts`) before it is
+  logged or written to the status record. Return the vendor's message unaltered.
 
 ## Provider Status Mapping
 
