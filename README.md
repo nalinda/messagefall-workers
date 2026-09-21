@@ -207,7 +207,11 @@ The chain runs like this:
 5. If the alarm fires and the chain's current attempt is still `sent`, the next channel is tried.
 6. When no chain channels remain, the chain is marked `failed` with the last error. `always` channels do not affect the chain's outcome.
 
-Without the Durable Object binding, steps 3 and 5 do not happen: chain fallback is driven only by explicit failure statuses. That is enough for notifications. For one-time codes you want the timer, because "no status yet" after thirty seconds is the common failure mode, not an explicit rejection.
+Without the Durable Object binding, steps 3 and 5 do not happen: chain fallback is driven only by explicit failure statuses, and the app logs one `timer.off` line on its first request so the missing binding is visible. That is enough for notifications. For one-time codes you want the timer, because "no status yet" after thirty seconds is the common failure mode, not an explicit rejection.
+
+The timer is one Durable Object per message, named by the message id. Its alarm re-creates the messaging core from the options passed to `createMessagingApp` (or `createMessaging`) in the same isolate, and an isolate woken only by an alarm runs nothing but module evaluation before the handler. So `FallbackTimer` must be exported from the same Worker module that calls `createMessagingApp`, and that call must run at module top level (`const app = createMessagingApp({...})` at module scope, as the quick start does), not lazily inside a request handler; the last registration in an isolate wins, so configure one set of options per Worker. If an alarm fires with no options registered it throws and keeps its state for the platform's retry. A chain with only one channel, or a `'all'` policy, never arms it: there is nothing a timeout could move on to.
+
+One case beyond steps 3 and 5: the timer is armed before the first attempt is dispatched (for one-time codes the dispatch runs in `ctx.waitUntil` after the response), so an alarm can find the chain still `pending` — no attempt recorded yet. It does not treat that as terminal. It re-schedules itself for another timeout, up to three times (`MAX_PENDING_RECHECKS`), and advances normally once the chain shows `sent`; only after those re-checks does it give up, log `timer.gave-up` and clear its storage. A chain that is `delivered`, `read` or `failed` when the alarm fires is only cleaned up.
 
 ### Overriding the policy
 

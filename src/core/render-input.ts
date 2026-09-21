@@ -43,6 +43,11 @@ export interface RenderInput {
 }
 
 /**
+ * Locale used when a render input carries none.
+ */
+export const DEFAULT_LOCALE = 'en';
+
+/**
  * The KV key the render input for a message is stored under.
  *
  * @param id - Internal message identifier.
@@ -82,6 +87,24 @@ export async function readRenderInput(
 }
 
 /**
+ * The {@link RenderInput} fields of `source`, and nothing else: `input` always, `to` / `email` /
+ * `locale` only when defined. The one place the shape is copied, so the timer's stored state,
+ * its arm arguments and the fallback path's merges all build on it instead of restating it.
+ *
+ * @param source - Anything carrying the render input fields (an arm argument, a stored timer,
+ * a KV payload).
+ * @returns A fresh render input without undefined keys.
+ */
+export function pickRenderInput(source: RenderInput): RenderInput {
+  return {
+    input: source.input,
+    ...(source.to !== undefined && { to: source.to }),
+    ...(source.email !== undefined && { email: source.email }),
+    ...(source.locale !== undefined && { locale: source.locale }),
+  };
+}
+
+/**
  * Coerces an opaque value into a {@link RenderInput}: an envelope is taken as-is, anything else
  * is treated as the bare template input.
  *
@@ -96,6 +119,19 @@ export function asRenderInput(value: unknown): RenderInput {
 }
 
 /**
+ * Whether a chain of `fallback` channels ever arms the fallback timer: only when there is a
+ * channel left to move on to after the first. The send path arms on this condition and the
+ * release paths cancel on it, so a single-channel chain or policy `'all'` never costs a Durable
+ * Object round-trip in either direction.
+ *
+ * @param fallback - The resolved policy's chain.
+ * @returns True when the timer is armed for such a chain.
+ */
+export function isTimedChain(fallback: readonly unknown[]): boolean {
+  return fallback.length > 1;
+}
+
+/**
  * Terminal-state cleanup for one message: disarm the fallback timer and drop its render input.
  *
  * Called from every path that settles a chain for good — the synchronous send exhausting its
@@ -105,19 +141,26 @@ export function asRenderInput(value: unknown): RenderInput {
  * error. The KV entry carries a TTL, so a missed delete expires on its own; a missed cancel
  * costs one timer fire that `advanceChain` then finds nothing to do for.
  *
+ * The timer is only cancelled for a chain that {@link isTimedChain}; for any other policy the
+ * cancel would instantiate a Durable Object just to delete nothing.
+ *
  * @param timer - The resolved fallback timer, if the deployment has one.
  * @param kv - The KV namespace holding the render input, if the deployment has one.
  * @param id - Internal message identifier.
+ * @param fallback - The record's resolved chain, deciding whether a timer was ever armed.
  */
 export async function releaseChain(
   timer: FallbackTimerClient | undefined,
   kv: KVNamespace | undefined,
-  id: string
+  id: string,
+  fallback: readonly unknown[]
 ): Promise<void> {
-  try {
-    timer?.cancel?.(id);
-  } catch {
-    // Best-effort cancellation
+  if (isTimedChain(fallback)) {
+    try {
+      await timer?.cancel?.(id);
+    } catch {
+      // Best-effort cancellation
+    }
   }
   try {
     await kv?.delete(renderInputKey(id));

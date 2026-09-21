@@ -14,6 +14,7 @@ import {
 } from '../core/messaging.js';
 import { PolicyError } from '../core/policy.js';
 import { RecipientError, type SendContext } from '../core/send.js';
+import { announceTimerOff, registerMessagingOptions } from '../core/timer.js';
 import { type MessagingEnv, validateEnv } from '../env.js';
 import { TemplateValidationError } from '../templates.js';
 
@@ -81,6 +82,9 @@ export function createMessagingApp<E extends MessagingEnv = MessagingEnv>(
 ): Hono<{ Bindings: E }> {
   const app = new Hono<{ Bindings: E }>();
   const prefix = normalizeBasePath(options.basePath);
+  // The FallbackTimer Durable Object rebuilds the core from these options when its alarm fires,
+  // which is why it must be exported from the Worker module that makes this call.
+  registerMessagingOptions(options);
 
   let isValidated = false;
 
@@ -88,6 +92,9 @@ export function createMessagingApp<E extends MessagingEnv = MessagingEnv>(
   app.use('*', async (c, next) => {
     if (!isValidated) {
       validateEnv(c.env, options);
+      // Without the FALLBACK_TIMER binding chain fallback is driven by explicit failure
+      // statuses only; said once per app so a missing binding is visible in the logs.
+      announceTimerOff(c.env, options.timer, app);
       isValidated = true;
     }
     await next();

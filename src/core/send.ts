@@ -27,7 +27,7 @@ import {
 import { createLogger } from './logger.js';
 import { type DeliveryOverride, type DeliveryPolicy, resolveDelivery } from './policy.js';
 import { scrubError } from './redact.js';
-import { releaseChain, type RenderInput, renderInputKey } from './render-input.js';
+import { isTimedChain, releaseChain, type RenderInput, renderInputKey } from './render-input.js';
 import {
   type Attempt,
   deriveOverallStatus,
@@ -36,6 +36,7 @@ import {
   MessageRecordNotFoundError,
   type StatusStore,
 } from './status.js';
+import { chainTimeoutMs } from './timer.js';
 import { ulid } from './ulid.js';
 
 const defaultLogger = createLogger();
@@ -469,7 +470,7 @@ async function cleanupExhaustedChain(
   }
   const lastAttempt = chainAttempts.at(-1);
   if (lastAttempt?.status === 'failed' && chainAttempts.length >= policy.fallback.length) {
-    await releaseChain(deps.timer, deps.kv, id);
+    await releaseChain(deps.timer, deps.kv, id, policy.fallback);
   }
 }
 
@@ -593,10 +594,44 @@ function resolveEffectivePolicy(
   return { policy, hasSkippedEmail };
 }
 
-const DEFAULT_CHAIN_TIMEOUT_MS: Record<MessageRecord['kind'], number> = {
-  otp: 30_000,
-  notification: 300_000,
-};
+/**
+ * Stashes the render input for the asynchronous fallback path and arms the fallback timer.
+ *
+ * The `in:<id>` KV entry is written whenever there is a chain at all (a `failed` webhook can
+ * advance it). The timer is armed only when the chain has somewhere to go after the first
+ * channel: a single-channel chain or policy `'all'` has nothing a timeout could move on to. A
+ * timer that cannot be armed is logged (without content) and never fails the send.
+ */
+async function stashChainInput(
+  deps: SendDeps,
+  req: SendRequest,
+  id: string,
+  policy: DeliveryPolicy
+): Promise<void> {
+  if (policy.fallback.length === 0) {
+    return;
+  }
+  const timeoutMs = chainTimeoutMs(req.template.kind, deps.timeout);
+  const inputPayload: RenderInput = {
+    input: req.input,
+    to: req.to,
+    ...(req.email !== undefined && { email: req.email }),
+    locale: req.locale,
+  };
+  if (deps.kv) {
+    const ttlSeconds = Math.max(60, Math.ceil(timeoutMs / 1000));
+    await deps.kv.put(renderInputKey(id), JSON.stringify(inputPayload), {
+      expirationTtl: ttlSeconds,
+    });
+  }
+  if (isTimedChain(policy.fallback) && typeof deps.timer?.setState === 'function') {
+    try {
+      await deps.timer.setState(id, timeoutMs, inputPayload);
+    } catch {
+      defaultLogger.warn('timer.arm-failed', { id, kind: req.template.kind });
+    }
+  }
+}
 
 /**
  * Runs the send pipeline for one message.
@@ -646,29 +681,7 @@ export async function runSend(
     updatedAt: now,
   });
 
-  if (policy.fallback.length > 0) {
-    const timeoutMs =
-      deps.timeout?.[req.template.kind] ?? DEFAULT_CHAIN_TIMEOUT_MS[req.template.kind];
-    const inputPayload: RenderInput = {
-      input: req.input,
-      to: req.to,
-      ...(req.email !== undefined && { email: req.email }),
-      locale: req.locale,
-    };
-    if (deps.kv) {
-      const ttlSeconds = Math.max(60, Math.ceil(timeoutMs / 1000));
-      await deps.kv.put(renderInputKey(id), JSON.stringify(inputPayload), {
-        expirationTtl: ttlSeconds,
-      });
-    }
-    if (typeof deps.timer?.setState === 'function') {
-      try {
-        deps.timer.setState(id, timeoutMs, inputPayload);
-      } catch {
-        // Best effort
-      }
-    }
-  }
+  await stashChainInput(deps, req, id, policy);
 
   if (ctx && req.template.kind === 'otp') {
     ctx.waitUntil(deliverGuarded(deps, validated, id, policy));

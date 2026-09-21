@@ -47,6 +47,11 @@ export interface StatusApplied {
    * Parsed delivery status event.
    */
   event: StatusEvent;
+  /**
+   * The record as written with this status applied, so consumers can act on its policy without
+   * a second read.
+   */
+  record: MessageRecord;
 }
 
 /**
@@ -255,7 +260,7 @@ async function handleSingleEvent(
   const scrubbedEvent: StatusEvent =
     event.error === undefined ? event : { ...event, error: scrubError(event.error, sensitive) };
 
-  await store.update(
+  const updatedRecord = await store.update(
     ref.id,
     (record) => applyStatusUpdate(record, scrubbedEvent, ref).updatedRecord
   );
@@ -271,6 +276,7 @@ async function handleSingleEvent(
       provider: ref.provider,
       part: 'chain',
       event: scrubbedEvent,
+      record: updatedRecord,
     });
   }
 

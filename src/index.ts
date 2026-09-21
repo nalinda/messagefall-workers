@@ -10,10 +10,24 @@
 export * from './app/hono.js';
 export * from './core/fallback.js';
 export * from './core/logger.js';
-export * from './core/messaging.js';
+export {
+  createMessaging,
+  E164,
+  type Messaging,
+  MessagingConfigError,
+  type MessagingOptions,
+  ProviderConfigError,
+  type ProviderSet,
+  RecipientError,
+  type SendArgs,
+  type SendContext,
+  type StatusCallbackEvent,
+  UnknownTemplateError,
+} from './core/messaging.js';
 export * from './core/policy.js';
 export * from './core/redact.js';
 export * from './core/status.js';
+export { armTimer, type ArmTimerArgs, cancelTimer } from './core/timer.js';
 export * from './core/webhook.js';
 export * from './env.js';
 export * from './providers/index.js';
