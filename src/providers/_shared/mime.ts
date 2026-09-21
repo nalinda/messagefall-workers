@@ -77,7 +77,7 @@ function encodeSubject(subject: string): string {
  *
  * `From:` and `To:` are interpolated into the header block verbatim, so a CR or LF in either
  * ends the header and lets the caller append arbitrary ones — a `Bcc:`, or a second body. The
- * send pipeline rejects such an address long before it reaches here (`EMAIL_ADDRESS` in
+ * send pipeline rejects such an address long before it reaches here (`isEmailAddress` in
  * `core/send.ts`); this is the last line of defence for a provider built directly against this
  * builder. It throws rather than silently stripping: a message addressed to something other
  * than what the caller asked for is worse than no message.
