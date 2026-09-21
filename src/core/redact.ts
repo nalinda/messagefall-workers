@@ -102,6 +102,33 @@ function extractRenderedStrings(rendered: unknown): string[] {
   return [];
 }
 
+/**
+ * The genuinely sensitive parts of a rendered outbound payload: the message content, and
+ * nothing else.
+ *
+ * The payload handed to a provider is the rendered message merged over an `OutboundMeta` —
+ * `to`, `messageId`, `template`, `kind`, `locale`. Feeding the whole thing to {@link scrubError}
+ * shreds ordinary vendor error messages, because those metadata values are short and share
+ * substrings with real words: with `to: '+9477…'` harmless, but `kind: 'otp'` or a template
+ * named `to` turns "Token expired" into "T[redacted]n expired". Only the content can actually
+ * leak the message, so only the content is scrubbed for.
+ *
+ * @param payload - The rendered payload sent to a provider.
+ * @returns The content values to scrub the vendor's error against.
+ */
+export function renderedContent(payload: unknown): unknown[] {
+  if (!payload || typeof payload !== 'object') {
+    return [];
+  }
+  const content: unknown[] = extractRenderedStrings(payload);
+  const { template } = payload as { template?: unknown };
+  // RenderedWhatsApp's template config carries the substituted parameters.
+  if (template && typeof template === 'object' && 'params' in template) {
+    content.push(template.params);
+  }
+  return content;
+}
+
 function getTemplateDefinition(
   templates: unknown,
   templateName: string

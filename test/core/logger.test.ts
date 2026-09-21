@@ -212,6 +212,60 @@ describe('Issue #10: No message bodies in logs, enforced in code', () => {
       expect(scrubbed).not.toContain('482913');
       expect(scrubbed).not.toContain('Your secret code is 482913');
     });
+
+    // Regression: the scrubber used to be handed the whole provider payload — OutboundMeta's
+    // `to`, `messageId`, `template`, `kind` and `locale` included — and redacted every
+    // occurrence of each. "Token expired" came back as "T[redacted]n expired" because "to" is
+    // a substring of "Token". Only content is sensitive; metadata is not, and must survive.
+    it('leaves an ordinary vendor error intact while still redacting the message content', async () => {
+      const code = '482913';
+      const otpCatalog = defineTemplates({
+        loginOtp: {
+          input: z.object({ code: z.string().length(6) }),
+          kind: 'otp' as const,
+          sms: ({ code: c }: { code: string }) => `Your login code is ${c}`,
+        },
+      });
+
+      const failingSms: Provider<RenderedSms> = {
+        name: 'to-sms',
+        channel: 'sms',
+        // Every ordinary word here shares a substring with a metadata field the scrubber used
+        // to be fed: "to" (the recipient), "en" (the locale), "otp" (the kind).
+        send: () =>
+          Promise.resolve({
+            ok: false,
+            error: `Token expired: the tenant gateway rejected "Your login code is ${code}"`,
+          }),
+      };
+
+      const messaging = createMessaging(
+        { MESSAGES_KV: memoryKV() },
+        {
+          templates: otpCatalog,
+          providers: () => ({ sms: failingSms }),
+          delivery: { fallback: ['sms'], always: [] },
+        },
+      );
+
+      const { id } = await messaging.send({
+        template: 'loginOtp',
+        to: '+14155550123',
+        locale: 'en',
+        input: { code },
+      });
+
+      const record = await messaging.status(id);
+      const storedError = record!.chain.attempts[0].error ?? '';
+
+      // The content and the code are gone...
+      expect(storedError).not.toContain(code);
+      expect(storedError).not.toContain('Your login code is');
+      expect(storedError).toContain('[redacted]');
+      // ...and the vendor's own words came through unmangled.
+      expect(storedError).toContain('Token expired');
+      expect(storedError).toContain('the tenant gateway rejected');
+    });
   });
 
   describe('Acceptance Criterion 2: Integration-style zero-content leakage test', () => {

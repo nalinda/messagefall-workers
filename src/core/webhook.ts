@@ -10,7 +10,7 @@ import type { ExecutionContext, KVNamespace } from '@cloudflare/workers-types';
 import type { Channel, Provider, StatusEvent } from '../providers/types.js';
 import { createLogger } from './logger.js';
 import { extractTemplateSensitiveStrings, scrubError } from './redact.js';
-import { renderInputKey } from './render-input.js';
+import { asRenderInput, renderInputKey } from './render-input.js';
 import {
   type Attempt,
   deriveOverallStatus,
@@ -218,7 +218,10 @@ async function resolveWebhookSensitive(
     try {
       const rawInput = await kv.get(renderInputKey(refId));
       if (rawInput) {
-        sensitive.push(JSON.parse(rawInput));
+        // Only the template input's own field values, not the envelope's `to` / `email` /
+        // `locale` around them: those cannot leak the message content, and scrubbing an error
+        // for short metadata values shreds ordinary vendor error strings.
+        sensitive.push(asRenderInput(JSON.parse(rawInput) as unknown).input);
       }
     } catch {
       // ignore

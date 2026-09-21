@@ -26,7 +26,7 @@ import {
 } from '../templates.js';
 import { createLogger } from './logger.js';
 import { type DeliveryOverride, type DeliveryPolicy, resolveDelivery } from './policy.js';
-import { scrubError } from './redact.js';
+import { renderedContent, scrubError } from './redact.js';
 import { isTimedChain, releaseChain, type RenderInput, renderInputKey } from './render-input.js';
 import {
   type Attempt,
@@ -273,7 +273,10 @@ async function attemptChannel(
         ...base,
         status: 'failed',
         error: result.error
-          ? scrubError(result.error, [payload, req.validatedInput, req.input])
+          ? // Only the rendered content and the template input, never the payload's metadata
+            // (`to`, `messageId`, `template`, `kind`, `locale`): those cannot leak the message,
+            // and they shred ordinary vendor error strings they share substrings with.
+            scrubError(result.error, [renderedContent(payload), req.validatedInput, req.input])
           : undefined,
         at,
       };
