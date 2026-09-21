@@ -67,8 +67,31 @@ function extractFromTemplateString(patternStr: string, error: string, sensitive:
     return;
   }
 
-  const prefix = patternStr.slice(0, markerIdx);
-  const suffix = patternStr.slice(markerEnd + PARAM_SUFFIX.length);
+  pushBoundedMatch(
+    patternStr.slice(0, markerIdx),
+    patternStr.slice(markerEnd + PARAM_SUFFIX.length),
+    error,
+    sensitive
+  );
+}
+
+/**
+ * Recovers the substituted value from `error` by locating the literal text the template rendered
+ * around it, and records both that value and the whole rendered span.
+ */
+function pushBoundedMatch(
+  prefix: string,
+  suffix: string,
+  error: string,
+  sensitive: string[]
+): void {
+  // A pattern that is nothing but the marker (a WhatsApp `params` entry rendering a bare value,
+  // for instance) gives no literal text to anchor on, so any match would span the whole error
+  // string and redact it entirely. Without bounds the value cannot be recovered; skip it rather
+  // than destroy the error.
+  if (prefix.length === 0 && suffix.length === 0) {
+    return;
+  }
 
   const startIdx = error.indexOf(prefix);
   if (startIdx === -1) {
@@ -147,6 +170,52 @@ function getTemplateDefinition(
   return undefined;
 }
 
+type RenderFn = (input: unknown) => unknown;
+
+/**
+ * Every function a template definition can render content with.
+ *
+ * `sms` is a function on the definition itself, but `whatsapp` is a `WhatsAppTemplateConfig` and
+ * `email` an `EmailTemplateConfig` — objects whose own members (`params`/`text`, and
+ * `subject`/`text`/`html`) do the rendering. Probing only the top-level function-valued channels
+ * would leave the marker-proxy recovery dead for two of the three channels.
+ */
+function collectRenderFunctions(templateDef: Record<string, unknown>): RenderFn[] {
+  const { sms, whatsapp, email } = templateDef as {
+    sms?: unknown;
+    whatsapp?: unknown;
+    email?: unknown;
+  };
+  return [sms, whatsapp, email].flatMap((channel) => channelRenderFunctions(channel));
+}
+
+/**
+ * The render functions of one channel entry: the entry itself when it is a function (`sms`), or
+ * its function-valued members when it is a config object (`whatsapp`, `email`).
+ */
+function channelRenderFunctions(channel: unknown): RenderFn[] {
+  if (typeof channel === 'function') {
+    return [channel as RenderFn];
+  }
+  if (channel && typeof channel === 'object') {
+    return Object.values(channel).filter(
+      (member): member is RenderFn => typeof member === 'function'
+    );
+  }
+  return [];
+}
+
+/**
+ * The marker-bearing strings a render function produced: a rendered body, the members of a
+ * rendered email object, or the entries of a WhatsApp `params` array.
+ */
+function renderedPatternStrings(rendered: unknown): string[] {
+  if (Array.isArray(rendered)) {
+    return rendered.filter((item): item is string => typeof item === 'string');
+  }
+  return extractRenderedStrings(rendered);
+}
+
 /**
  * Extracts sensitive strings and parameter values from template definitions given an error message.
  *
@@ -172,19 +241,10 @@ export function extractTemplateSensitiveStrings(
     }
   );
 
-  const templateObj = templateDef as {
-    sms?: unknown;
-    whatsapp?: unknown;
-    email?: unknown;
-  };
-  const channelFns = [templateObj.sms, templateObj.whatsapp, templateObj.email];
-
-  for (const fn of channelFns) {
-    if (typeof fn !== 'function') continue;
+  for (const fn of collectRenderFunctions(templateDef)) {
     try {
-      const rendered = (fn as (input: unknown) => unknown)(proxy);
-      const stringsToTest = extractRenderedStrings(rendered);
-      for (const patternStr of stringsToTest) {
+      const rendered = fn(proxy);
+      for (const patternStr of renderedPatternStrings(rendered)) {
         extractFromTemplateString(patternStr, error, sensitive);
       }
     } catch {

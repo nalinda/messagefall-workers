@@ -55,6 +55,52 @@ function createSignedProvider(): Provider {
   };
 }
 
+/**
+ * A single-attempt record for the redaction tests, where the `in:<id>` render input has expired
+ * and the only way back to the rendered content is the template definition.
+ */
+function singleAttemptRecord(
+  messageId: string,
+  providerId: string,
+  template: string,
+  channel: 'whatsapp' | 'email',
+  provider: string
+): MessageRecord {
+  return {
+    id: messageId,
+    template,
+    kind: 'otp',
+    policy: { fallback: [channel], always: [] },
+    chain: {
+      status: 'sent',
+      attempts: [
+        {
+          channel,
+          provider,
+          providerId,
+          status: 'sent',
+          at: '2026-09-20T12:00:00.000Z',
+        },
+      ],
+    },
+    always: [],
+    status: 'sent',
+    createdAt: '2026-09-20T12:00:00.000Z',
+    updatedAt: '2026-09-20T12:00:00.000Z',
+  };
+}
+
+function providerEmitting(name: string, event: StatusEvent): Provider {
+  return {
+    name,
+    channel: 'whatsapp',
+    send: () => Promise.resolve({ ok: true }),
+    webhook: {
+      parse: () => Promise.resolve([event]),
+    },
+  };
+}
+
 describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider handler', () => {
   let kv: KVNamespace;
   let disposeKv: () => Promise<void>;
@@ -1099,6 +1145,158 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
 
       const response = await handleWebhook('meta-wa', unsignedRequest);
       expect(response.status).toBe(401);
+    });
+  });
+
+  describe('Template recovery redaction for object-valued channels', () => {
+    it('redacts content echoed by a vendor error against an email template config after in:<id> expiry', async () => {
+      const store = kvStatusStore(kv);
+      const messageId = 'msg_01J9REDACT0000000000EMAIL';
+      const providerId = 'resend_01J9REDACT_EMAIL';
+      const secretCode = '913277';
+
+      await store.create(singleAttemptRecord(messageId, providerId, 'loginOtp', 'email', 'resend'));
+      await store.indexProviderId(providerId, {
+        id: messageId,
+        channel: 'email',
+        provider: 'resend',
+      });
+
+      const templates = {
+        loginOtp: {
+          kind: 'otp' as const,
+          email: {
+            subject: (input: { code: string }): string =>
+              `Your login code is ${input.code} (expires in 5 minutes)`,
+            text: (input: { code: string }): string => `Code: ${input.code}. Do not share it.`,
+          },
+        },
+      };
+
+      const event: StatusEvent = {
+        providerId,
+        status: 'failed',
+        error: `Content rejected: subject "Your login code is ${secretCode} (expires in 5 minutes)" violates policy`,
+        at: '2026-09-20T12:05:00.000Z',
+      };
+
+      const handleWebhook = createWebhookHandler({
+        providers: { email: providerEmitting('resend', event) },
+        kv,
+        templates,
+      });
+
+      const response = await handleWebhook(
+        'resend',
+        new Request('http://localhost/webhooks/resend', { method: 'POST', body: '{}' })
+      );
+      expect(response.status).toBe(200);
+
+      const updated = await store.get(messageId);
+      const storedError = updated?.chain.attempts[0]?.error;
+      expect(storedError).toBeDefined();
+      expect(storedError).not.toContain(secretCode);
+      expect(storedError).toContain('[redacted]');
+      // Only the rendered content is removed; the vendor's own diagnosis survives.
+      expect(storedError).toContain('violates policy');
+      expect(JSON.stringify(updated)).not.toContain(secretCode);
+    });
+
+    it('redacts content echoed by a vendor error against a WhatsApp template config after in:<id> expiry', async () => {
+      const store = kvStatusStore(kv);
+      const messageId = 'msg_01J9REDACT00000000000WA';
+      const providerId = 'wamid.HBgL_01J9REDACT_WA';
+      const secretCode = '480221';
+
+      await store.create(singleAttemptRecord(messageId, providerId, 'loginOtp', 'whatsapp', 'meta-wa'));
+      await store.indexProviderId(providerId, {
+        id: messageId,
+        channel: 'whatsapp',
+        provider: 'meta-wa',
+      });
+
+      const templates = {
+        loginOtp: {
+          kind: 'notification' as const,
+          whatsapp: {
+            text: (input: { code: string }): string =>
+              `Your verification code is ${input.code}, please keep it private`,
+          },
+        },
+      };
+
+      const event: StatusEvent = {
+        providerId,
+        status: 'failed',
+        error: `(#131047) Message body "Your verification code is ${secretCode}, please keep it private" was undeliverable`,
+        at: '2026-09-20T12:05:00.000Z',
+      };
+
+      const handleWebhook = createWebhookHandler({
+        providers: { whatsapp: providerEmitting('meta-wa', event) },
+        kv,
+        templates,
+      });
+
+      const response = await handleWebhook(
+        'meta-wa',
+        new Request('http://localhost/webhooks/meta-wa', { method: 'POST', body: '{}' })
+      );
+      expect(response.status).toBe(200);
+
+      const updated = await store.get(messageId);
+      const storedError = updated?.chain.attempts[0]?.error;
+      expect(storedError).toBeDefined();
+      expect(storedError).not.toContain(secretCode);
+      expect(storedError).toContain('[redacted]');
+      expect(storedError).toContain('was undeliverable');
+      expect(JSON.stringify(updated)).not.toContain(secretCode);
+    });
+
+    it('leaves a vendor error intact when a WhatsApp params template offers no literal text to anchor on', async () => {
+      const store = kvStatusStore(kv);
+      const messageId = 'msg_01J9REDACT000000000PARAM';
+      const providerId = 'wamid.HBgL_01J9REDACT_PARAM';
+
+      await store.create(singleAttemptRecord(messageId, providerId, 'loginOtp', 'whatsapp', 'meta-wa'));
+      await store.indexProviderId(providerId, {
+        id: messageId,
+        channel: 'whatsapp',
+        provider: 'meta-wa',
+      });
+
+      const templates = {
+        loginOtp: {
+          kind: 'otp' as const,
+          whatsapp: {
+            template: 'login_otp',
+            language: 'en',
+            params: (input: { code: string }): string[] => [input.code],
+          },
+        },
+      };
+
+      const event: StatusEvent = {
+        providerId,
+        status: 'failed',
+        error: 'Rate limit exceeded, try again later',
+        at: '2026-09-20T12:05:00.000Z',
+      };
+
+      const handleWebhook = createWebhookHandler({
+        providers: { whatsapp: providerEmitting('meta-wa', event) },
+        kv,
+        templates,
+      });
+
+      const response = await handleWebhook(
+        'meta-wa',
+        new Request('http://localhost/webhooks/meta-wa', { method: 'POST', body: '{}' })
+      );
+      expect(response.status).toBe(200);
+
+      const updated = await store.get(messageId);
+      expect(updated?.chain.attempts[0]?.error).toBe('Rate limit exceeded, try again later');
     });
   });
 });
