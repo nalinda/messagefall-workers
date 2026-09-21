@@ -175,14 +175,22 @@ function isStatusProgression(att: Attempt, event: StatusEvent): boolean {
 }
 
 /**
+ * Whether `att` is the attempt a status event/reference is about: either it already carries the
+ * event's own `providerId`, or it is the attempt on the same channel and provider the reference
+ * resolved to (the only match available before an attempt has a `providerId` indexed at all).
+ */
+function isMatchingAttempt(att: Attempt, event: StatusEvent, ref: ProviderRef): boolean {
+  return (
+    att.providerId === event.providerId ||
+    (att.channel === ref.channel && att.provider === ref.provider)
+  );
+}
+
+/**
  * Updates a single attempt if it matches the event and provider reference.
  */
 function updateAttempt(att: Attempt, event: StatusEvent, ref: ProviderRef): Attempt {
-  const hasMatched =
-    att.providerId === event.providerId ||
-    (att.channel === ref.channel && att.provider === ref.provider);
-
-  if (!hasMatched || !isStatusProgression(att, event)) {
+  if (!isMatchingAttempt(att, event, ref) || !isStatusProgression(att, event)) {
     return att;
   }
 
@@ -211,11 +219,7 @@ function applyStatusUpdate(
   event: StatusEvent,
   ref: ProviderRef
 ): { updatedRecord: MessageRecord; isChain: boolean; hasChanged: boolean } {
-  const isChain = record.chain.attempts.some(
-    (att) =>
-      att.providerId === event.providerId ||
-      (att.channel === ref.channel && att.provider === ref.provider)
-  );
+  const isChain = record.chain.attempts.some((att) => isMatchingAttempt(att, event, ref));
 
   const chainAttempts = record.chain.attempts.map((att) => updateAttempt(att, event, ref));
   const alwaysAttempts = record.always.map((att) => updateAttempt(att, event, ref));
