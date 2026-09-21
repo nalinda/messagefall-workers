@@ -236,7 +236,7 @@ await messages.send('loginCode', { to, locale, input, delivery: { always: [] } }
 
 A channel that appears in both `fallback` and `always` is sent once, as part of `always`. A template that defines none of the resolved channels is a send-time error with a clear message.
 
-Send calls carry `to` (the E.164 phone number) and an optional `email` field (`{ to, email?, ... }`) so a template can reach an inbox. When the resolved policy includes `email` and no `email` address is provided, the email channel is dropped from the policy with a logged `send.channel-skipped` event rather than failing the send, and phone channels proceed normally.
+Send calls carry `to` (the E.164 phone number) and an optional `email` field (`{ to, email?, ... }`) so a template can reach an inbox. When the resolved policy includes `email` and no `email` address is provided, the email channel is dropped from the policy with a logged `send.channel-skipped` event rather than failing the send, and phone channels proceed normally. The one exception is when dropping it would leave nothing to send on — an email-only template called without an address: that throws `PolicyError`, the same fault an unsatisfiable policy throws, rather than creating a record that would sit `pending` for ever with no provider ever called.
 
 Fallback never re-renders with a different input. The same input renders each channel's version of the same template.
 
@@ -344,7 +344,7 @@ The top-level `status` is the chain's status, or the worst of the `always` attem
 
 The status record itself holds no message content, but the fallback chain has to be able to re-render the message on the next channel once the first one fails. So every send with a chain writes its **render input** to a second KV key, `in:<id>`, and hands the same payload to the fallback timer. That payload is the raw input you passed to `send`, plus the recipient and locale — for an `otp` template it therefore contains **the code itself, in plaintext**.
 
-It is stored **unencrypted**, for the duration of the chain timeout (the key's TTL: thirty seconds for `otp` and five minutes for `notification` by default), and deleted as soon as the chain reaches a terminal state. Anyone who can read that KV namespace can read the code while the key is there.
+It is stored **unencrypted**, for the duration of the chain timeout, and deleted as soon as the chain reaches a terminal state. The key's TTL is the chain timeout rounded up to whole seconds, floored at KV's sixty-second minimum — so **sixty seconds for `otp`** (whose thirty-second timeout is shorter than KV will accept) and five minutes for `notification`, by default. Anyone who can read that KV namespace can read the code while the key is there.
 
 Encrypting `in:<id>` is a known gap, **deliberately deferred past 0.1.0**. Until it is closed, treat the messaging Worker's KV namespace as holding secrets: do not share it with anything that does not need it, and keep the chain timeouts no longer than your fallback actually requires.
 
