@@ -133,6 +133,9 @@ describe('createMessaging.handleWebhook observer failures', () => {
       const record = await messaging.status(id);
       expect(record!.chain.attempts[0].status).toBe('read');
       expect(captured.logs.some((line) => line.includes(id))).toBe(true);
+      // Distinct from the record-write and providerId-index failures, which used to share this
+      // one's event name and left an operator unable to tell the three apart.
+      expect(captured.logs.some((line) => line.includes('send.observer-failed'))).toBe(true);
     } finally {
       captured.restore();
     }

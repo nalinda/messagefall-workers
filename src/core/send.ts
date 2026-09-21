@@ -570,13 +570,18 @@ async function deliverGuarded(
   try {
     await deliver(deps, req, id, policy);
   } catch {
-    defaultLogger.error('send.attempt', { id });
+    defaultLogger.error('send.persist-failed', { id });
   }
 }
 
 /**
  * Indexes the providerId of one attempt. The send has already happened, so a failure is logged
  * (without content) and swallowed rather than allowed to fail the send.
+ *
+ * Its own event name, distinct from the record-write failure (`send.persist-failed`) and the
+ * throwing observer (`send.observer-failed`): the consequence is specific — this attempt's
+ * delivery-status webhook will arrive with a providerId nothing can be matched to — and an
+ * operator has to be able to tell the three apart.
  */
 async function indexAttempt(deps: SendDeps, id: string, attempt: Attempt): Promise<void> {
   const { channel, provider } = attempt;
@@ -605,7 +610,7 @@ export async function notifyStatus(
   try {
     await onStatus?.(event);
   } catch {
-    defaultLogger.warn('send.attempt', {
+    defaultLogger.warn('send.observer-failed', {
       id: event.id,
       channel: event.channel,
       provider: event.provider,

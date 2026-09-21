@@ -940,6 +940,9 @@ describe('Issue #3: createMessaging send pipeline', () => {
         expect(record!.chain.status).not.toBe('failed');
         expect(record!.status).toBe('sent');
         expect(captured.logs.some((line) => line.includes(id))).toBe(true);
+        // Its own event name: an operator must be able to tell a lost record write apart from a
+        // providerId that could not be indexed and from a throwing onStatus observer.
+        expect(captured.logs.some((line) => line.includes('send.persist-failed'))).toBe(true);
         expect(captured.logs.some((line) => line.includes('hello'))).toBe(false);
       } finally {
         captured.restore();

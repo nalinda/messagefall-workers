@@ -36,6 +36,8 @@ export interface LogFields {
 export type LogEvent =
   | 'send.start'
   | 'send.attempt'
+  | 'send.persist-failed'
+  | 'send.observer-failed'
   | 'send.retry'
   | 'send.channel-skipped'
   | 'webhook.applied'
