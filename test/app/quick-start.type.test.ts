@@ -17,10 +17,12 @@
    deprecated Zod spelling the snippet still uses. */
 /* eslint-disable @typescript-eslint/no-unsafe-return, sonarjs/deprecation */
 
+import type { Fetcher } from '@cloudflare/workers-types';
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
 
 import { createMessagingApp } from '../../src/app/hono.js';
+import { createMessagingClient } from '../../src/client/index.js';
 import { defineTemplates, type MessagingEnv } from '../../src/index.js';
 import { gmail } from '../../src/providers/gmail/index.js';
 import { httpSms } from '../../src/providers/http-sms/index.js';
@@ -101,6 +103,26 @@ const app = createMessagingApp<Env>({
 
 /* eslint-enable @typescript-eslint/no-unsafe-return, sonarjs/deprecation */
 
+// --- README: "Overriding the policy" -------------------------------------------------------
+//
+// The snippet calls `messages.send(...)` in the CLIENT's two-argument form. Pinned here with the
+// binding it assumes, so the form and the two `delivery` shorthands cannot drift the way the
+// quick start once did. (`accountLocked` in the README stands in for any notification template;
+// `matchFound` above is the one this fixture has.)
+
+async function overridingThePolicy(
+  binding: Fetcher,
+  to: string,
+  locale: string,
+  input: { title: string; url: string }
+): Promise<void> {
+  const messages = createMessagingClient<typeof templates>({ binding });
+
+  // default is WhatsApp -> SMS, always email
+  await messages.send('matchFound', { to, locale, input, delivery: 'all' }); // all three at once
+  await messages.send('matchFound', { to, locale, input, delivery: { always: [] } }); // chain only, no email
+}
+
 describe('README quick start', () => {
   it('compiles and builds a mountable Hono app', () => {
     expect(typeof app.fetch).toBe('function');
@@ -108,5 +130,9 @@ describe('README quick start', () => {
 
   it('defines the templates the quick start names', () => {
     expect(Object.keys(templates)).toEqual(['loginCode', 'matchFound']);
+  });
+
+  it('type-checks the "Overriding the policy" snippet', () => {
+    expect(typeof overridingThePolicy).toBe('function');
   });
 });

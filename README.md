@@ -40,7 +40,7 @@ On Workers that has some specific shape:
 - **Vendors change.** A gateway that is cheapest this year is not next year. Swapping one should touch a config line, not the pipeline.
 - **Codes must never be logged.** A one-time code passing through a messaging layer is a secret in transit.
 
-This package handles those four things and leaves the rest to you.
+This package handles those five things and leaves the rest to you.
 
 ## Features
 
@@ -256,6 +256,10 @@ Each level may set `fallback`, `always`, or both; unset parts inherit from the n
 - `delivery: { fallback: ['sms'] , always: [] }` sends SMS only, ignoring the default's email.
 
 ```ts
+// `messages` here is the client from `createMessagingClient` (see "Calling it from another
+// Worker" below); the core sender created by `createMessaging` takes one object instead.
+const messages = createMessagingClient<typeof templates>({ binding: env.MESSAGES });
+
 // default is WhatsApp -> SMS, always email
 await messages.send('accountLocked', { to, locale, input, delivery: 'all' }); // all three at once
 await messages.send('loginCode', { to, locale, input, delivery: { always: [] } }); // chain only, no email
@@ -363,9 +367,13 @@ Every send gets a message id. `GET /status/:id` returns:
     ]
   },
   "always": [{ "channel": "email", "providerId": "re_...", "status": "delivered", "at": "..." }],
-  "status": "sent"
+  "status": "sent",
+  "sealed": true
 }
 ```
+
+`sealed` is an internal marker: it records that this chain's fallback processing has already run
+to its end, so a repeated webhook or timer cannot advance it again. Consumers should ignore it.
 
 The top-level `status` is the chain's status, or the worst of the `always` attempts when there is no chain. Records live in KV with a TTL, seven days by default. There is no history beyond that; if you want reporting, subscribe with `onStatus` in the configuration and write wherever you like.
 
