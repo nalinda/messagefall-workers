@@ -43,7 +43,12 @@ import {
   type StatusCallbackEvent,
   type ValidatedSendRequest,
 } from './send.js';
-import { type Attempt, type MessageRecord, type StatusStore } from './status.js';
+import {
+  type Attempt,
+  isConfirmedDelivery,
+  type MessageRecord,
+  type StatusStore,
+} from './status.js';
 import { chainTimeoutMs, type FallbackTimerClient, resolveTimer } from './timer.js';
 
 const logger = createLogger();
@@ -169,11 +174,11 @@ function shouldSkipAdvancement(
   if (!record || record.sealed === true) {
     return true;
   }
-  if (record.chain.status === 'delivered' || record.chain.status === 'read') {
+  if (isConfirmedDelivery(record.chain.status)) {
     return true;
   }
   const lastAttempt = record.chain.attempts.at(-1);
-  if (!lastAttempt || lastAttempt.status === 'delivered' || lastAttempt.status === 'read') {
+  if (!lastAttempt || isConfirmedDelivery(lastAttempt.status)) {
     return true;
   }
   return reason === 'failed' && lastAttempt.status !== 'failed';

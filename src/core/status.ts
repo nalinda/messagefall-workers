@@ -218,6 +218,24 @@ const TERMINAL_CHAIN_STATUSES: ReadonlySet<DeliveryStatus | 'pending'> = new Set
   'failed',
 ]);
 
+/**
+ * Whether a status is a confirmed delivery: the message demonstrably reached the recipient.
+ *
+ * Narrower than {@link isTerminalChainStatus}, and the distinction matters — a `failed` chain is
+ * terminal but has NOT been delivered, so it may still advance onto its next channel, while a
+ * `delivered` / `read` one must never be sent again. Every caller that decides "may this still
+ * fall back?" (`shouldSkipAdvancement`, the webhook bridge's pre-check) reads it from here, so
+ * those decisions cannot drift apart from one another.
+ *
+ * @param status - An attempt's or the chain's status.
+ * @returns True for `delivered` and `read`.
+ */
+export function isConfirmedDelivery(
+  status: DeliveryStatus | 'pending'
+): status is 'delivered' | 'read' {
+  return status === 'delivered' || status === 'read';
+}
+
 function getStatusPrecedence(status: DeliveryStatus): number {
   switch (status) {
     case 'failed': {
@@ -256,7 +274,7 @@ function confirmedDelivery(attempts: Attempt[]): 'delivered' | 'read' | undefine
       best = attempt.status;
     }
   }
-  return best === 'delivered' || best === 'read' ? best : undefined;
+  return best !== undefined && isConfirmedDelivery(best) ? best : undefined;
 }
 
 /**
