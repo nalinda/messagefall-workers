@@ -824,6 +824,76 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       const unchanged = await store.get(messageId);
       expect(unchanged?.chain.attempts).toHaveLength(2);
     });
+
+    it('fires the terminal onStatus once when advanceChain is called twice on an exhausted chain', async () => {
+      // `advanceChain` is exported, so the webhook path's own `hasChanged` guard is not the only
+      // way in: a caller invoking it directly twice for the same terminal failure used to re-run
+      // `finalizeExhaustion` and emit a second terminal event. `chain.status` cannot tell the two
+      // calls apart — it already reads 'failed' on the first, legitimate call — so the record's
+      // `sealed` flag is what makes this idempotent.
+      const smsProvider = recordingProvider('sms', 'twilio-sms');
+
+      const messageId = 'msg_01J9FB00000000000000000013';
+      await store.create({
+        id: messageId,
+        template: 'otpVerification',
+        kind: 'otp',
+        policy: { fallback: ['whatsapp', 'sms'], always: [] },
+        chain: {
+          status: 'failed',
+          attempts: [
+            {
+              channel: 'whatsapp',
+              provider: 'meta-wa',
+              status: 'failed',
+              error: 'WA fail',
+              at: '2026-09-20T10:00:00.000Z',
+            },
+            {
+              channel: 'sms',
+              provider: 'twilio-sms',
+              status: 'failed',
+              error: 'SMS fail',
+              at: '2026-09-20T10:00:05.000Z',
+            },
+          ],
+        },
+        always: [],
+        status: 'failed',
+        createdAt: '2026-09-20T10:00:00.000Z',
+        updatedAt: '2026-09-20T10:00:05.000Z',
+      });
+
+      const notified: { channel: string; status: string }[] = [];
+      const args: AdvanceChainArgs = {
+        id: messageId,
+        reason: 'failed',
+        env: { MESSAGES_KV: kv },
+        options: {
+          templates: testTemplates,
+          providers: { sms: smsProvider },
+          timer: mockTimer,
+          onStatus: (event) => {
+            notified.push({ channel: event.channel, status: event.status });
+          },
+        },
+        store,
+      };
+
+      await advanceChain(args);
+      expect(notified).toEqual([{ channel: 'sms', status: 'failed' }]);
+      const afterFirst = await store.get(messageId);
+      expect(afterFirst?.sealed).toBe(true);
+
+      await advanceChain(args);
+      await advanceChain(args);
+
+      expect(notified).toEqual([{ channel: 'sms', status: 'failed' }]);
+      expect(smsProvider.calls).toHaveLength(0);
+      const unchanged = await store.get(messageId);
+      expect(unchanged?.chain.attempts).toHaveLength(2);
+      expect(unchanged?.chain.status).toBe('failed');
+    });
   });
 
   describe('Fallback advancement via timeout reason', () => {

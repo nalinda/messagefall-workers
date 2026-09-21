@@ -162,7 +162,14 @@ function shouldSkipAdvancement(
   record: MessageRecord | null,
   reason: 'failed' | 'timeout'
 ): boolean {
-  if (!record || record.chain.status === 'delivered' || record.chain.status === 'read') {
+  // `sealed` first, and on its own: a chain whose fallback processing already ran to the end is
+  // never advanced again, whatever its status or last attempt say. `advanceChain` is exported,
+  // so a caller can invoke it twice for the same terminal event; without this the second call
+  // re-runs `finalizeExhaustion` and fires a duplicate terminal `onStatus`.
+  if (!record || record.sealed === true) {
+    return true;
+  }
+  if (record.chain.status === 'delivered' || record.chain.status === 'read') {
     return true;
   }
   const lastAttempt = record.chain.attempts.at(-1);
@@ -260,18 +267,37 @@ async function finalizeMissingInput(
 /**
  * This module's call into the shared terminal-state cleanup, with the timer resolved the same
  * way every other path here resolves it.
+ *
+ * Every path that ends a chain here goes through this, so this is also where the record is
+ * marked {@link MessageRecord.sealed} — the flag `shouldSkipAdvancement` reads to no-op a
+ * repeated `advanceChain` for the same already-finished chain.
  */
 async function release(
   args: AdvanceChainArgs,
   record: MessageRecord,
   kv: KVNamespace | undefined
 ): Promise<void> {
+  await seal(args);
   await releaseChain(
     resolveTimer(args.env, args.options.timer),
     kv,
     args.id,
     record.policy.fallback
   );
+}
+
+/**
+ * Marks the record as sealed. Best effort: the chain's terminal outcome is already recorded and
+ * notified by the time this runs, so a KV fault (or a record that has since expired) must not
+ * turn a finished advance into a thrown one. The worst case of a lost write is the behaviour
+ * that existed before the flag.
+ */
+async function seal(args: AdvanceChainArgs): Promise<void> {
+  try {
+    await args.store.update(args.id, (current) => ({ ...current, sealed: true }));
+  } catch {
+    // Best-effort sealing
+  }
 }
 
 /**

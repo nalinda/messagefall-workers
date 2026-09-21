@@ -75,6 +75,18 @@ export interface MessageRecord {
    */
   status: DeliveryStatus | 'pending';
   /**
+   * Whether this chain's fallback processing is finished for good: every channel it was going to
+   * try has been tried, the terminal outcome has been recorded and notified, and the timer and
+   * stored render input have been released. Set once, by the fallback path's own release step.
+   *
+   * Deliberately separate from `chain.status`, which cannot answer the same question: a chain's
+   * status legitimately reads `'failed'` on the very first advance too (the failing attempt is
+   * written to the record before the advance it triggers is even invoked), so status alone
+   * cannot tell "just finalized on this call" from "already finalized on a previous one". This
+   * flag can, which is what makes `advanceChain` idempotent when called directly.
+   */
+  sealed?: boolean;
+  /**
    * ISO 8601 creation timestamp.
    */
   createdAt: string;
