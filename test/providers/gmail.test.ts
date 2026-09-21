@@ -203,6 +203,71 @@ describe('Gmail provider (Issue #20)', () => {
     expect(sendCount).toBe(2);
   });
 
+  it('floors the token cache expirationTtl at 60 seconds for a short-lived token', async () => {
+    // expires_in 30 leaves a usable life of 1s after the safety buffer, and KV rejects an
+    // expirationTtl below its own 60-second minimum outright.
+    const puts: { key: string; ttl: number | undefined }[] = [];
+    const recordingCache = {
+      get: () => Promise.resolve(null),
+      put: (key: string, _value: string, opts?: { expirationTtl?: number }) => {
+        puts.push({ key, ttl: opts?.expirationTtl });
+        return Promise.resolve();
+      },
+      delete: () => Promise.resolve(),
+    } as unknown as GmailConfig['tokenCache'];
+
+    mockFetchHandler((url) => {
+      if (url.includes('oauth2.googleapis.com/token')) {
+        return Response.json({ access_token: 'ya29.short_lived', expires_in: 30 }, { status: 200 });
+      }
+      if (url.includes('gmail.googleapis.com/gmail/v1/users/me/messages/send')) {
+        return Response.json({ id: 'gmail_short_ttl' }, { status: 200 });
+      }
+      return new Response('Not Found', { status: 404 });
+    });
+
+    const provider = gmail({ ...testConfig, tokenCache: recordingCache });
+    const result = await provider.send(sampleEmail);
+
+    expect(result.ok).toBe(true);
+    expect(puts).toHaveLength(1);
+    expect(puts[0]?.ttl).toBe(60);
+  });
+
+  it('still reports the send as successful when the token cache write fails', async () => {
+    // The access token was obtained; only the cross-isolate cache write failed. Failing the send
+    // would report a retryable failure for a message that could have gone out.
+    const failingCache = {
+      get: () => Promise.resolve(null),
+      put: () => Promise.reject(new Error('KV PUT failed: quota exceeded')),
+      delete: () => Promise.resolve(),
+    } as unknown as GmailConfig['tokenCache'];
+
+    let sendCount = 0;
+    mockFetchHandler((url) => {
+      if (url.includes('oauth2.googleapis.com/token')) {
+        return Response.json(
+          { access_token: 'ya29.cache_write_fails', expires_in: 3600 },
+          { status: 200 }
+        );
+      }
+      if (url.includes('gmail.googleapis.com/gmail/v1/users/me/messages/send')) {
+        sendCount++;
+        return Response.json({ id: 'gmail_cache_write_failed' }, { status: 200 });
+      }
+      return new Response('Not Found', { status: 404 });
+    });
+
+    const provider = gmail({ ...testConfig, tokenCache: failingCache });
+    const result = await provider.send(sampleEmail);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.providerId).toBe('gmail_cache_write_failed');
+    }
+    expect(sendCount).toBe(1);
+  });
+
   it('encodes text-only email as base64url MIME with required headers and CRLF line endings', async () => {
     const provider = gmail(testConfig);
 

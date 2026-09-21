@@ -52,7 +52,10 @@ export type LogEvent =
   | 'timer.gave-up'
   | 'timer.off'
   | 'timer.options-replaced'
-  | 'timer.unconfigured';
+  | 'timer.unconfigured'
+  // Provider-owned events. A provider must not write to the console directly (the lint rule in
+  // eslint.config.js bans it), so anything it needs to report is named here too.
+  | 'provider.token-cache-failed';
 
 /**
  * Supported log levels.

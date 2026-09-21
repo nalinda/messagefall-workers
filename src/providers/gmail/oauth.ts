@@ -10,6 +10,16 @@
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 
+import { createLogger } from '../../core/logger.js';
+
+const logger = createLogger();
+
+/**
+ * KV's minimum `expirationTtl`, in seconds. A shorter value is rejected outright, so a token
+ * whose remaining life is under a minute would otherwise make the cache write throw.
+ */
+const KV_MIN_EXPIRATION_TTL = 60;
+
 /**
  * Options required for Google OAuth2 token exchange.
  */
@@ -75,6 +85,25 @@ export function createGmailTokenManager(options: GmailOAuthOptions): GmailTokenM
     return cacheKeyPromise;
   }
 
+  /**
+   * Writes the freshly exchanged token to the cross-isolate cache. Best effort, deliberately:
+   * by the time this runs a valid access token is already in hand and in memory, so a rejected
+   * KV write must not turn a successful exchange into a thrown one — the caller would report a
+   * retryable send failure for a send that could have gone out. The only cost of a lost write
+   * is that the next isolate exchanges the refresh token again.
+   */
+  async function cacheToken(accessToken: string, ttlSeconds: number): Promise<void> {
+    try {
+      const key = await getCacheKey();
+      await options.tokenCache?.put(key, accessToken, { expirationTtl: ttlSeconds });
+    } catch (error) {
+      logger.warn('provider.token-cache-failed', {
+        provider: 'gmail',
+        errorCode: error instanceof Error ? error.name : 'UnknownError',
+      });
+    }
+  }
+
   async function exchangeRefreshToken(): Promise<string> {
     const params = new URLSearchParams({
       grant_type: 'refresh_token',
@@ -114,16 +143,18 @@ export function createGmailTokenManager(options: GmailOAuthOptions): GmailTokenM
 
     const data = (await res.json()) as { access_token: string; expires_in?: number };
     const expiresIn = typeof data.expires_in === 'number' ? data.expires_in : 3600;
-    const ttlSeconds = Math.max(expiresIn - 60, 1);
+    // The token's usable life, with a safety buffer for clock skew and the request in flight.
+    const lifetimeSeconds = Math.max(expiresIn - 60, 1);
 
     inMemoryToken = data.access_token;
-    inMemoryExpiresAt = Date.now() + ttlSeconds * 1000;
+    inMemoryExpiresAt = Date.now() + lifetimeSeconds * 1000;
 
     if (options.tokenCache) {
-      const key = await getCacheKey();
-      await options.tokenCache.put(key, data.access_token, {
-        expirationTtl: ttlSeconds,
-      });
+      // Floored at KV's own minimum, which the usable life can fall below for a short-lived
+      // token. A cached entry outliving the token by up to a minute is harmless: the send path
+      // invalidates and re-exchanges on a 401, which is exactly what an expired one produces.
+      const ttlSeconds = Math.max(lifetimeSeconds, KV_MIN_EXPIRATION_TTL);
+      await cacheToken(data.access_token, ttlSeconds);
     }
 
     return data.access_token;
