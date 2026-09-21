@@ -5,7 +5,13 @@
  */
 
 import type { DeliveryOverride } from './core/policy.js';
-import type { Channel, RenderedEmail, RenderedSms, RenderedWhatsApp } from './providers/types.js';
+import type {
+  Channel,
+  RenderedEmail,
+  RenderedSms,
+  RenderedWhatsApp,
+  TemplateKind,
+} from './providers/types.js';
 import type { StandardSchemaIssue, StandardSchemaV1 } from './types.js';
 
 /**
@@ -50,7 +56,7 @@ export interface EmailTemplateConfig<In> {
  */
 export interface TemplateDef<In = unknown> {
   input: StandardSchemaV1<unknown, In>;
-  kind: 'otp' | 'notification';
+  kind: TemplateKind;
   whatsapp?: WhatsAppTemplateConfig<In>;
   sms?: (input: In, locale: Locale) => string;
   email?: EmailTemplateConfig<In>;

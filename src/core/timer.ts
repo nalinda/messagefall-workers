@@ -14,6 +14,7 @@
 import type { DurableObjectNamespace } from '@cloudflare/workers-types';
 
 import type { MessagingEnv } from '../env.js';
+import type { TemplateKind } from '../providers/types.js';
 import type { Templates } from '../templates.js';
 import { createLogger } from './logger.js';
 import type { MessagingOptions } from './messaging.js';
@@ -55,7 +56,7 @@ export interface FallbackTimerStub {
 /**
  * Default chain timeout per template kind, in milliseconds.
  */
-export const DEFAULT_CHAIN_TIMEOUT_MS: Readonly<Record<'otp' | 'notification', number>> = {
+export const DEFAULT_CHAIN_TIMEOUT_MS: Readonly<Record<TemplateKind, number>> = {
   otp: 30_000,
   notification: 300_000,
 };
@@ -68,7 +69,7 @@ export const DEFAULT_CHAIN_TIMEOUT_MS: Readonly<Record<'otp' | 'notification', n
  * @returns Milliseconds before the chain moves on when no status has arrived.
  */
 export function chainTimeoutMs(
-  kind: 'otp' | 'notification',
+  kind: TemplateKind,
   timeout?: { otp?: number; notification?: number }
 ): number {
   return kind === 'otp'

@@ -11,7 +11,7 @@
  * @module
  */
 
-import type { Channel, DeliveryStatus } from '../providers/types.js';
+import type { Channel, DeliveryStatus, TemplateKind } from '../providers/types.js';
 
 /**
  * Identifier and telemetry fields allowed on structured log lines.
@@ -20,7 +20,7 @@ import type { Channel, DeliveryStatus } from '../providers/types.js';
 export interface LogFields {
   id?: string;
   template?: string;
-  kind?: 'otp' | 'notification';
+  kind?: TemplateKind;
   channel?: Channel;
   provider?: string;
   providerId?: string;

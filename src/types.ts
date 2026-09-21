@@ -14,6 +14,7 @@ export type {
   RenderedWhatsApp,
   SendResult,
   StatusEvent,
+  TemplateKind,
 } from './providers/types.js';
 export { CHANNELS } from './providers/types.js';
 export type {
@@ -26,11 +27,6 @@ export type {
   WhatsAppTemplateConfig,
 } from './templates.js';
 export { definedChannels, defineTemplates, render, TemplateValidationError } from './templates.js';
-
-/**
- * Template kind: 'otp' for one-time codes, 'notification' for general alerts.
- */
-export type TemplateKind = 'otp' | 'notification';
 
 /**
  * Issue reported by standard schema validation.

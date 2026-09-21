@@ -6,7 +6,7 @@
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 
-import type { Channel, DeliveryStatus } from '../providers/types.js';
+import type { Channel, DeliveryStatus, TemplateKind } from '../providers/types.js';
 import type { DeliveryPolicy } from './policy.js';
 import type { RenderInput } from './render-input.js';
 import { isDurableObjectNamespace, namespaceTimerClient } from './timer.js';
@@ -107,7 +107,7 @@ export interface MessageRecord {
   /**
    * Template classification.
    */
-  kind: 'otp' | 'notification';
+  kind: TemplateKind;
   /**
    * Resolved delivery policy for this send.
    */

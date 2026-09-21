@@ -104,7 +104,8 @@ describe('Provider types and JSDoc documentation', () => {
     expect(content).toMatch(/\/\*\*[\s\S]*?\*\/\s*to:\s*string/);
     expect(content).toMatch(/\/\*\*[\s\S]*?\*\/\s*messageId:\s*string/);
     expect(content).toMatch(/\/\*\*[\s\S]*?\*\/\s*template:\s*string/);
-    expect(content).toMatch(/\/\*\*[\s\S]*?\*\/\s*kind:\s*'otp'\s*\|\s*'notification'/);
+    expect(content).toMatch(/\/\*\*[\s\S]*?\*\/\s*kind:\s*TemplateKind/);
+    expect(content).toMatch(/\/\*\*[\s\S]*?\*\/\s*export type TemplateKind = /);
     expect(content).toMatch(/\/\*\*[\s\S]*?\*\/\s*locale:\s*string/);
 
     // Rendered WhatsApp / SMS / Email field documentation

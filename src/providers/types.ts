@@ -23,6 +23,14 @@ export type Channel = (typeof CHANNELS)[number];
 export type DeliveryStatus = 'sent' | 'delivered' | 'read' | 'failed';
 
 /**
+ * Template kind: 'otp' for sensitive one-time codes, 'notification' for general alerts.
+ *
+ * Declared here, the module every other one can reach without a cycle, and re-exported from
+ * `src/types.ts` as part of the public surface.
+ */
+export type TemplateKind = 'otp' | 'notification';
+
+/**
  * Delivery status event reported by a provider webhook or status mechanism.
  */
 export interface StatusEvent {
@@ -64,9 +72,9 @@ export interface OutboundMeta {
    */
   template: string;
   /**
-   * Template kind: 'otp' for sensitive one-time passwords, 'notification' for general alerts.
+   * Template kind: 'otp' for sensitive one-time codes, 'notification' for general alerts.
    */
-  kind: 'otp' | 'notification';
+  kind: TemplateKind;
   /**
    * Message locale (e.g. 'en', 'es').
    */
