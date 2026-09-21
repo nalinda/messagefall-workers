@@ -36,6 +36,7 @@ import {
   attemptRecorder,
   NO_PROVIDER,
   notifyStatus,
+  providerFor,
   type ProviderSet,
   runChain,
   type SendDeps,
@@ -224,17 +225,7 @@ async function finalizeExhaustion(
  * when the channel has none.
  */
 function providerNameFor(providers: ProviderSet, channel: Channel): string {
-  switch (channel) {
-    case 'whatsapp': {
-      return providers.whatsapp?.name ?? NO_PROVIDER;
-    }
-    case 'sms': {
-      return providers.sms?.name ?? NO_PROVIDER;
-    }
-    case 'email': {
-      return providers.email?.name ?? NO_PROVIDER;
-    }
-  }
+  return providerFor(providers, channel)?.name ?? NO_PROVIDER;
 }
 
 /**

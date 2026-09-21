@@ -187,7 +187,13 @@ function newMessageId(): string {
   return `msg_${ulid()}`;
 }
 
-function providerFor(providers: ProviderSet, channel: Channel): Provider<AnyRendered> | undefined {
+/**
+ * The configured provider for a channel slot, or `undefined` when the channel has none.
+ */
+export function providerFor(
+  providers: ProviderSet,
+  channel: Channel
+): Provider<AnyRendered> | undefined {
   switch (channel) {
     case 'whatsapp': {
       return providers.whatsapp;
