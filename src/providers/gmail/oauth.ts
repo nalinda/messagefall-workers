@@ -221,12 +221,30 @@ export function createGmailTokenManager(options: GmailOAuthOptions): GmailTokenM
       return exchangeRefreshToken();
     },
 
+    /**
+     * Drops the rejected token, in memory and from the cross-isolate cache.
+     *
+     * The delete is best effort for the same reason {@link cacheToken}'s write is, and with a
+     * sharper edge: `send` calls this from the one `await` outside its own try block, so a
+     * rejecting KV delete would propagate out of the provider, be flattened into a plain
+     * `{ ok: false, error }` with no `retryable`, and move the chain to the next channel instead
+     * of retrying with a fresh token — the very failure a 401 refresh exists to avoid. The
+     * in-memory token is already cleared above, so the retry re-exchanges either way; a lost
+     * delete only costs another isolate one 401.
+     */
     async invalidate(): Promise<void> {
       inMemoryToken = null;
       inMemoryExpiresAt = 0;
       if (options.tokenCache) {
-        const key = await getCacheKey();
-        await options.tokenCache.delete(key);
+        try {
+          const key = await getCacheKey();
+          await options.tokenCache.delete(key);
+        } catch (error) {
+          logger.warn('provider.token-cache-failed', {
+            provider: 'gmail',
+            errorCode: error instanceof Error ? error.name : 'UnknownError',
+          });
+        }
       }
     },
   };

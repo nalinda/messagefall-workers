@@ -309,6 +309,42 @@ describe('Gmail provider (Issue #20)', () => {
     expect(sendCount).toBe(1);
   });
 
+  it('still refreshes and retries on a 401 when the token cache delete fails', async () => {
+    // `invalidate()` runs outside `send`'s try block, so a rejecting delete would leave the send
+    // reported as a non-retryable failure and move the chain on instead of retrying.
+    const failingDeleteCache = {
+      get: () => Promise.resolve(null),
+      put: () => Promise.resolve(),
+      delete: () => Promise.reject(new Error('KV DELETE failed: quota exceeded')),
+    } as unknown as GmailConfig['tokenCache'];
+
+    let sendCount = 0;
+    mockFetchHandler((url) => {
+      if (url.includes('oauth2.googleapis.com/token')) {
+        return Response.json(
+          { access_token: `ya29.delete_fails_${String(sendCount)}`, expires_in: 3600 },
+          { status: 200 }
+        );
+      }
+      if (url.includes('gmail.googleapis.com/gmail/v1/users/me/messages/send')) {
+        sendCount++;
+        return sendCount === 1
+          ? Response.json({ error: { code: 401, message: 'Invalid Credentials' } }, { status: 401 })
+          : Response.json({ id: 'gmail_retried_after_delete_failure' }, { status: 200 });
+      }
+      return new Response('Not Found', { status: 404 });
+    });
+
+    const provider = gmail({ ...testConfig, tokenCache: failingDeleteCache });
+    const result = await provider.send(sampleEmail);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.providerId).toBe('gmail_retried_after_delete_failure');
+    }
+    expect(sendCount).toBe(2);
+  });
+
   it('encodes text-only email as base64url MIME with required headers and CRLF line endings', async () => {
     const provider = gmail(testConfig);
 
