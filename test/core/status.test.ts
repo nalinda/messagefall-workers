@@ -6,9 +6,14 @@
  *   and TTL passed to `put` (default 604800s, custom via opts.ttlSeconds).
  * - Overall status derivation tested for chain-present (worst-of-chain, pending before attempts)
  *   and chain-absent policies (worst of always attempts: failed < sent < delivered < read).
- * - Zero-content leakage: renders a template with a known code, drives create and update,
- *   scans every KV key and value, and asserts total absence of code, rendered text, subject,
- *   html, input, and params.
+ * - Zero-content leakage, for what the status store itself writes: renders a template with a
+ *   known code, drives create and update through this store, then scans the KV namespace and
+ *   asserts no code, rendered text, subject, html, input or params landed in it. The fixture
+ *   writes nothing but the store's own `msg:<id>` and `pid:<providerId>` entries, so that is
+ *   the scope of the guarantee — not the namespace a real send leaves behind. A real send also
+ *   writes the raw plaintext render input to `in:<id>` here, which is a deliberate, documented
+ *   gap (the README's Delivery status section, and the CHANGELOG's known limitations) and is
+ *   not covered by this suite.
  * - MessageRecord and Attempt shapes are verified and exported.
  */
 
