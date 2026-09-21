@@ -8,6 +8,7 @@ import type { DurableObjectNamespace, KVNamespace } from '@cloudflare/workers-ty
 
 import type { MessagingOptions } from './core/messaging.js';
 import { providerSetProblems } from './core/provider-set.js';
+import { isDurableObjectNamespace } from './core/timer.js';
 import { type Channel, CHANNELS } from './providers/types.js';
 import { type TemplateDef, validateTemplateDef } from './templates.js';
 
@@ -37,22 +38,18 @@ function checkKvNamespace(val: unknown): string | null {
   return null;
 }
 
-function hasNamespaceMethod(val: Record<string, unknown>): boolean {
-  if (typeof val.idFromName === 'function') return true;
-  if (typeof val.idFromString === 'function') return true;
-  if (typeof val.newUniqueId === 'function') return true;
-  return typeof val.get === 'function';
-}
-
-function isDurableObjectNamespace(val: Record<string, unknown>): boolean {
-  return hasNamespaceMethod(val);
-}
-
+/**
+ * Deliberately the very same predicate `resolveTimer` uses, imported rather than restated: a
+ * looser check here would pass a binding at startup that `resolveTimer` then refuses to adapt —
+ * a `KVNamespace` bound as `FALLBACK_TIMER`, say, which would come back out as a
+ * `FallbackTimerClient` with no `arm` or `cancel` and turn timed fallback off in silence. One
+ * predicate means a binding either passes validation and works, or fails loudly at startup.
+ */
 function checkFallbackTimer(val: unknown): string | null {
   if (val === undefined) {
     return null;
   }
-  return isRecord(val) && isDurableObjectNamespace(val)
+  return isDurableObjectNamespace(val)
     ? null
     : 'FALLBACK_TIMER must be a valid DurableObjectNamespace';
 }

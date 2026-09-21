@@ -140,6 +140,30 @@ describe('validateEnv startup validation (Issue #13)', () => {
     expect(() => validateEnv(env, options)).toThrow(/FALLBACK_TIMER/);
   });
 
+  // `resolveTimer` only adapts a binding with both `idFromName` and `get`; anything else comes
+  // back as a client with no `arm`/`cancel`, which turns timed fallback off in silence. Startup
+  // validation shares that one predicate, so a KV namespace wired to the wrong binding is a
+  // loud configuration fault instead.
+  it('throws an error when FALLBACK_TIMER is a KV namespace rather than a Durable Object one', () => {
+    const env = {
+      MESSAGES_KV: memoryKV(),
+      FALLBACK_TIMER: memoryKV(),
+    };
+
+    const options = {
+      templates: pingTemplates,
+      providers: () => ({
+        sms: {
+          name: 'valid-sms',
+          channel: 'sms' as const,
+          send: () => Promise.resolve({ ok: true as const }),
+        },
+      }),
+    };
+
+    expect(() => validateEnv(env, options)).toThrow(/FALLBACK_TIMER/);
+  });
+
   it('throws an error when default delivery policy is malformed', () => {
     const env: MessagingEnv = {
       MESSAGES_KV: memoryKV(),

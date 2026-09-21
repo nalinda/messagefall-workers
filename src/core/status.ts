@@ -47,6 +47,11 @@ export interface FallbackTimerClient {
  * non-object (or absent) binding yields `undefined`, which every timer path treats as "no
  * timer configured".
  *
+ * `isDurableObjectNamespace` is also what `validateEnv` checks `FALLBACK_TIMER` with, so the
+ * "already a client" branch below is only ever reached for an explicit `override` — a test
+ * double, or the `FallbackTimer` object passing itself into its own alarm. A binding that is not
+ * a namespace fails startup validation rather than arriving here as a client with no `arm`.
+ *
  * @param env - Worker bindings, possibly carrying `FALLBACK_TIMER`.
  * @param override - A timer supplied by the caller, taking precedence over the binding.
  * @returns The timer to use, or undefined when there is none.
