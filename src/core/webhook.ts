@@ -17,6 +17,7 @@ import {
   type Attempt,
   chainStatus,
   deriveOverallStatus,
+  isConfirmedDelivery,
   kvStatusStore,
   type MessageRecord,
   type ProviderRef,
@@ -183,7 +184,7 @@ function isStatusProgression(att: Attempt, event: StatusEvent): boolean {
       return false;
     }
     case 'failed': {
-      return event.status === 'delivered' || event.status === 'read';
+      return isConfirmedDelivery(event.status);
     }
   }
 }
