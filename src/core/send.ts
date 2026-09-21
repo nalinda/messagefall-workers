@@ -45,6 +45,7 @@ import {
 } from './status.js';
 import { chainTimeoutMs } from './timer.js';
 import { ulid } from './ulid.js';
+import { errorMessage } from './values.js';
 
 const defaultLogger = createLogger();
 
@@ -185,10 +186,6 @@ export interface ValidatedSendRequest extends SendRequest {
 
 function newMessageId(): string {
   return `msg_${ulid()}`;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function providerFor(providers: ProviderSet, channel: Channel): Provider<AnyRendered> | undefined {

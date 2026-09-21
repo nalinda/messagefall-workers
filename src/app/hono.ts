@@ -16,6 +16,7 @@ import {
 import { PolicyError } from '../core/policy.js';
 import { EmailRecipientError, RecipientError, type SendContext } from '../core/send.js';
 import { announceTimerOff, registerMessagingOptions } from '../core/timer.js';
+import { errorMessage, isRecord } from '../core/values.js';
 import { type MessagingEnv, validateEnv } from '../env.js';
 import { TemplateValidationError } from '../templates.js';
 
@@ -27,20 +28,12 @@ function getExecutionContext(c: { executionCtx: unknown }): SendContext | undefi
   }
 }
 
-function isRecord(val: unknown): val is Record<string, unknown> {
-  return typeof val === 'object' && val !== null;
-}
-
 function isMissingSendFields(body: Record<string, unknown>): boolean {
   return !body.template || !body.to || !body.locale || body.input === undefined;
 }
 
 function isNamedError(err: unknown, name: string): boolean {
   return isRecord(err) && err.name === name;
-}
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 /**

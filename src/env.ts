@@ -9,6 +9,7 @@ import type { DurableObjectNamespace, KVNamespace } from '@cloudflare/workers-ty
 import type { MessagingOptions } from './core/messaging.js';
 import { providerSetProblems } from './core/provider-set.js';
 import { isDurableObjectNamespace } from './core/timer.js';
+import { isRecord } from './core/values.js';
 import { type Channel, CHANNELS } from './providers/types.js';
 import { type TemplateDef, validateTemplateDef } from './templates.js';
 
@@ -20,10 +21,6 @@ export interface MessagingEnv {
   FALLBACK_TIMER?: DurableObjectNamespace;
   MESSAGING_DEV_UNSIGNED?: string;
   [key: string]: unknown;
-}
-
-function isRecord(val: unknown): val is Record<string, unknown> {
-  return typeof val === 'object' && val !== null;
 }
 
 function checkKvNamespace(val: unknown): string | null {

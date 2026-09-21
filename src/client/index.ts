@@ -10,6 +10,7 @@ import type { Fetcher } from '@cloudflare/workers-types';
 
 import { normalizeBasePath } from '../core/base-path.js';
 import type { MessageRecord } from '../core/status.js';
+import { isRecord } from '../core/values.js';
 import type { InputOf, Templates } from '../templates.js';
 
 /**
@@ -108,10 +109,6 @@ export class MessagingClientError extends Error {
     this.name = 'MessagingClientError';
     this.status = status;
   }
-}
-
-function isRecord(val: unknown): val is Record<string, unknown> {
-  return typeof val === 'object' && val !== null;
 }
 
 async function tryParseJsonError(res: {
