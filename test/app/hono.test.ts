@@ -679,31 +679,35 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
       }),
     });
 
+    // Hono's default error handler answers 500 with a fixed body, which would let this test
+    // pass for any failure at all. Surfacing the message is what makes the assertions below
+    // about *what* was reported meaningful.
+    app.onError((err, c) => c.text(err.message, 500));
+
     // Env missing MESSAGES_KV and options have duplicate provider name
     const invalidEnv = {} as MessagingEnv;
 
-    let didFailOrThrow = false;
-    try {
-      const response = await app.fetch(
-        new Request('https://worker.local/send', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            template: 'smsOnly',
-            to: '+94771234567',
-            locale: 'en',
-            input: { message: 'startup-check' },
-          }),
+    const response = await app.fetch(
+      new Request('https://worker.local/send', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          template: 'smsOnly',
+          to: '+94771234567',
+          locale: 'en',
+          input: { message: 'startup-check' },
         }),
-        invalidEnv
-      );
-      if (response.status >= 500) {
-        didFailOrThrow = true;
-      }
-    } catch {
-      didFailOrThrow = true;
-    }
+      }),
+      invalidEnv
+    );
 
-    expect(didFailOrThrow).toBe(true);
+    expect(response.status).toBe(500);
+    const body = await response.text();
+    // Both problems, in one report: validation collects everything it finds rather than
+    // stopping at the first fault, so a misconfigured deployment is fixed in one pass.
+    expect(body).toContain('Missing required binding MESSAGES_KV');
+    expect(body).toContain('same-name');
+    // The route never ran: no record was created and no provider was called.
+    expect(body).not.toContain('startup-check');
   });
 });
