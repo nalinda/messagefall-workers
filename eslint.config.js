@@ -58,15 +58,4 @@ export default [
       'security/detect-non-literal-regexp': 'off',
     },
   },
-  {
-    // Stub and test providers are intentionally simplified for development.
-    files: ['src/providers/stub/**/*.ts', 'src/providers/test/**/*.ts'],
-    rules: {
-      'no-explicit-any': 'off',
-      '@typescript-eslint/no-unused-vars': 'off',
-      '@typescript-eslint/require-await': 'off',
-      'no-async-promise-executor': 'off',
-      'no-floating-promise': 'off',
-    },
-  },
 ];
