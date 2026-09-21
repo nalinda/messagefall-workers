@@ -15,6 +15,7 @@ import type {
   RenderedWhatsApp,
   SendResult,
   StatusEvent,
+  WebhookParseOptions,
 } from '../types.js';
 
 export type ConsoleRendered =
@@ -32,6 +33,14 @@ function templateLabel(template: unknown): string {
   }
   return String(template);
 }
+
+type ConsoleStatusBody = {
+  providerId?: string;
+  id?: string;
+  status: StatusEvent['status'];
+  error?: string;
+  at?: string;
+};
 
 /**
  * Configuration options for creating a console provider.
@@ -57,6 +66,19 @@ export interface ConsoleProviderOptions {
      * Delay in milliseconds before firing the simulated status event.
      */
     afterMs: number;
+  };
+  /**
+   * Optional webhook handler for delivery status updates.
+   */
+  webhook?: {
+    /**
+     * Handshake verification.
+     */
+    verify?(request: Request): Promise<Response | null>;
+    /**
+     * Parse webhook delivery status payload into status events.
+     */
+    parse: (request: Request, options?: WebhookParseOptions) => Promise<StatusEvent[]>;
   };
 }
 
@@ -113,6 +135,19 @@ export function consoleProvider<R = ConsoleRendered>(
         ok: true,
         providerId,
       });
+    },
+    webhook: options.webhook ?? {
+      parse: async (request: Request): Promise<StatusEvent[]> => {
+        const body = (await request.json()) as ConsoleStatusBody | ConsoleStatusBody[];
+        const items = Array.isArray(body) ? body : [body];
+        const at = new Date().toISOString();
+        return items.map((item) => ({
+          providerId: item.providerId ?? item.id ?? '',
+          status: item.status,
+          ...(item.error !== undefined && { error: item.error }),
+          at: item.at ?? at,
+        }));
+      },
     },
   };
 

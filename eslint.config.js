@@ -34,7 +34,7 @@ export default [
   ...errorsOnly(
     node({
       tsconfigRootDir: import.meta.dirname,
-      files: ['src/**/*.ts', 'test/**/*.ts'],
+      files: ['src/**/*.ts', 'test/**/*.ts', 'examples/**/*.ts'],
       runtime: 'worker',
     })
   ),
@@ -42,7 +42,7 @@ export default [
     // unknown is the correct type for genuinely open-shaped data (env
     // bindings, KV values, JSON payloads) — banning it just pushes
     // toward fabricated interfaces or the separately-banned `any`.
-    files: ['src/**/*.ts', 'test/**/*.ts'],
+    files: ['src/**/*.ts', 'test/**/*.ts', 'examples/**/*.ts'],
     rules: {
       '@typescript-eslint/no-restricted-types': 'off',
     },

@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "messagefall-basic-example",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-16",
+  "kv_namespaces": [
+    {
+      "binding": "MESSAGES_KV",
+      "id": "messages-kv-local"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "FALLBACK_TIMER",
+        "class_name": "FallbackTimer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["FallbackTimer"]
+    }
+  ]
+}
