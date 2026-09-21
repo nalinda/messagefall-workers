@@ -58,11 +58,6 @@
     "test:integration": "bun test test/integration/integration.test.ts",
     "prepare": "husky"
   },
-  "eslintConfig": {
-    "extends": [
-      "@serendibyte-co/eslint-config"
-    ]
-  },
   "peerDependencies": {
     "@cloudflare/workers-types": ">=4.0.0",
     "hono": "^4.0.0"
