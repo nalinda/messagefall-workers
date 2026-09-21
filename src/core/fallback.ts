@@ -8,9 +8,9 @@
  * and the render inputs, normalises the providers through `./provider-set.js`, then hands them
  * to `runChain` / `attemptRecorder` in `./send.js`, which is the single chain-advance
  * implementation. Everything below is the
- * asynchronous entry point's own concerns — where the input comes from (`in:<id>` in KV, the
- * timer's state, or a synchronous pass-through) and what happens to the fallback timer and the
- * `in:<id>` key once the chain settles.
+ * asynchronous entry point's own concerns — where the input comes from (a synchronous
+ * pass-through, or `in:<id>` in KV) and what happens to the fallback timer and the `in:<id>` key
+ * once the chain settles.
  *
  * @module
  */
@@ -120,20 +120,12 @@ function withRecipient(payload: RenderInput, from: RenderInput | undefined): Ren
   return from ? { ...pickRenderInput(from), ...pickRenderInput(payload) } : payload;
 }
 
-function extractFromTimer(
-  timer: FallbackTimerClient | undefined,
-  id: string
-): RenderInput | undefined {
-  if (typeof timer?.armed !== 'function') {
-    return undefined;
-  }
-  const state = timer.armed(id);
-  if (!state?.input) {
-    return undefined;
-  }
-  return asRenderInput(state.input);
-}
-
+/**
+ * Where an advance gets the render input to rebuild the send from. Two sources, in order: the
+ * synchronous pass-through (`args.input`) — how the alarm hands over the payload it stashed with
+ * the timer — and the `in:<id>` KV entry the send wrote. The timer itself is never read back:
+ * its client is write-only (see {@link FallbackTimerClient}).
+ */
 async function resolveInputPayload(
   args: AdvanceChainArgs,
   kv: KVNamespace | undefined
@@ -145,11 +137,6 @@ async function resolveInputPayload(
     return given.to === undefined
       ? withRecipient(given, await readRenderInput(kv, args.id))
       : given;
-  }
-
-  const fromTimer = extractFromTimer(resolveTimer(args.env, args.options.timer), args.id);
-  if (fromTimer) {
-    return fromTimer;
   }
 
   return readRenderInput(kv, args.id);

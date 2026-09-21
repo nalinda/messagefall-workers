@@ -30,7 +30,6 @@ export interface MockFallbackTimer {
   stateMap: Map<string, MockFallbackTimerState>;
   cancelled: string[];
   rearmed: Array<{ messageId: string; timeoutMs: number }>;
-  armed(messageId: string): MockFallbackTimerState | null;
   arm(messageId: string, timeoutMs: number, input?: unknown): void;
   cancel(messageId: string): void;
   isCancelled(messageId: string): boolean;
@@ -50,9 +49,6 @@ export function createMockFallbackTimer(): MockFallbackTimer {
     stateMap,
     cancelled,
     rearmed,
-    armed(messageId: string): MockFallbackTimerState | null {
-      return stateMap.get(messageId) ?? null;
-    },
     arm(messageId: string, timeoutMs: number, input?: unknown): void {
       stateMap.set(messageId, {
         messageId,
@@ -81,9 +77,9 @@ export function createMockFallbackTimer(): MockFallbackTimer {
 describe('test/helpers/fallback', () => {
   it('loads', () => {
     const timer = createMockFallbackTimer();
-    expect(timer.armed('msg_absent')).toBeNull();
+    expect(timer.stateMap.get('msg_absent')).toBeUndefined();
     timer.arm('msg_self_test', 1000);
-    expect(timer.armed('msg_self_test')?.timeoutMs).toBe(1000);
+    expect(timer.stateMap.get('msg_self_test')?.timeoutMs).toBe(1000);
     timer.cancel('msg_self_test');
     expect(timer.isCancelled('msg_self_test')).toBe(true);
   });

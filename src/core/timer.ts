@@ -29,14 +29,14 @@ const logger = createLogger();
  * fallback paths talk to, so neither has to know whether it holds a real Durable Object stub, a
  * namespace binding or a test double. Every member is optional because a deployment may run with
  * no `FALLBACK_TIMER` binding at all, in which case timer handling is simply skipped.
+ *
+ * Write-only by design: there is no way to read a timer's stashed render input back through this
+ * boundary, because nothing needs one. The alarm hands the payload it holds straight to
+ * `advanceChain`, and any other caller recovers it from the `in:<id>` KV entry the send wrote —
+ * those two are the documented sources, and a third would only ever be reachable from a test
+ * double.
  */
 export interface FallbackTimerClient {
-  /**
-   * Reads the armed timer for a message, including any render input stashed with it. The
-   * stashed value is whatever was written, so callers coerce it with `asRenderInput` rather
-   * than trusting it to be a {@link RenderInput} envelope.
-   */
-  armed?(messageId: string): { input?: unknown } | null;
   /**
    * Arms (or re-arms) the timer for a message, optionally carrying the render input the
    * fallback path will need when it fires. A Durable Object round-trip returns a promise; a
