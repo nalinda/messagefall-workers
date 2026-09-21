@@ -288,12 +288,7 @@ async function attemptChannel(
 
   let result = await callProvider(provider, payload);
   if (!result.ok && result.retryable) {
-    defaultLogger.warn('send.retry', {
-      id,
-      channel,
-      provider: provider.name,
-      errorCode: (result as { errorCode?: string }).errorCode,
-    });
+    defaultLogger.warn('send.retry', { id, channel, provider: provider.name });
     result = await callProvider(provider, payload);
   }
 
