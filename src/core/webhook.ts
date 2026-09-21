@@ -210,7 +210,7 @@ function applyStatusUpdate(
   record: MessageRecord,
   event: StatusEvent,
   ref: ProviderRef
-): { updatedRecord: MessageRecord; isChain: boolean } {
+): { updatedRecord: MessageRecord; isChain: boolean; hasChanged: boolean } {
   const isChain = record.chain.attempts.some(
     (att) =>
       att.providerId === event.providerId ||
@@ -248,7 +248,7 @@ function applyStatusUpdate(
     updatedAt: hasChanged ? event.at : record.updatedAt,
   };
 
-  return { updatedRecord, isChain };
+  return { updatedRecord, isChain, hasChanged };
 }
 
 async function resolveWebhookSensitive(
@@ -296,28 +296,32 @@ async function handleSingleEvent(
   }
 
   const existingRecord = await store.get(ref.id);
-  const isChain = existingRecord
-    ? existingRecord.chain.attempts.some(
-        (att) =>
-          att.providerId === event.providerId ||
-          (att.channel === ref.channel && att.provider === ref.provider)
-      )
-    : false;
-
   const sensitive = await resolveWebhookSensitive(options, ref.id, existingRecord, event.error);
   const scrubbedEvent: StatusEvent =
     event.error === undefined ? event : { ...event, error: scrubError(event.error, sensitive) };
 
-  const updatedRecord = await store.update(
-    ref.id,
-    (record) => applyStatusUpdate(record, scrubbedEvent, ref).updatedRecord
-  );
+  // Captured from `applyStatusUpdate`'s own result rather than recomputed from `existingRecord`:
+  // that keeps this one match against the actual write, not a second guess at what it did. A
+  // plain object, not two `let` bindings: a `let` reassigned only inside the updater closure is
+  // never narrowed away from its initial value at the read below, which the linter (correctly,
+  // by the rules of control-flow analysis) then flags as dead.
+  const applied = { isChain: false, hasChanged: false };
+  const updatedRecord = await store.update(ref.id, (record) => {
+    const result = applyStatusUpdate(record, scrubbedEvent, ref);
+    applied.isChain = result.isChain;
+    applied.hasChanged = result.hasChanged;
+    return result.updatedRecord;
+  });
 
   if (options.onStatus) {
     await options.onStatus(scrubbedEvent, ref);
   }
 
-  if (isChain && options.onStatusApplied) {
+  // A redelivered or out-of-order event that `applyStatusUpdate` dropped (see `hasChanged`
+  // there) changed nothing about the record, so it must not drive fallback or a terminal-state
+  // release a second time either: without this, a redelivered terminal webhook re-seals the
+  // chain and fires `onStatus` again for the same failure every time the vendor retries it.
+  if (applied.isChain && applied.hasChanged && options.onStatusApplied) {
     await options.onStatusApplied({
       id: ref.id,
       channel: ref.channel,

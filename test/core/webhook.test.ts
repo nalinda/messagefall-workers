@@ -905,6 +905,100 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
       expect(emitted.event).toEqual(statusEvent);
     });
 
+    it('does not re-emit StatusApplied for a redelivered terminal `failed` webhook', async () => {
+      // Regression for issue #25 finding 1: a chain already exhausted on its last fallback
+      // channel still re-derives `chain.status: 'failed'` on every redelivery of the same
+      // vendor callback. Without gating StatusApplied on the event actually having changed the
+      // record, each redelivery would drive fallback again — re-sealing the chain and firing
+      // `onStatus` a second time for the same terminal failure.
+      const store = kvStatusStore(kv);
+
+      const messageId = 'msg_01J9REDELIVER0000000000001';
+      const providerId = 'twilio_sms_terminal_failed';
+      const eventTimestamp = '2026-09-20T12:00:05.000Z';
+
+      const initialRecord: MessageRecord = {
+        id: messageId,
+        template: 'otpVerification',
+        kind: 'otp',
+        policy: { fallback: ['sms'], always: [] },
+        chain: {
+          status: 'sent',
+          attempts: [
+            {
+              channel: 'sms',
+              provider: 'twilio-sms',
+              providerId,
+              status: 'sent',
+              at: '2026-09-20T12:00:00.000Z',
+            },
+          ],
+        },
+        always: [],
+        status: 'sent',
+        createdAt: '2026-09-20T12:00:00.000Z',
+        updatedAt: '2026-09-20T12:00:00.000Z',
+      };
+
+      await store.create(initialRecord);
+      await store.indexProviderId(providerId, {
+        id: messageId,
+        channel: 'sms',
+        provider: 'twilio-sms',
+      });
+
+      const appliedEvents: StatusApplied[] = [];
+      const statusEvent: StatusEvent = {
+        providerId,
+        status: 'failed',
+        at: eventTimestamp,
+        error: 'destination unreachable',
+      };
+
+      const provider: Provider = {
+        name: 'twilio-sms',
+        channel: 'sms',
+        send: () => Promise.resolve({ ok: true }),
+        webhook: {
+          parse: () => Promise.resolve([statusEvent]),
+        },
+      };
+
+      const handleWebhook = createWebhookHandler({
+        providers: { sms: provider },
+        kv,
+        onStatusApplied: (applied) => {
+          appliedEvents.push(applied);
+        },
+      });
+
+      const request = (): Request =>
+        new Request('http://localhost/webhooks/twilio-sms', {
+          method: 'POST',
+          body: JSON.stringify({ id: providerId, status: 'failed' }),
+          headers: { 'content-type': 'application/json' },
+        });
+
+      // First delivery: the sms attempt genuinely moves from `sent` to `failed`, which exhausts
+      // the (single-channel) fallback chain. StatusApplied fires exactly once.
+      const first = await handleWebhook('twilio-sms', request());
+      expect(first.status).toBe(200);
+      expect(appliedEvents).toHaveLength(1);
+
+      const afterFirst = await store.get(messageId);
+      expect(afterFirst?.chain.status).toBe('failed');
+
+      // The vendor redelivers the identical callback (same providerId, status and timestamp).
+      // Nothing about the record changes, so StatusApplied must not fire again.
+      const second = await handleWebhook('twilio-sms', request());
+      expect(second.status).toBe(200);
+      expect(appliedEvents).toHaveLength(1);
+
+      const afterSecond = await store.get(messageId);
+      expect(afterSecond?.chain.status).toBe('failed');
+      expect(afterSecond?.chain.attempts).toHaveLength(1);
+    });
+
     it('does NOT emit StatusApplied for always attempts', async () => {
       const store = kvStatusStore(kv);
 
