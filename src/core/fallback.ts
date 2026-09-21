@@ -90,11 +90,6 @@ export interface AdvanceChainArgs {
 }
 
 /**
- * Signature of the advanceChain function.
- */
-export type AdvanceChainFn = (args: AdvanceChainArgs) => Promise<void>;
-
-/**
  * Re-arms the fallback timer after a non-terminal attempt. Best effort: the attempt is already
  * recorded, so a timer that cannot be reached must not fail the advance.
  */

@@ -63,11 +63,6 @@ export interface CreateMessagingClientOptions {
 }
 
 /**
- * Alias for CreateMessagingClientOptions.
- */
-export type MessagingClientOptions = CreateMessagingClientOptions;
-
-/**
  * Typed client returned by createMessagingClient.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

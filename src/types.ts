@@ -42,7 +42,7 @@ export interface StandardSchemaV1<Input = unknown, Output = Input> {
   };
 }
 
-export type { AdvanceChainArgs, AdvanceChainFn } from './core/fallback.js';
+export type { AdvanceChainArgs } from './core/fallback.js';
 export { advanceChain } from './core/fallback.js';
 export type { DeliveryOverride, DeliveryPolicy, ResolveDeliveryArgs } from './core/policy.js';
 export { DEFAULT_POLICY, PolicyError, resolveDelivery } from './core/policy.js';
