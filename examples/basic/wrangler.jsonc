@@ -6,21 +6,21 @@
   "kv_namespaces": [
     {
       "binding": "MESSAGES_KV",
-      "id": "messages-kv-local"
-    }
+      "id": "messages-kv-local",
+    },
   ],
   "durable_objects": {
     "bindings": [
       {
         "name": "FALLBACK_TIMER",
-        "class_name": "FallbackTimer"
-      }
-    ]
+        "class_name": "FallbackTimer",
+      },
+    ],
   },
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["FallbackTimer"]
-    }
-  ]
+      "new_sqlite_classes": ["FallbackTimer"],
+    },
+  ],
 }
