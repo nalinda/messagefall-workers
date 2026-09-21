@@ -95,7 +95,14 @@ export function consoleProvider<R = ConsoleRendered>(
   } = {
     name: providerName,
     channel: providerChannel,
-    send: (message: R & OutboundMeta): Promise<SendResult> => {
+    // A method, not an arrow closing over `provider`, so a simulated status is fired on whatever
+    // object the send was made through. `createMessaging` installs its `onSimulatedStatus` on a
+    // per-instance view of the provider rather than on the caller's object, and `this` is what
+    // routes the status back to the instance that sent the message.
+    send(
+      this: { onSimulatedStatus?: (event: StatusEvent) => void },
+      message: R & OutboundMeta
+    ): Promise<SendResult> {
       const { to, messageId, kind, template } = message;
 
       if (kind === 'otp') {
@@ -112,8 +119,11 @@ export function consoleProvider<R = ConsoleRendered>(
 
       if (options.simulate) {
         const { status, afterMs } = options.simulate;
+        // Bound now: the hook is read when the status fires, off the object the send was made
+        // through, which is the messaging instance's own view of this provider.
+        const fire = (event: StatusEvent): void => this.onSimulatedStatus?.(event);
         setTimeout(() => {
-          provider.onSimulatedStatus?.({
+          fire({
             providerId,
             status,
             at: new Date().toISOString(),

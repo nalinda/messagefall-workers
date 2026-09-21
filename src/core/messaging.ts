@@ -185,7 +185,7 @@ export async function advanceChainFor<T extends Templates<Record<string, Templat
   request: AdvanceChainRequest
 ): Promise<void> {
   const kv = requireKv(env, options);
-  const providers = memoProviders(env, options.providers);
+  const { providers } = wiredCore(env, options, kv);
   const store = statusStoreFor(env, options);
   await advanceChain({
     id: request.id,
@@ -263,19 +263,78 @@ export function statusStoreFor(
  * dispatcher hands a parsed vendor payload to, rather than to a parallel path — so a simulated
  * status and a real one are handled identically. Errors are contained: a simulated status fires
  * from a timer with nobody to reject to.
+ *
+ * The caller's provider objects are NOT written to. They are memoised per `env` and
+ * `createMessaging` may run per request, so assigning the hook in place would have each instance
+ * overwrite the previous one's closure — two messaging instances in one isolate would cross-wire
+ * their simulated statuses into whichever ran last. Each provider instead gets a per-instance
+ * view (`Object.create`, so a class-based provider keeps its prototype) carrying this instance's
+ * hook as its own property, and the sends are made through that view.
+ *
+ * @returns The provider set this instance sends through.
  */
-function wireSimulatedStatuses(providers: ProviderSet, options: WebhookDispatchOptions): void {
-  for (const provider of [providers.whatsapp, providers.sms, providers.email]) {
-    if (!provider) {
-      continue;
-    }
+function wireSimulatedStatuses(
+  providers: ProviderSet,
+  options: WebhookDispatchOptions
+): ProviderSet {
+  const wire = <P extends { name: string }>(provider: P): P => {
     const providerName = provider.name;
-    provider.onSimulatedStatus = (event: StatusEvent): void => {
+    const view = Object.create(provider) as P & {
+      onSimulatedStatus?: (event: StatusEvent) => void;
+    };
+    view.onSimulatedStatus = (event: StatusEvent): void => {
       void applyStatusEvents([event], providerName, options).catch(() => {
         // Nothing to report to: the status was fired by a timer, not a request.
       });
     };
-  }
+    return view;
+  };
+
+  return {
+    ...(providers.whatsapp && { whatsapp: wire(providers.whatsapp) }),
+    ...(providers.sms && { sms: wire(providers.sms) }),
+    ...(providers.email && { email: wire(providers.email) }),
+  };
+}
+
+/**
+ * The core for one `env` and one set of options: the status store, the providers wired for
+ * simulated statuses, and the webhook dispatch options those statuses (and real vendor
+ * callbacks) are applied through.
+ *
+ * Shared by `createMessaging` and {@link advanceChainFor} so a message sent on the request path
+ * and one sent by a fallback advance go through the same wired providers — otherwise a console
+ * provider's simulated `delivered` would be routed on one path and dropped on the other.
+ */
+function wiredCore<T extends Templates<Record<string, TemplateDef<unknown>>>>(
+  env: MessagingEnv,
+  options: MessagingOptions<T>,
+  kv: KVNamespace
+): { webhookOptions: WebhookDispatchOptions; providers: ProviderSet } {
+  const store = statusStoreFor(env, options);
+  const webhookOptions: WebhookDispatchOptions = {
+    providers: memoProviders(env, options.providers),
+    store,
+    templates: options.templates,
+    env,
+    // The webhook module reports raw StatusEvents plus the ref it already resolved; forward them
+    // in this module's onStatus shape so callers see one event type from sends and webhooks.
+    // As on the send path, a throwing observer is logged (without content) and never fails the
+    // batch or the webhook response.
+    onStatus: options.onStatus
+      ? (raw, ref) =>
+          ref
+            ? notifyStatus(options.onStatus, { ...ref, status: (raw as StatusEvent).status })
+            : undefined
+      : undefined,
+    onStatusApplied: ({ id, part, event, record }) =>
+      part === 'chain' ? handleChainStatusApplied(id, event, record, env, options, kv) : undefined,
+  };
+  // The hook closes over `webhookOptions`, so the wired set can only be installed on it after it
+  // exists; `applyStatusEvents` reads `providers` when a status actually fires.
+  const providers = wireSimulatedStatuses(webhookOptions.providers ?? {}, webhookOptions);
+  webhookOptions.providers = providers;
+  return { webhookOptions, providers };
 }
 
 /**
@@ -302,29 +361,10 @@ export function createMessaging<T extends Templates<any>>(
     fallback: options.delivery?.fallback ?? DEFAULT_POLICY.fallback,
     always: options.delivery?.always ?? DEFAULT_POLICY.always,
   };
-  const store = statusStoreFor(env, options);
-  const providers = memoProviders(env, options.providers);
   const templates = new Map<string, TemplateDef<unknown>>(Object.entries(options.templates));
-  const webhookOptions: WebhookDispatchOptions = {
-    providers,
-    store,
-    templates: options.templates,
-    env,
-    // The webhook module reports raw StatusEvents plus the ref it already resolved; forward them
-    // in this module's onStatus shape so callers see one event type from sends and webhooks.
-    // As on the send path, a throwing observer is logged (without content) and never fails the
-    // batch or the webhook response.
-    onStatus: options.onStatus
-      ? (raw, ref) =>
-          ref
-            ? notifyStatus(options.onStatus, { ...ref, status: (raw as StatusEvent).status })
-            : undefined
-      : undefined,
-    onStatusApplied: ({ id, part, event, record }) =>
-      part === 'chain' ? handleChainStatusApplied(id, event, record, env, options, kv) : undefined,
-  };
+  const { webhookOptions, providers } = wiredCore(env, options, kv);
+  const store = webhookOptions.store as StatusStore;
   const webhook = createWebhookHandler(webhookOptions);
-  wireSimulatedStatuses(providers, webhookOptions);
 
   return {
     send(args, ctx) {

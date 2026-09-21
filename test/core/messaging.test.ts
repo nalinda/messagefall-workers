@@ -211,6 +211,50 @@ describe('createMessaging simulated statuses', () => {
     expect(record!.chain.attempts[0].status).toBe('failed');
     expect(record!.chain.attempts[1]).toMatchObject({ provider: 'console-sms', status: 'sent' });
   });
+
+  // Regression: the hook used to be assigned onto the provider objects themselves, which are
+  // memoised per `env`. A second instance overwrote the first one's closure, so the first
+  // instance's simulated statuses were reported to the second instance's observer instead.
+  it('keeps two instances in one isolate from cross-wiring their simulated statuses', async () => {
+    const env = newEnv();
+    const provider = consoleProvider<RenderedSms>({
+      channel: 'sms',
+      name: 'console-sms',
+      simulate: { status: 'delivered', afterMs: 1 },
+    });
+
+    const seenByFirst: string[] = [];
+    const seenBySecond: string[] = [];
+    const first = createMessaging(env, {
+      templates,
+      providers: () => ({ sms: provider }),
+      onStatus: (event) => {
+        seenByFirst.push(event.status);
+      },
+    });
+    // Built after `first`, on the same env and so over the same memoised provider objects.
+    createMessaging(env, {
+      templates,
+      providers: () => ({ sms: provider }),
+      onStatus: (event) => {
+        seenBySecond.push(event.status);
+      },
+    });
+
+    const { id } = await first.send({
+      template: 'ping',
+      to: '+14155550123',
+      locale: 'en',
+      input: undefined,
+    });
+    await waitFor(async () => {
+      const current = await first.status(id);
+      return current?.status === 'delivered';
+    });
+
+    expect(seenByFirst).toEqual(['sent', 'delivered']);
+    expect(seenBySecond).toEqual([]);
+  });
 });
 
 describe('defineTemplates', () => {
