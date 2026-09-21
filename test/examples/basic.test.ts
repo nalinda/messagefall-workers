@@ -84,6 +84,7 @@ describe('Issue #14: Example Worker under examples/basic', () => {
         kv_namespaces?: Array<{ binding: string; id: string }>;
         durable_objects?: { bindings: Array<{ name: string; class_name: string }> };
         migrations?: Array<{ tag: string; new_sqlite_classes?: string[] }>;
+        vars?: Record<string, string>;
       };
 
       expect(config.main).toBe('src/index.ts');
@@ -106,6 +107,9 @@ describe('Issue #14: Example Worker under examples/basic', () => {
         (m) => m.new_sqlite_classes && m.new_sqlite_classes.includes('FallbackTimer')
       );
       expect(hasMigration).toBe(true);
+
+      // Unsigned dev webhooks, so the README's curl commands work out of the box
+      expect(config.vars?.MESSAGING_DEV_UNSIGNED).toBe('true');
     });
 
     it('exports FallbackTimer, runs createMessagingApp at module scope, and uses only console providers with no credentials', () => {
