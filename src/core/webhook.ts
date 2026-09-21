@@ -343,11 +343,7 @@ export function createWebhookHandler(options: WebhookDispatchOptions): WebhookHa
     const isDevUnsigned = isDevBypassAllowed(request, options.env);
     let events: StatusEvent[];
     try {
-      events = await provider.webhook.parse(request, {
-        devUnsigned: isDevUnsigned,
-        unsigned: isDevUnsigned,
-        allowUnsigned: isDevUnsigned,
-      });
+      events = await provider.webhook.parse(request, { devUnsigned: isDevUnsigned });
     } catch {
       return new Response('Unauthorized', {
         status: 401,

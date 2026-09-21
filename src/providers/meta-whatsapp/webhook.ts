@@ -177,16 +177,7 @@ export function parseStatuses(payload: unknown): StatusEvent[] {
     .filter((event): event is StatusEvent => event !== null);
 }
 
-/**
- * Verify the request signature and parse its statuses into events.
- *
- * @throws On a missing or mismatched signature, or a body that is not JSON.
- */
-export async function parseSignedStatuses(
-  request: Request,
-  appSecret: string
-): Promise<StatusEvent[]> {
-  const body = await verifySignedBody(request, appSecret);
+function parseBody(body: string): StatusEvent[] {
   let payload: unknown;
   try {
     payload = JSON.parse(body) as unknown;
@@ -194,4 +185,35 @@ export async function parseSignedStatuses(
     throw new Error('meta-whatsapp: webhook body is not valid JSON');
   }
   return parseStatuses(payload);
+}
+
+/**
+ * Verify the request signature and parse its statuses into events.
+ *
+ * @param request - The incoming webhook request.
+ * @param appSecret - App secret the `X-Hub-Signature-256` header is checked against.
+ * @returns The status events in the payload.
+ * @throws On a missing or mismatched signature, or a body that is not JSON.
+ */
+export async function parseSignedStatuses(
+  request: Request,
+  appSecret: string
+): Promise<StatusEvent[]> {
+  return parseBody(await verifySignedBody(request, appSecret));
+}
+
+/**
+ * Parse a webhook payload WITHOUT verifying its signature.
+ *
+ * Only for the documented local-development bypass: the dispatcher sets
+ * `WebhookParseOptions.devUnsigned` solely when `MESSAGING_DEV_UNSIGNED=true` and the request
+ * arrived on localhost, because a vendor webhook cannot reach a developer's machine to be
+ * signed in the first place.
+ *
+ * @param request - The incoming webhook request.
+ * @returns The status events in the payload.
+ * @throws On a body that is not JSON.
+ */
+export async function parseUnsignedStatuses(request: Request): Promise<StatusEvent[]> {
+  return parseBody(await request.text());
 }

@@ -152,6 +152,14 @@ async function signedRequest(
   return new Request(WEBHOOK_URL, { method: 'POST', headers, body });
 }
 
+function unsignedRequest(body: string): Request {
+  return new Request(WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body,
+  });
+}
+
 describe('metaWhatsApp provider: webhook', () => {
   const provider: Provider<RenderedWhatsApp> = metaWhatsApp(testConfig);
 
@@ -327,6 +335,40 @@ describe('metaWhatsApp provider: webhook', () => {
       const events = await webhook().parse(request);
 
       expect(events).toEqual([]);
+    });
+  });
+
+  describe('parse (dev bypass)', () => {
+    // A vendor webhook cannot reach a developer's machine, so MESSAGING_DEV_UNSIGNED on
+    // localhost lets an unsigned payload through — for the reference provider too, not just
+    // for console. `devUnsigned` is the one name the dispatcher and every provider use.
+    it('parses an unsigned payload when the dispatcher grants devUnsigned', async () => {
+      const request = unsignedRequest(JSON.stringify(statusPayload()));
+
+      const events = await webhook().parse(request, { devUnsigned: true });
+
+      const ids = events.map((event) => event.providerId);
+      expect(ids).toEqual(['wamid.SENT1', 'wamid.DELIVERED1', 'wamid.READ1', 'wamid.FAILED1']);
+    });
+
+    it.each([
+      ['devUnsigned: false', { devUnsigned: false }],
+      ['no flag set', {}],
+      ['no options at all', undefined],
+    ])('still enforces the signature with %s', async (_label, parseOptions) => {
+      const request = unsignedRequest(JSON.stringify(statusPayload()));
+
+      const error = await rejectionOf(webhook().parse(request, parseOptions));
+
+      expect(error).toBeInstanceOf(Error);
+    });
+
+    it('throws on a body that is not JSON even under the bypass', async () => {
+      const request = unsignedRequest('not json');
+
+      const error = await rejectionOf(webhook().parse(request, { devUnsigned: true }));
+
+      expect(error).toBeInstanceOf(Error);
     });
   });
 });

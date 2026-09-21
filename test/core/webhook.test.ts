@@ -18,7 +18,12 @@ import {
   type StatusApplied,
   type WebhookHandler,
 } from '../../src/core/webhook.js';
-import type { DeliveryStatus, Provider, StatusEvent } from '../../src/providers/types.js';
+import type {
+  DeliveryStatus,
+  Provider,
+  StatusEvent,
+  WebhookParseOptions,
+} from '../../src/providers/types.js';
 import { createMiniflareKV } from '../helpers/status.js';
 import { createMockExecutionContext, type MockExecutionContext } from '../helpers/webhook.js';
 
@@ -30,15 +35,10 @@ function createSignedProvider(): Provider {
     webhook: {
       parse: async (
         req: Request,
-        parseOpts?: { devUnsigned?: boolean; unsigned?: boolean; allowUnsigned?: boolean }
+        parseOpts?: WebhookParseOptions
       ): Promise<StatusEvent[]> => {
-        const isBypassActive =
-          parseOpts?.devUnsigned === true ||
-          parseOpts?.unsigned === true ||
-          parseOpts?.allowUnsigned === true;
-
         const sig = req.headers.get('x-hub-signature-256');
-        if (!isBypassActive && sig !== 'sha256=valid_test_signature') {
+        if (sig !== 'sha256=valid_test_signature' && parseOpts?.devUnsigned !== true) {
           throw new Error('Signature validation failed');
         }
 

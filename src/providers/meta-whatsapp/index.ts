@@ -8,9 +8,16 @@
  * @module
  */
 
-import type { OutboundMeta, Provider, RenderedWhatsApp, SendResult } from '../types.js';
+import type {
+  OutboundMeta,
+  Provider,
+  RenderedWhatsApp,
+  SendResult,
+  StatusEvent,
+  WebhookParseOptions,
+} from '../types.js';
 import { messagesUrl, sendViaGraph } from './graph.js';
-import { parseSignedStatuses, verifyHandshake } from './webhook.js';
+import { parseSignedStatuses, parseUnsignedStatuses, verifyHandshake } from './webhook.js';
 
 /**
  * Configuration for the Meta WhatsApp Cloud API provider.
@@ -46,7 +53,9 @@ export interface MetaWhatsAppConfig {
  * Creates a Meta WhatsApp Cloud API provider.
  *
  * `webhook.parse` verifies `X-Hub-Signature-256` and maps each status in the
- * payload to a `StatusEvent`. When a status's `timestamp` is missing or
+ * payload to a `StatusEvent`, unless the dispatcher grants the local-development
+ * bypass (`WebhookParseOptions.devUnsigned`, set only for `MESSAGING_DEV_UNSIGNED=true`
+ * on localhost), in which case the payload is parsed unverified. When a status's `timestamp` is missing or
  * unparseable the event is still emitted, with `at` set to the webhook's
  * receipt time rather than dropped; a late-redelivered event may therefore
  * carry a later `at` than statuses that actually followed it.
@@ -66,7 +75,13 @@ export function metaWhatsApp(config: MetaWhatsAppConfig): Provider<RenderedWhats
     webhook: {
       verify: (request: Request): Promise<Response | null> =>
         Promise.resolve(verifyHandshake(request, verifyToken)),
-      parse: (request: Request) => parseSignedStatuses(request, appSecret),
+      // HMAC verification is skipped only for the documented local-development bypass, which
+      // the dispatcher grants solely when MESSAGING_DEV_UNSIGNED=true and the request arrived
+      // on localhost. Everywhere else the signature is still required.
+      parse: (request: Request, options?: WebhookParseOptions): Promise<StatusEvent[]> =>
+        options?.devUnsigned === true
+          ? parseUnsignedStatuses(request)
+          : parseSignedStatuses(request, appSecret),
     },
   };
 }

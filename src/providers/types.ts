@@ -159,18 +159,14 @@ export type SendResult =
  */
 export interface WebhookParseOptions {
   /**
-   * Whether unsigned payload development bypass is enabled.
+   * Whether the local-development bypass is in force for this request: the dispatcher sets it
+   * only when `MESSAGING_DEV_UNSIGNED=true` and the request arrived on localhost. A provider
+   * that honours it must skip signature verification and parse the body as-is.
+   *
+   * This is the one name for that flag. There are deliberately no aliases and no open index
+   * signature: a provider that misspells it would silently keep enforcing signatures.
    */
   devUnsigned?: boolean;
-  /**
-   * Alias for devUnsigned.
-   */
-  unsigned?: boolean;
-  /**
-   * Alias for devUnsigned.
-   */
-  allowUnsigned?: boolean;
-  [key: string]: unknown;
 }
 
 /**

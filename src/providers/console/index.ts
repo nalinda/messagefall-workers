@@ -190,11 +190,7 @@ export function consoleProvider<R = ConsoleRendered>(
         request: Request,
         parseOptions?: WebhookParseOptions
       ): Promise<StatusEvent[]> => {
-        if (
-          parseOptions?.devUnsigned !== true &&
-          parseOptions?.unsigned !== true &&
-          parseOptions?.allowUnsigned !== true
-        ) {
+        if (parseOptions?.devUnsigned !== true) {
           throw new Error('console: unsigned webhooks disabled without dev bypass');
         }
         const body: unknown = await request.json();
