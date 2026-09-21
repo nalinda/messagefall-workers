@@ -213,6 +213,25 @@ describe('Issue #10: No message bodies in logs, enforced in code', () => {
       expect(scrubbed).not.toContain('Your secret code is 482913');
     });
 
+    // Regression: every number and boolean in the input used to be collected as a redaction
+    // target with no length floor, so `{ retries: 4 }` turned "400 Bad Request" into
+    // "[redacted]00 Bad Request" — the same hazard metadata values pose, from the input side.
+    it('leaves short numbers and booleans in the input out of the redaction targets', () => {
+      const scrubbed = scrubError('400 Bad Request (retryable: true, attempt 2 of 3)', {
+        retries: 4,
+        attempt: 2,
+        retryable: true,
+      });
+
+      expect(scrubbed).toBe('400 Bad Request (retryable: true, attempt 2 of 3)');
+    });
+
+    it('still redacts a numeric code long enough to be message content', () => {
+      const scrubbed = scrubError('Gateway rejected body "Your code is 482913"', { code: 482_913 });
+
+      expect(scrubbed).not.toContain('482913');
+    });
+
     // Regression: the scrubber used to be handed the whole provider payload — OutboundMeta's
     // `to`, `messageId`, `template`, `kind` and `locale` included — and redacted every
     // occurrence of each. "Token expired" came back as "T[redacted]n expired" because "to" is

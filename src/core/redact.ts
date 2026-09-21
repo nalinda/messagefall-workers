@@ -20,6 +20,24 @@ function collectFromString(data: string, out: Set<string>): void {
   }
 }
 
+/**
+ * The shortest string form of a number worth redacting.
+ *
+ * A number in the input is redaction-worthy when it could be the message content itself — a
+ * numeric OTP, say. Short ones cannot be: they are `{ retries: 4 }` or `{ attempt: 2 }`, and
+ * collecting them shreds ordinary vendor error text that happens to contain the same digits,
+ * turning "400 Bad Request" into "[redacted]00 Bad Request". Four digits is the shortest OTP
+ * anyone issues, so that is the floor.
+ */
+const MIN_NUMBER_LENGTH = 4;
+
+function collectFromNumber(data: number, out: Set<string>): void {
+  const asString = String(data);
+  if (asString.length >= MIN_NUMBER_LENGTH) {
+    out.add(asString);
+  }
+}
+
 function collectFromObject(data: object, out: Set<string>): void {
   if (Array.isArray(data)) {
     for (const item of data) {
@@ -40,8 +58,13 @@ function collectSensitiveStrings(data: unknown, out: Set<string> = new Set<strin
     collectFromString(data, out);
     return out;
   }
-  if (typeof data === 'number' || typeof data === 'boolean') {
-    out.add(String(data));
+  if (typeof data === 'number') {
+    collectFromNumber(data, out);
+    return out;
+  }
+  // A boolean is never the leaked content, but `true` / `false` occur in ordinary vendor error
+  // text, so collecting one only damages the error.
+  if (typeof data === 'boolean') {
     return out;
   }
   if (typeof data === 'object') {
