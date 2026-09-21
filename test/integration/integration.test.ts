@@ -11,7 +11,8 @@
  *    from alarm. Runs against its own entrypoint with a 250ms chain timeout: the example ships
  *    realistic timeouts, so only this scenario gets a fast alarm — and the webhook-driven
  *    scenarios above cannot be passed by a timer firing behind their backs.
- * 4. Send OTP template (`loginCode`); response time under 100 ms via ctx.waitUntil; delivery still happens.
+ * 4. Send OTP template (`loginCode`) against a deliberately slow WhatsApp provider; response
+ *    time under 100 ms via ctx.waitUntil; delivery still happens once the slow send completes.
  * 5. Post `delivered` for SMS attempt; chain and overall status `delivered`; timer storage empty.
  * 7. POST /send with `delivery: 'all'` yields three parallel attempts.
  * 8. Unsigned webhook without dev bypass returns 401.
@@ -26,6 +27,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { IntegrationHarness } from './harness.js';
 
 const FAST_TIMER_ENTRYPOINT = path.join(import.meta.dir, 'fixtures/fast-timer-worker.ts');
+const SLOW_PROVIDER_ENTRYPOINT = path.join(import.meta.dir, 'fixtures/slow-provider-worker.ts');
+// Kept in lockstep with `fixtures/slow-provider-worker.ts`'s `SLOW_SEND_DELAY_MS` by a comment
+// rather than an import: importing the fixture module here would execute it (and its
+// `messagefall-workers/durable` re-export) under bun's own runtime instead of wrangler's, which
+// is exactly what running it as a worker entrypoint avoids everywhere else in this file.
+const SLOW_SEND_DELAY_MS = 300;
 
 const TEST_TIMEOUT = 15_000;
 const SETTLE_TIMEOUT = 2500;
@@ -39,6 +46,10 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
   // Scenario 5 asserts the timer left NO state behind, and that check reads the whole Durable
   // Object directory — so it needs an instance no other scenario's still-armed timer writes to.
   let harnessTimerCleanup: IntegrationHarness;
+  // Scenario 4 wants a WhatsApp `send` that genuinely blocks, so its `< 100ms` response-time
+  // assertion can actually fail if the OTP ctx.waitUntil deferral regresses. The example's own
+  // console providers resolve immediately, so they cannot exercise that path.
+  let harnessSlowProvider: IntegrationHarness;
 
   beforeAll(async () => {
     harness = await IntegrationHarness.start({
@@ -54,6 +65,10 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
     harnessTimerCleanup = await IntegrationHarness.start({
       vars: { MESSAGING_DEV_UNSIGNED: 'true' },
     });
+    harnessSlowProvider = await IntegrationHarness.start({
+      vars: { MESSAGING_DEV_UNSIGNED: 'true' },
+      entrypoint: SLOW_PROVIDER_ENTRYPOINT,
+    });
   });
 
   afterAll(async () => {
@@ -62,6 +77,7 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
       harnessNoBypass.stop(),
       harnessFastTimer.stop(),
       harnessTimerCleanup.stop(),
+      harnessSlowProvider.stop(),
     ]);
   });
 
@@ -219,8 +235,13 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
   it(
     'Scenario 4: Send loginCode; response time under 100 ms while providers are slow; delivery still happens',
     async () => {
+      // Against `harnessSlowProvider`, WhatsApp's own `send` blocks for SLOW_SEND_DELAY_MS
+      // (300ms) before resolving. If the OTP ctx.waitUntil deferral regressed and `send` started
+      // waiting for delivery before responding, this assertion would fail — unlike against the
+      // example's own console providers, which resolve immediately and make `< 100ms` true
+      // whether or not the deferral actually runs.
       const start = performance.now();
-      const sendRes = await harness.send({
+      const sendRes = await harnessSlowProvider.send({
         template: 'loginCode',
         to: '+94779998888',
         locale: 'en',
@@ -232,11 +253,14 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
 
       expect(sendRes.status).toBe(200);
       expect(elapsedMs).toBeLessThan(100);
+      expect(elapsedMs).toBeLessThan(SLOW_SEND_DELAY_MS);
 
       const { id } = (await sendRes.json()) as { id: string };
       expect(id).toBeDefined();
 
-      const record = await harness.waitForRecord(
+      // Delivery still happens: the slow send eventually completes and the attempt lands,
+      // proving the deferral only delayed the caller's response, not the send itself.
+      const record = await harnessSlowProvider.waitForRecord(
         id,
         (r) => r.chain.attempts.length === 1,
         SETTLE_TIMEOUT
