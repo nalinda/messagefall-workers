@@ -295,6 +295,23 @@ async function handleSingleEvent(
 }
 
 /**
+ * Applies one event: to the store when there is one, otherwise straight to `onStatus`.
+ */
+async function applyOneEvent(
+  event: StatusEvent,
+  store: StatusStore | null,
+  options: WebhookDispatchOptions
+): Promise<{ wasHandled: boolean }> {
+  if (store) {
+    return handleSingleEvent(event, store, options);
+  }
+  if (options.onStatus) {
+    await options.onStatus(event);
+  }
+  return { wasHandled: true };
+}
+
+/**
  * Applies a batch of parsed status events: matches each one to its message, writes it to the
  * record and fires `onStatus` / `onStatusApplied`.
  *
@@ -316,13 +333,21 @@ export async function applyStatusEvents(
   let unknownCount = 0;
 
   for (const event of events) {
-    if (store) {
-      const result = await handleSingleEvent(event, store, options);
-      if (!result.wasHandled) {
+    // Applying one event must never sink the batch or the response. The handler answers `200` as
+    // soon as the body parses — vendors retry on anything else, and a retry cannot fix an expired
+    // record, a KV fault or a throwing `onStatusApplied`. So every per-event failure is logged and
+    // the next event is tried, on the inline path exactly as on the `ctx.waitUntil` one.
+    try {
+      const { wasHandled } = await applyOneEvent(event, store, options);
+      if (!wasHandled) {
         unknownCount++;
       }
-    } else if (options.onStatus) {
-      await options.onStatus(event);
+    } catch (error) {
+      defaultLogger.error('webhook.event-failed', {
+        provider: providerName,
+        providerId: event.providerId,
+        errorCode: error instanceof Error ? error.name : 'UnknownError',
+      });
     }
   }
 

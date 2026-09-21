@@ -40,6 +40,7 @@ export type LogEvent =
   | 'send.channel-skipped'
   | 'webhook.applied'
   | 'webhook.received'
+  | 'webhook.event-failed'
   | 'fallback.advance'
   | 'fallback.input-lost'
   | 'timer.armed'

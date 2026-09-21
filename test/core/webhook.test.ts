@@ -24,6 +24,7 @@ import type {
   StatusEvent,
   WebhookParseOptions,
 } from '../../src/providers/types.js';
+import { captureConsole } from '../helpers/messaging.js';
 import { createMiniflareKV } from '../helpers/status.js';
 import { createMockExecutionContext, type MockExecutionContext } from '../helpers/webhook.js';
 
@@ -1297,6 +1298,128 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
 
       const updated = await store.get(messageId);
       expect(updated?.chain.attempts[0]?.error).toBe('Rate limit exceeded, try again later');
+    });
+  });
+
+  describe('Per-event resilience on the inline (no-ctx) path', () => {
+    it('acknowledges with 200 when the pid index resolves but the msg record has expired', async () => {
+      const { logs, restore } = captureConsole();
+      try {
+        const store = kvStatusStore(kv);
+        const liveId = 'msg_01J9RESILIENCE00000LIVE';
+        const expiredProviderId = 'wamid.HBgL_01J9EXPIRED';
+        const liveProviderId = 'wamid.HBgL_01J9LIVE';
+
+        // The `pid:` index outlives its `msg:` record: it is written later (at attempt time) than
+        // the record (at create time), so a status event can resolve to an id with nothing behind it.
+        await store.indexProviderId(expiredProviderId, {
+          id: 'msg_01J9RESILIENCE000EXPIRED',
+          channel: 'whatsapp',
+          provider: 'meta-wa',
+        });
+
+        await store.create(
+          singleAttemptRecord(liveId, liveProviderId, 'loginOtp', 'whatsapp', 'meta-wa')
+        );
+        await store.indexProviderId(liveProviderId, {
+          id: liveId,
+          channel: 'whatsapp',
+          provider: 'meta-wa',
+        });
+
+        const provider: Provider = {
+          name: 'meta-wa',
+          channel: 'whatsapp',
+          send: () => Promise.resolve({ ok: true }),
+          webhook: {
+            parse: () =>
+              Promise.resolve([
+                { providerId: expiredProviderId, status: 'delivered', at: '2026-09-20T13:00:00.000Z' },
+                { providerId: liveProviderId, status: 'delivered', at: '2026-09-20T13:00:01.000Z' },
+              ]),
+          },
+        };
+
+        const handleWebhook = createWebhookHandler({ providers: { whatsapp: provider }, kv });
+
+        const response = await handleWebhook(
+          'meta-wa',
+          new Request('http://localhost/webhooks/meta-wa', { method: 'POST', body: '{}' })
+        );
+        expect(response.status).toBe(200);
+
+        // The failure is logged, and the second event of the same batch is still applied.
+        expect(logs.some((line) => line.includes('webhook.event-failed'))).toBe(true);
+        const updated = await store.get(liveId);
+        expect(updated?.chain.attempts[0]?.status).toBe('delivered');
+      } finally {
+        restore();
+      }
+    });
+
+    it('acknowledges with 200 and keeps processing when onStatusApplied throws without a ctx', async () => {
+      const { logs, restore } = captureConsole();
+      try {
+        const store = kvStatusStore(kv);
+        const firstId = 'msg_01J9RESILIENCE0000FIRST';
+        const secondId = 'msg_01J9RESILIENCE000SECOND';
+        const firstProviderId = 'wamid.HBgL_01J9THROWS';
+        const secondProviderId = 'wamid.HBgL_01J9AFTER';
+
+        for (const [id, providerId] of [
+          [firstId, firstProviderId],
+          [secondId, secondProviderId],
+        ] as const) {
+          await store.create(
+            singleAttemptRecord(id, providerId, 'loginOtp', 'whatsapp', 'meta-wa')
+          );
+          await store.indexProviderId(providerId, {
+            id,
+            channel: 'whatsapp',
+            provider: 'meta-wa',
+          });
+        }
+
+        const provider: Provider = {
+          name: 'meta-wa',
+          channel: 'whatsapp',
+          send: () => Promise.resolve({ ok: true }),
+          webhook: {
+            parse: () =>
+              Promise.resolve([
+                { providerId: firstProviderId, status: 'failed', at: '2026-09-20T13:00:00.000Z' },
+                { providerId: secondProviderId, status: 'delivered', at: '2026-09-20T13:00:01.000Z' },
+              ]),
+          },
+        };
+
+        const appliedFor: string[] = [];
+        const handleWebhook = createWebhookHandler({
+          providers: { whatsapp: provider },
+          kv,
+          // Stands in for `advanceChainFor` blowing up (a MessagingConfigError, a KV fault).
+          onStatusApplied: (applied: StatusApplied) => {
+            appliedFor.push(applied.id);
+            if (applied.id === firstId) {
+              throw new Error('advanceChainFor exploded');
+            }
+          },
+        });
+
+        // No ExecutionContext: the batch is applied inline, in the request's own promise.
+        const response = await handleWebhook(
+          'meta-wa',
+          new Request('http://localhost/webhooks/meta-wa', { method: 'POST', body: '{}' })
+        );
+        expect(response.status).toBe(200);
+
+        expect(logs.some((line) => line.includes('webhook.event-failed'))).toBe(true);
+        expect(appliedFor).toEqual([firstId, secondId]);
+        const second = await store.get(secondId);
+        expect(second?.chain.attempts[0]?.status).toBe('delivered');
+      } finally {
+        restore();
+      }
     });
   });
 });
