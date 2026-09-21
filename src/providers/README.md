@@ -74,7 +74,10 @@ Handles a handshake request (for example Meta's `GET` `hub.challenge` exchange).
 There is no registry module. A provider is "registered" by being re-exported and by being put in
 the `ProviderSet` a deployment builds from its env:
 
-- Built-in providers are re-exported from [`index.ts`](./index.ts).
+- A built-in provider is re-exported from [`index.ts`](./index.ts) only if it should be part of
+  the default barrel — today that is `console` alone. `gmail`, `http-sms` and `meta-whatsapp` are
+  deliberately left out for bundle isolation, and the tests assert each is unreachable from every
+  entry point but its own, so an optional provider never lands in a consumer's bundle.
 - Each provider directory is also published as its own entry point through the `./providers/*`
   subpath export in `package.json`, so `messagefall-workers/providers/meta-whatsapp` imports only
   that provider and stays tree-shakeable.
