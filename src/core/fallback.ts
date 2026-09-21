@@ -445,7 +445,9 @@ export async function advanceChain(args: AdvanceChainArgs): Promise<void> {
     try {
       attempts = await runChain(request, args.id, providers, nextChannels, recorder);
     } catch {
-      logger.error('send.persist-failed', { id: args.id });
+      // Its own event name rather than the sync path's `send.persist-failed`: the consequence
+      // differs, because here the lost write also releases the chain instead of re-arming it.
+      logger.error('fallback.persist-failed', { id: args.id });
       // Which channel accepted is exactly what the lost write cost us, so the chain cannot be
       // re-armed for another fallback hop; release it rather than risk advancing on stale state.
       await release(args, initialRecord, kv);

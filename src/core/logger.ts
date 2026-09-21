@@ -48,6 +48,7 @@ export type LogEvent =
   | 'fallback.advance-skipped'
   | 'fallback.input-lost'
   | 'fallback.input-invalid'
+  | 'fallback.persist-failed'
   | 'timer.armed'
   | 'timer.arm-failed'
   | 'timer.cancelled'
