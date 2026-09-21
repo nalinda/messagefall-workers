@@ -143,42 +143,49 @@ function resolveStatusStore(options: WebhookDispatchOptions): StatusStore | null
 }
 
 /**
- * How far along its lifecycle a delivery status is: an attempt goes out `sent`, then either
- * climbs to `delivered` and `read` or ends `failed`.
- *
- * This is deliberately NOT `status.ts`'s `failed < sent < delivered < read`. That ordering ranks
- * statuses by severity, to take the worst of the always attempts; this one ranks them by the
- * order they actually arrive in, so `failed` — a terminal outcome that by definition follows
- * `sent` — counts as progress rather than as a rewind.
- */
-function lifecycleRank(status: StatusEvent['status']): number {
-  switch (status) {
-    case 'sent': {
-      return 0;
-    }
-    case 'delivered': {
-      return 1;
-    }
-    case 'read': {
-      return 2;
-    }
-    case 'failed': {
-      return 3;
-    }
-  }
-}
-
-/**
  * Whether an incoming status event should overwrite the attempt's recorded status.
  *
  * Vendors redeliver and reorder callbacks, so an event is not automatically the latest word about
- * an attempt. One is applied when it moves the attempt forward through the lifecycle, or when it
- * is genuinely newer than what is recorded. A `sent` redelivered after a `delivered` satisfies
- * neither — it would otherwise rewind the attempt, the chain and the overall status to `sent`
- * permanently, since nothing later would come along to correct it.
+ * an attempt, and its timestamp is not a tie-break either: a redelivery carries the timestamp it
+ * always had, and a vendor clock is not ours. The only thing that decides is which transitions
+ * the delivery lifecycle actually permits, per current status:
+ *
+ * - `sent` — the attempt is still in flight, so every outcome is genuine progress:
+ *   `delivered`, `read` and `failed` are all applied.
+ * - `delivered` — the message reached the recipient. Permanently terminal apart from `read`,
+ *   which is the one thing that can still happen to a delivered message. A later `failed` is
+ *   NOT applied: accepting it would rewrite a delivered attempt to `failed`, re-derive the
+ *   chain back to non-terminal and let the fallback walk dispatch the next channel — sending an
+ *   already-delivered message (an OTP code, say) a second time on another channel.
+ * - `read` — permanently terminal; nothing is applied over it.
+ * - `failed` — upgradable by a late `delivered`/`read`. DECISION: these upgrades ARE accepted.
+ *   A confirmation arriving after a timeout or a vendor's own failure callback is real news
+ *   about the same attempt, and recording it costs nothing: by the time it lands the fallback
+ *   chain has already been walked, and `shouldSkipAdvancement` reads a `delivered`/`read` chain
+ *   as finished, so the upgrade can only stop further sends, never cause one. A `sent` after
+ *   `failed` is rejected — that is a rewind, not news.
+ *
+ * A repeat of the status already recorded is a silent no-op rather than a rejection: nothing
+ * about the attempt changed, so no side effect (log, `onStatusApplied`, fallback) should fire.
  */
 function isStatusProgression(att: Attempt, event: StatusEvent): boolean {
-  return lifecycleRank(event.status) > lifecycleRank(att.status) || event.at > att.at;
+  if (event.status === att.status) {
+    return false;
+  }
+  switch (att.status) {
+    case 'sent': {
+      return true;
+    }
+    case 'delivered': {
+      return event.status === 'read';
+    }
+    case 'read': {
+      return false;
+    }
+    case 'failed': {
+      return event.status === 'delivered' || event.status === 'read';
+    }
+  }
 }
 
 /**

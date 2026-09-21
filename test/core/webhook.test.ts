@@ -679,6 +679,176 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
     });
   });
 
+  describe('Attempt status transition table', () => {
+    /**
+     * Every (recorded status, incoming status) pair, exhaustively. `isApplied: true` means the
+     * event overwrites the attempt; `false` means it is dropped — either because it is a rewind
+     * or an overwrite of a terminal outcome, or because it repeats the status already recorded
+     * (a silent no-op). Every incoming event here carries a timestamp NEWER than the recorded
+     * one, so a dropped case proves the decision is the transition table's and not the clock's.
+     */
+    const RECORDED_AT = '2026-09-20T12:00:00.000Z';
+    const EVENT_AT = '2026-09-20T12:05:00.000Z';
+
+    const transitions: { from: DeliveryStatus; to: DeliveryStatus; isApplied: boolean }[] = [
+      // In flight: every outcome is genuine news.
+      { from: 'sent', to: 'delivered', isApplied: true },
+      { from: 'sent', to: 'read', isApplied: true },
+      { from: 'sent', to: 'failed', isApplied: true },
+      { from: 'sent', to: 'sent', isApplied: false },
+      // Delivered: only `read` can still happen. A late `failed` here is the duplicate-send bug.
+      { from: 'delivered', to: 'read', isApplied: true },
+      { from: 'delivered', to: 'failed', isApplied: false },
+      { from: 'delivered', to: 'sent', isApplied: false },
+      { from: 'delivered', to: 'delivered', isApplied: false },
+      // Read: permanently terminal.
+      { from: 'read', to: 'failed', isApplied: false },
+      { from: 'read', to: 'delivered', isApplied: false },
+      { from: 'read', to: 'sent', isApplied: false },
+      { from: 'read', to: 'read', isApplied: false },
+      // Failed: a late confirmation is accepted as an upgrade; a late `sent` is a rewind.
+      { from: 'failed', to: 'delivered', isApplied: true },
+      { from: 'failed', to: 'read', isApplied: true },
+      { from: 'failed', to: 'sent', isApplied: false },
+      { from: 'failed', to: 'failed', isApplied: false },
+    ];
+
+    const verbFor = (from: DeliveryStatus, to: DeliveryStatus, isApplied: boolean): string => {
+      if (isApplied) return 'applies';
+      return from === to ? 'no-ops on' : 'rejects';
+    };
+
+    for (const { from, to, isApplied } of transitions) {
+      it(`${verbFor(from, to, isApplied)} ${from} -> ${to}`, async () => {
+        const store = kvStatusStore(kv);
+        const messageId = `msg_01J9TRANSITION_${from}_${to}`;
+        const providerId = `wamid.transition_${from}_${to}`;
+
+        await store.create({
+          id: messageId,
+          template: 'loginCode',
+          kind: 'otp',
+          policy: { fallback: ['whatsapp'], always: [] },
+          chain: {
+            status: from,
+            attempts: [
+              {
+                channel: 'whatsapp',
+                provider: 'meta-wa',
+                providerId,
+                status: from,
+                at: RECORDED_AT,
+              },
+            ],
+          },
+          always: [],
+          status: from,
+          createdAt: RECORDED_AT,
+          updatedAt: RECORDED_AT,
+        });
+        await store.indexProviderId(providerId, {
+          id: messageId,
+          channel: 'whatsapp',
+          provider: 'meta-wa',
+        });
+
+        const statusApplied: StatusApplied[] = [];
+        const seenEvents: StatusEvent[] = [];
+        const handleWebhook = createWebhookHandler({
+          providers: {
+            whatsapp: providerEmitting('meta-wa', { providerId, status: to, at: EVENT_AT }),
+          },
+          kv,
+          onStatus: (event) => {
+            seenEvents.push(event);
+          },
+          onStatusApplied: (event) => {
+            statusApplied.push(event);
+          },
+        });
+
+        await handleWebhook('meta-wa', statusPost());
+
+        const updated = await store.get(messageId);
+        const expectedStatus = isApplied ? to : from;
+        expect(updated?.chain.attempts[0].status).toBe(expectedStatus);
+        expect(updated?.chain.status).toBe(expectedStatus);
+        expect(updated?.status).toBe(expectedStatus);
+        expect(updated?.updatedAt).toBe(isApplied ? EVENT_AT : RECORDED_AT);
+
+        // `onStatus` sees every parsed event, applied or not; `onStatusApplied` — the hook that
+        // drives fallback and the terminal-state release — fires only for a real change.
+        expect(seenEvents).toHaveLength(1);
+        expect(statusApplied).toHaveLength(isApplied ? 1 : 0);
+      });
+    }
+
+    it('never resurrects a delivered chain for fallback, however often a `failed` is redelivered', async () => {
+      // The end-to-end shape of the bug the table above pins down: a two-channel chain whose
+      // WhatsApp attempt is already `delivered` must not dispatch SMS when the vendor redelivers
+      // (or belatedly sends) a `failed` for that same attempt.
+      const store = kvStatusStore(kv);
+      const messageId = 'msg_01J9NORESURRECT0000000001';
+      const providerId = 'wamid.no_resurrect_delivered';
+
+      await store.create({
+        id: messageId,
+        template: 'loginCode',
+        kind: 'otp',
+        policy: { fallback: ['whatsapp', 'sms'], always: [] },
+        chain: {
+          status: 'delivered',
+          attempts: [
+            {
+              channel: 'whatsapp',
+              provider: 'meta-wa',
+              providerId,
+              status: 'delivered',
+              at: '2026-09-20T12:00:30.000Z',
+            },
+          ],
+        },
+        always: [],
+        status: 'delivered',
+        createdAt: RECORDED_AT,
+        updatedAt: '2026-09-20T12:00:30.000Z',
+      });
+      await store.indexProviderId(providerId, {
+        id: messageId,
+        channel: 'whatsapp',
+        provider: 'meta-wa',
+      });
+
+      const statusApplied: StatusApplied[] = [];
+      const handleWebhook = createWebhookHandler({
+        providers: {
+          whatsapp: providerEmitting('meta-wa', {
+            providerId,
+            status: 'failed',
+            at: '2026-09-20T12:09:00.000Z',
+            error: 'vendor says undeliverable',
+          }),
+        },
+        kv,
+        onStatusApplied: (event) => {
+          statusApplied.push(event);
+        },
+      });
+
+      for (let i = 0; i < 3; i++) {
+        await handleWebhook('meta-wa', statusPost());
+      }
+
+      const updated = await store.get(messageId);
+      expect(updated?.chain.attempts).toHaveLength(1);
+      expect(updated?.chain.attempts[0].status).toBe('delivered');
+      expect(updated?.chain.attempts[0].error).toBeUndefined();
+      expect(updated?.chain.status).toBe('delivered');
+      expect(updated?.status).toBe('delivered');
+      expect(statusApplied).toHaveLength(0);
+    });
+  });
+
   describe('Unknown Provider ID Handling', () => {
     it('acknowledges with 200 when providerId is unknown, skipping without error', async () => {
       let wasParseCalled = false;
