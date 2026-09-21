@@ -62,8 +62,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/bun-install
+      # `bun test` picks up test/integration/ too, and that suite is slow (it boots
+      # wrangler dev). The `integration` job below is the one place it runs in CI.
       - name: Run tests
-        run: bun run test
+        run: bun run test -- --path-ignore-patterns='**/test/integration/**'
 
   integration:
     name: Integration tests
@@ -71,7 +73,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/bun-install
-      - name: Build package
-        run: bun run build
+      # No build step: the harness resolves the library through tsconfig `paths`
+      # into src/, never dist/, so a build here would change nothing.
       - name: Run integration tests
         run: bun run test:integration
