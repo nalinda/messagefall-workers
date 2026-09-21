@@ -2,6 +2,7 @@
  * Tests for createMessaging: provider wiring, sends and status.
  */
 
+import type { DurableObjectNamespace } from '@cloudflare/workers-types';
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
 
@@ -20,8 +21,10 @@ import {
   type StatusEvent,
 } from '../../src/index.js';
 import { consoleProvider } from '../../src/providers/console/index.js';
+import { createMockFallbackTimer } from '../helpers/fallback.js';
 import {
   captureConsole,
+  memoryKV,
   newEnv,
   pingTemplates as templates,
   waitFor,
@@ -422,11 +425,19 @@ describe('createMessaging late confirmation for a superseded channel', () => {
     const sms = queueingProvider<RenderedSms>('sms', 'sms');
     const email = queueingProvider<RenderedEmail>('email', 'email');
 
-    const messaging = createMessaging(newEnv(), {
-      templates: otpTemplates,
-      providers: () => ({ whatsapp, sms, email }),
-      delivery: { fallback: ['whatsapp', 'sms', 'email'], always: [] },
-    });
+    const kv = memoryKV();
+    const timer = createMockFallbackTimer();
+    const messaging = createMessaging(
+      { MESSAGES_KV: kv },
+      {
+        templates: otpTemplates,
+        providers: () => ({ whatsapp, sms, email }),
+        delivery: { fallback: ['whatsapp', 'sms', 'email'], always: [] },
+        // `resolveTimer` takes any object that is not a Durable Object namespace as the client
+        // itself, which is how a test drives the arm/cancel seam without a real DO.
+        timer: timer as unknown as DurableObjectNamespace,
+      }
+    );
 
     const { id } = await messaging.send({
       template: 'loginCode',
@@ -467,6 +478,14 @@ describe('createMessaging late confirmation for a superseded channel', () => {
     ]);
     expect(afterUpgrade!.chain.status).toBe('delivered');
     expect(afterUpgrade!.status).toBe('delivered');
+
+    // The seam this test exists for: delivery wins, so the chain is released *now* — at the exact
+    // moment the SMS attempt is still `sent`, i.e. a later attempt is genuinely in flight. The
+    // timer must be cancelled and the stored render input dropped, not held until the in-flight
+    // attempt resolves. Asserting the chain reads `delivered` and email is never tried would pass
+    // either way; only these two assertions fail if the release is deferred.
+    expect(timer.isCancelled(id)).toBe(true);
+    expect(await kv.get(`in:${id}`)).toBeNull();
 
     // The SMS attempt then fails. The message was already delivered, so the chain must not walk
     // on to email — and it must not report itself failed either.
