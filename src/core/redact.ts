@@ -10,9 +10,24 @@
  * @module
  */
 
+/**
+ * The shortest value worth redacting, in characters.
+ *
+ * A value in the input is redaction-worthy when it could be the message content itself — a
+ * numeric OTP, say. Short ones cannot be: they are `{ retries: 4 }`, `{ attempt: 2 }`,
+ * `{ initial: 'a' }` or `{ locale: 'si' }`, and collecting them shreds ordinary vendor error
+ * text that happens to contain the same characters, turning "400 Bad Request" into
+ * "[redacted]00 Bad Request" and "Invalid sender" into "Inv[redacted]lid sender". Four
+ * characters is the shortest OTP anyone issues, so that is the floor.
+ *
+ * It applies to strings and numbers alike: a one-character string is exactly the hazard the
+ * numeric floor exists to prevent, so the two must not disagree.
+ */
+const MIN_SENSITIVE_LENGTH = 4;
+
 function collectFromString(data: string, out: Set<string>): void {
   const trimmed = data.trim();
-  if (trimmed.length > 0) {
+  if (trimmed.length >= MIN_SENSITIVE_LENGTH) {
     out.add(data);
     if (trimmed !== data) {
       out.add(trimmed);
@@ -20,20 +35,9 @@ function collectFromString(data: string, out: Set<string>): void {
   }
 }
 
-/**
- * The shortest string form of a number worth redacting.
- *
- * A number in the input is redaction-worthy when it could be the message content itself — a
- * numeric OTP, say. Short ones cannot be: they are `{ retries: 4 }` or `{ attempt: 2 }`, and
- * collecting them shreds ordinary vendor error text that happens to contain the same digits,
- * turning "400 Bad Request" into "[redacted]00 Bad Request". Four digits is the shortest OTP
- * anyone issues, so that is the floor.
- */
-const MIN_NUMBER_LENGTH = 4;
-
 function collectFromNumber(data: number, out: Set<string>): void {
   const asString = String(data);
-  if (asString.length >= MIN_NUMBER_LENGTH) {
+  if (asString.length >= MIN_SENSITIVE_LENGTH) {
     out.add(asString);
   }
 }
