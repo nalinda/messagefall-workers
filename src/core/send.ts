@@ -327,7 +327,9 @@ export type RecordAttempt = (
 
 /**
  * Recorder for one send: `record` persists attempts; `sealChain` re-derives the chain status
- * from `progress` alone, for when a chain attempt's own write was lost.
+ * from the walk's `progress`, for when a chain attempt's own write was lost. `progress` only
+ * decides when no attempt on the record carries a confirmed delivery — a `delivered` / `read`
+ * on any attempt is the chain's answer and short-circuits ahead of it.
  */
 export interface AttemptRecorder {
   record: RecordAttempt;
