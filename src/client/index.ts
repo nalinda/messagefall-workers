@@ -207,9 +207,13 @@ export function createMessagingClient<
     },
 
     async status(id: string): Promise<MessageRecord | null> {
-      const res = await options.binding.fetch(`https://messaging${prefix}/status/${id}`, {
-        method: 'GET',
-      });
+      // Encoded even though the ids this package mints are ULIDs, which need no escaping: the
+      // id is whatever the caller passes, and a `/` or `?` in it would otherwise address a
+      // different route.
+      const res = await options.binding.fetch(
+        `https://messaging${prefix}/status/${encodeURIComponent(id)}`,
+        { method: 'GET' }
+      );
 
       if (res.status === 404) {
         return null;
