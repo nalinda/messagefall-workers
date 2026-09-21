@@ -263,6 +263,9 @@ describe('Issue #14: Example Worker under examples/basic', () => {
       const record = await waitForRecord(id, (r) => r.chain.attempts.length === 1);
       expect(record.template).toBe('loginCode');
       expect(record.kind).toBe('otp');
+      // The SMS fallback the example's docs promise is real: `loginCode` renders for SMS, so
+      // `resolveDelivery` keeps it in the chain instead of dropping it.
+      expect(record.policy.fallback).toEqual(['whatsapp', 'sms']);
       expect(record.chain.attempts[0].channel).toBe('whatsapp');
       expect(record.always).toHaveLength(0);
 

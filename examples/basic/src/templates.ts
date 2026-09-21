@@ -3,7 +3,7 @@
  *
  * Demonstrates:
  * - `orderUpdate`: A notification template with WhatsApp-first SMS-fallback and always-on email.
- * - `loginCode`: An authentication (OTP) template with WhatsApp and SMS channels.
+ * - `loginCode`: An authentication (OTP) template with WhatsApp-first SMS-fallback.
  *
  * Every template declares an `input` Standard Schema: the payload posted to `/send` is validated
  * against it before anything renders, and the channel renderers are typed from it.
@@ -32,6 +32,10 @@ export const templates = defineTemplates({
       language: 'en',
       params: ({ code }: LoginCodeInput) => [code],
     },
+    // Without this rendering `resolveDelivery` would drop `sms` from the policy and the OTP
+    // fallback the docs describe would never happen: a channel is only in the chain if the
+    // template can actually render for it.
+    sms: ({ code }: LoginCodeInput) => `Your login code is ${code}.`,
   },
   orderUpdate: {
     input: orderUpdateInput,
