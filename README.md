@@ -59,11 +59,27 @@ This package handles those four things and leaves the rest to you.
 
 ## Installation
 
-Not on npm. `0.1.0` is tagged in this repository and the package is marked `private`, so install it from git:
+Not on npm, and the package is marked `private`. The published entry points all
+resolve into `dist/`, which is not committed, so a package-manager install
+straight from a git URL would give you a package with nothing to import. Clone
+it and build it instead:
 
 ```sh
-npm install github:nalinda/messagefall-workers#v0.1.0
+git clone https://github.com/nalinda/messagefall-workers.git
+cd messagefall-workers
+bun install
+bun run build
 ```
+
+Then depend on that checkout from your Worker, by path:
+
+```sh
+npm install ../messagefall-workers
+```
+
+Rebuild the checkout (`bun run build`) after you pull. A tagged, installable
+release is what the `0.x` line is working towards; until then this is the
+supported way in.
 
 No other runtime dependencies. Hono is an optional peer dependency for the ready-made app.
 
