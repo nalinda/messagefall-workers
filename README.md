@@ -156,6 +156,10 @@ import { templates } from './templates';
 export { FallbackTimer } from 'messagefall-workers/durable';
 
 type Env = MessagingEnv & {
+  WHATSAPP_TOKEN: string;
+  WHATSAPP_PHONE_NUMBER_ID: string;
+  WHATSAPP_APP_SECRET: string;
+  WHATSAPP_VERIFY_TOKEN: string;
   SMS_GATEWAY_URL: string;
   SMS_GATEWAY_KEY: string;
   GMAIL_CLIENT_ID: string;
@@ -165,26 +169,31 @@ type Env = MessagingEnv & {
 
 export default createMessagingApp<Env>({
   templates,
-  providers: (env) => ({
-    whatsapp: metaWhatsApp({
-      token: env.WHATSAPP_TOKEN,
-      phoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID,
-      appSecret: env.WHATSAPP_APP_SECRET,
-      verifyToken: env.WHATSAPP_VERIFY_TOKEN,
-    }),
-    sms: httpSms({
-      url: env.SMS_GATEWAY_URL,
-      headers: { authorization: `Bearer ${env.SMS_GATEWAY_KEY}` },
-      body: ({ to, text }) => ({ to, text }),
-      messageId: (json) => json.id,
-    }),
-    email: gmail({
-      clientId: env.GMAIL_CLIENT_ID,
-      clientSecret: env.GMAIL_CLIENT_SECRET,
-      refreshToken: env.GMAIL_REFRESH_TOKEN,
-      from: 'no-reply@example.com',
-    }),
-  }),
+  // The factory is always handed a `MessagingEnv`, whose custom bindings are `unknown`.
+  // Narrow it once to your own `Env` and every secret below reads as a `string`.
+  providers: (env) => {
+    const e = env as Env;
+    return {
+      whatsapp: metaWhatsApp({
+        token: e.WHATSAPP_TOKEN,
+        phoneNumberId: e.WHATSAPP_PHONE_NUMBER_ID,
+        appSecret: e.WHATSAPP_APP_SECRET,
+        verifyToken: e.WHATSAPP_VERIFY_TOKEN,
+      }),
+      sms: httpSms({
+        url: e.SMS_GATEWAY_URL,
+        headers: { authorization: `Bearer ${e.SMS_GATEWAY_KEY}` },
+        body: ({ to, text }) => ({ to, text }),
+        messageId: (json) => (json as { id?: string }).id,
+      }),
+      email: gmail({
+        clientId: e.GMAIL_CLIENT_ID,
+        clientSecret: e.GMAIL_CLIENT_SECRET,
+        refreshToken: e.GMAIL_REFRESH_TOKEN,
+        from: 'no-reply@example.com',
+      }),
+    };
+  },
   delivery: {
     fallback: ['whatsapp', 'sms'],
     always: ['email'],
@@ -410,6 +419,8 @@ Service-binding calls stay inside Cloudflare's network. The API Worker never hol
 | `statusTtl`         | `number`                                  | `604800`                               | Seconds to keep status records.                                                                                       |
 | `onStatus`          | `(event) => void \| Promise<void>`        | none                                   | Called on every status change. Receives ids and statuses, never bodies.                                               |
 | `basePath`          | `string`                                  | `'/'`                                  | Path prefix for the routes.                                                                                           |
+
+The `providers` factory always receives a `MessagingEnv`, whose custom bindings are typed `unknown` — the `<Env>` type parameter on `createMessagingApp` types the Hono bindings only, never this factory. A Worker with typed bindings narrows the argument itself (`const e = env as Env`) before reading its secrets, as the quick start does.
 
 ## Routing and webhooks
 
