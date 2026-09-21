@@ -222,7 +222,16 @@ async function handleChainStatusApplied<T extends Templates<Record<string, Templ
   kv: KVNamespace
 ): Promise<void> {
   if (event.status === 'failed') {
-    await advanceChainFor(env, options, { id, reason: 'failed' });
+    // A chain some attempt has already confirmed `delivered` / `read` never falls back again:
+    // `shouldSkipAdvancement` no-ops on exactly that, but only after a full advance-lease round
+    // trip (KV get + put + delete) and a record read. Decide it here from the record this event
+    // was just applied to and skip the trip. Only confirmed delivery is skippable, not every
+    // terminal status: a `failed` that exhausts the last fallback channel makes the chain
+    // terminal-failed for the first time, and it is this advance that seals, notifies and
+    // releases it.
+    if (record.chain.status !== 'delivered' && record.chain.status !== 'read') {
+      await advanceChainFor(env, options, { id, reason: 'failed' });
+    }
     return;
   }
 
