@@ -24,7 +24,7 @@ const app = createMessagingApp<MessagingEnv>({
   delivery: {
     fallback: ['whatsapp', 'sms'],
     always: ['email'],
-    timeout: { otp: 30_000, notification: 5 * 60_000 },
+    timeout: { otp: 25, notification: 25 },
   },
 });
 

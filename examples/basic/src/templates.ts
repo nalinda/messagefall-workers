@@ -18,7 +18,6 @@ export const templates = defineTemplates({
       language: 'en',
       params: ({ code }: { code: string }) => [code],
     },
-    sms: ({ code }: { code: string }) => `Your login code is ${code}`,
   },
   orderUpdate: {
     kind: 'notification',
