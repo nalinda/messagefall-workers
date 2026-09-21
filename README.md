@@ -359,18 +359,45 @@ Every send gets a message id. `GET /status/:id` returns:
   "id": "msg_01J...",
   "template": "loginCode",
   "kind": "otp",
+  "policy": { "fallback": ["whatsapp", "sms"], "always": ["email"] },
   "chain": {
     "status": "sent",
     "attempts": [
-      { "channel": "whatsapp", "providerId": "wamid.HBg...", "status": "failed", "at": "..." },
-      { "channel": "sms", "providerId": "8f2c...", "status": "sent", "at": "..." }
+      {
+        "channel": "whatsapp",
+        "provider": "meta-whatsapp",
+        "providerId": "wamid.HBg...",
+        "status": "failed",
+        "at": "..."
+      },
+      {
+        "channel": "sms",
+        "provider": "http-sms",
+        "providerId": "8f2c...",
+        "status": "sent",
+        "at": "..."
+      }
     ]
   },
-  "always": [{ "channel": "email", "providerId": "re_...", "status": "delivered", "at": "..." }],
+  "always": [
+    {
+      "channel": "email",
+      "provider": "gmail",
+      "providerId": "re_...",
+      "status": "delivered",
+      "at": "..."
+    }
+  ],
   "status": "sent",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:03.500Z",
   "sealed": true
 }
 ```
+
+Each attempt names the `provider` it was dispatched through, which is also the `<name>` in that
+provider's `/webhooks/<name>` route — so an incoming delivery receipt can be traced back to the
+attempt it belongs to. `policy` is the delivery policy as resolved for this send.
 
 `sealed` is an internal marker: it records that this chain's fallback processing has already run
 to its end, so a repeated webhook or timer cannot advance it again. Consumers should ignore it.
