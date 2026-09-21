@@ -19,9 +19,35 @@ import type { Templates } from '../templates.js';
 import { createLogger } from './logger.js';
 import type { MessagingOptions } from './messaging.js';
 import { DEFAULT_LOCALE, pickRenderInput, type RenderInput } from './render-input.js';
-import type { FallbackTimerClient } from './status.js';
 
 const logger = createLogger();
+
+/**
+ * The fallback timer as the delivery pipeline uses it.
+ *
+ * The timer itself is a Durable Object (`src/durable/`); this is the boundary the send and
+ * fallback paths talk to, so neither has to know whether it holds a real Durable Object stub, a
+ * namespace binding or a test double. Every member is optional because a deployment may run with
+ * no `FALLBACK_TIMER` binding at all, in which case timer handling is simply skipped.
+ */
+export interface FallbackTimerClient {
+  /**
+   * Reads the armed timer for a message, including any render input stashed with it. The
+   * stashed value is whatever was written, so callers coerce it with `asRenderInput` rather
+   * than trusting it to be a {@link RenderInput} envelope.
+   */
+  armed?(messageId: string): { input?: unknown } | null;
+  /**
+   * Arms (or re-arms) the timer for a message, optionally carrying the render input the
+   * fallback path will need when it fires. A Durable Object round-trip returns a promise; a
+   * test double may be synchronous. Callers await either.
+   */
+  arm?(messageId: string, timeoutMs: number, input?: RenderInput): void | Promise<void>;
+  /**
+   * Disarms the timer for a message; called once the chain reaches a terminal state.
+   */
+  cancel?(messageId: string): void | Promise<void>;
+}
 
 /**
  * Arguments to `FallbackTimer#arm` / {@link armTimer}: the {@link RenderInput} to re-render
@@ -153,6 +179,35 @@ export function namespaceTimerClient(ns: DurableObjectNamespace): FallbackTimerC
 }
 
 /**
+ * Resolves the fallback timer a call should use: an explicit override wins, otherwise the
+ * `FALLBACK_TIMER` binding on the env. Both are typed loosely on purpose — a deployment passes
+ * a `DurableObjectNamespace`, a test passes a double — so the one runtime check lives here and
+ * callers get a {@link FallbackTimerClient} back without casting at their own boundary. A
+ * namespace is adapted to the client (`arm` / `cancel` RPC on the per-message object); a
+ * non-object (or absent) binding yields `undefined`, which every timer path treats as "no
+ * timer configured".
+ *
+ * {@link isDurableObjectNamespace} is also what `validateEnv` checks `FALLBACK_TIMER` with, so
+ * the "already a client" branch below is only ever reached for an explicit `override` — a test
+ * double, or the `FallbackTimer` object passing itself into its own alarm. A binding that is not
+ * a namespace fails startup validation rather than arriving here as a client with no `arm`.
+ *
+ * @param env - Worker bindings, possibly carrying `FALLBACK_TIMER`.
+ * @param override - A timer supplied by the caller, taking precedence over the binding.
+ * @returns The timer to use, or undefined when there is none.
+ */
+export function resolveTimer(
+  env: { FALLBACK_TIMER?: unknown } | undefined,
+  override?: unknown
+): FallbackTimerClient | undefined {
+  const raw = override ?? env?.FALLBACK_TIMER;
+  if (isDurableObjectNamespace(raw)) {
+    return namespaceTimerClient(raw);
+  }
+  return raw && typeof raw === 'object' ? raw : undefined;
+}
+
+/**
  * Builds the {@link ArmTimerArgs} for a render input payload.
  *
  * @param id - Internal message identifier.
@@ -190,10 +245,7 @@ const timerOffAnnounced = new WeakSet<object>();
  * @param scope - The object the "once" is tied to; defaults to `env`.
  */
 export function announceTimerOff(env: MessagingEnv, timer: unknown, scope: object = env): void {
-  // Same "is there a timer at all" test as `resolveTimer`, inlined to keep this module free of
-  // a value import from `./status.js` (which imports the adapter from here).
-  const raw = timer ?? env.FALLBACK_TIMER;
-  if ((raw && typeof raw === 'object') || timerOffAnnounced.has(scope)) {
+  if (resolveTimer(env, timer) !== undefined || timerOffAnnounced.has(scope)) {
     return;
   }
   timerOffAnnounced.add(scope);

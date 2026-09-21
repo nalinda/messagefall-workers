@@ -15,7 +15,7 @@
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 
-import type { FallbackTimerClient } from './status.js';
+import type { FallbackTimerClient } from './timer.js';
 
 /**
  * Everything the fallback path needs to re-render a message on the next channel.

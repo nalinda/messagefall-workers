@@ -42,14 +42,8 @@ import {
   type StatusCallbackEvent,
   type ValidatedSendRequest,
 } from './send.js';
-import {
-  type Attempt,
-  type FallbackTimerClient,
-  type MessageRecord,
-  resolveTimer,
-  type StatusStore,
-} from './status.js';
-import { chainTimeoutMs } from './timer.js';
+import { type Attempt, type MessageRecord, type StatusStore } from './status.js';
+import { chainTimeoutMs, type FallbackTimerClient, resolveTimer } from './timer.js';
 
 const logger = createLogger();
 

@@ -38,12 +38,11 @@ import {
   type ChainProgress,
   chainStatus,
   deriveOverallStatus,
-  type FallbackTimerClient,
   type MessageRecord,
   MessageRecordNotFoundError,
   type StatusStore,
 } from './status.js';
-import { chainTimeoutMs } from './timer.js';
+import { chainTimeoutMs, type FallbackTimerClient } from './timer.js';
 import { ulid } from './ulid.js';
 import { errorMessage } from './values.js';
 

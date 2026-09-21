@@ -20,8 +20,13 @@
 import { createLogger } from '../core/logger.js';
 import { advanceChainFor, MessagingConfigError, statusStoreFor } from '../core/messaging.js';
 import { pickRenderInput, type RenderInput } from '../core/render-input.js';
-import { type FallbackTimerClient, isTerminalChainStatus } from '../core/status.js';
-import { armArgs, type ArmTimerArgs, registeredMessagingOptions } from '../core/timer.js';
+import { isTerminalChainStatus } from '../core/status.js';
+import {
+  armArgs,
+  type ArmTimerArgs,
+  type FallbackTimerClient,
+  registeredMessagingOptions,
+} from '../core/timer.js';
 import type { MessagingEnv } from '../env.js';
 import { DurableObjectBase } from './base.js';
 

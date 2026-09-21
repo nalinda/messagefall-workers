@@ -21,7 +21,7 @@ export interface MockFallbackTimerState {
 
 /**
  * Mock FallbackTimer interface for testing timer re-arming and cancellation. Structurally a
- * {@link import('../../src/core/status.js').FallbackTimerClient}, plus the call records the
+ * {@link import('../../src/core/timer.js').FallbackTimerClient}, plus the call records the
  * assertions read.
  */
 export interface MockFallbackTimer {
