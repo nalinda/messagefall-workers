@@ -170,6 +170,9 @@ describe('Entry points export documented functions', () => {
       'applyStatusEvents',
       'assertNoOtpWhatsAppText',
       'chainStatus',
+      // #10 scopes `createLogger` to `src/core/logger.ts`; the root entry's documented
+      // interface (#1) is `createMessaging`, `createMessagingApp`, `defineTemplates` and types.
+      'createLogger',
       'createWebhookHandler',
       'deriveOverallStatus',
       'extractTemplateSensitiveStrings',
@@ -206,7 +209,6 @@ describe('Entry points export documented functions', () => {
       'armTimer',
       'cancelTimer',
       'consoleProvider',
-      'createLogger',
       'createMessaging',
       'definedChannels',
       'defineTemplates',

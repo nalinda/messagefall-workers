@@ -22,13 +22,6 @@
  */
 
 export {
-  createLogger,
-  type LogEvent,
-  type LogFields,
-  type Logger,
-  type LogLevel,
-} from './core/logger.js';
-export {
   createMessaging,
   E164,
   EmailRecipientError,
