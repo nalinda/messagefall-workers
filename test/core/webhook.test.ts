@@ -427,8 +427,138 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
       expect(updatedRecord?.chain.attempts[0]?.status).toBe('failed');
       expect(updatedRecord?.chain.attempts[0]?.error).toBe(failureReason);
       expect(updatedRecord?.chain.attempts[0]?.at).toBe(eventTimestamp);
+      // The chain is `whatsapp` then `sms` and only WhatsApp has been attempted, so the chain is
+      // NOT terminal yet: the webhook path derives the chain status exactly as the send path
+      // does, leaving it `pending` until SMS has had its turn. Writing `failed` here would show
+      // a client polling /status a final failure that has not happened, and would invite the
+      // fallback timer's terminal check to clean up a chain that is still live.
+      expect(updatedRecord?.chain.status).toBe('pending');
+      expect(updatedRecord?.status).toBe('pending');
+    });
+
+    it('marks the chain failed once the failing attempt is the last configured channel', async () => {
+      const store = kvStatusStore(kv);
+
+      const messageId = 'msg_01J9DISPATCH000000000012';
+      const providerId = 'wamid.HBgL_01J9TEST_LAST_FAILED';
+      const eventTimestamp = '2026-09-20T12:00:20.000Z';
+
+      await store.create({
+        id: messageId,
+        template: 'securityAlert',
+        kind: 'notification',
+        policy: { fallback: ['whatsapp', 'sms'], always: [] },
+        chain: {
+          status: 'sent',
+          attempts: [
+            {
+              channel: 'whatsapp',
+              provider: 'meta-wa',
+              providerId: 'wamid.earlier_whatsapp',
+              status: 'failed',
+              at: '2026-09-20T12:00:00.000Z',
+            },
+            {
+              channel: 'sms',
+              provider: 'http-sms',
+              providerId,
+              status: 'sent',
+              at: '2026-09-20T12:00:05.000Z',
+            },
+          ],
+        },
+        always: [],
+        status: 'pending',
+        createdAt: '2026-09-20T12:00:00.000Z',
+        updatedAt: '2026-09-20T12:00:05.000Z',
+      });
+      await store.indexProviderId(providerId, {
+        id: messageId,
+        channel: 'sms',
+        provider: 'http-sms',
+      });
+
+      const provider: Provider = {
+        name: 'http-sms',
+        channel: 'sms',
+        send: () => Promise.resolve({ ok: true }),
+        webhook: {
+          parse: (): Promise<StatusEvent[]> =>
+            Promise.resolve([
+              { providerId, status: 'failed', error: 'carrier rejected', at: eventTimestamp },
+            ]),
+        },
+      };
+
+      const handleWebhook = createWebhookHandler({ providers: { sms: provider }, kv });
+      const response = await handleWebhook(
+        'http-sms',
+        new Request('http://localhost/webhooks/http-sms', { method: 'POST', body: '{}' })
+      );
+      expect(response.status).toBe(200);
+
+      const updatedRecord = await store.get(messageId);
+      // Every configured fallback channel has now been attempted and the last one failed, so
+      // the chain really is terminal.
       expect(updatedRecord?.chain.status).toBe('failed');
       expect(updatedRecord?.status).toBe('failed');
+    });
+
+    it('keeps a non-terminal webhook status verbatim on a chain with channels left to try', async () => {
+      const store = kvStatusStore(kv);
+
+      const messageId = 'msg_01J9DISPATCH000000000013';
+      const providerId = 'wamid.HBgL_01J9TEST_DELIVERED_EARLY';
+
+      await store.create({
+        id: messageId,
+        template: 'securityAlert',
+        kind: 'notification',
+        policy: { fallback: ['whatsapp', 'sms'], always: [] },
+        chain: {
+          status: 'sent',
+          attempts: [
+            {
+              channel: 'whatsapp',
+              provider: 'meta-wa',
+              providerId,
+              status: 'sent',
+              at: '2026-09-20T12:00:00.000Z',
+            },
+          ],
+        },
+        always: [],
+        status: 'sent',
+        createdAt: '2026-09-20T12:00:00.000Z',
+        updatedAt: '2026-09-20T12:00:00.000Z',
+      });
+      await store.indexProviderId(providerId, {
+        id: messageId,
+        channel: 'whatsapp',
+        provider: 'meta-wa',
+      });
+
+      const provider: Provider = {
+        name: 'meta-wa',
+        channel: 'whatsapp',
+        send: () => Promise.resolve({ ok: true }),
+        webhook: {
+          parse: (): Promise<StatusEvent[]> =>
+            Promise.resolve([{ providerId, status: 'delivered', at: '2026-09-20T12:00:30.000Z' }]),
+        },
+      };
+
+      const handleWebhook = createWebhookHandler({ providers: { whatsapp: provider }, kv });
+      await handleWebhook(
+        'meta-wa',
+        new Request('http://localhost/webhooks/meta-wa', { method: 'POST', body: '{}' })
+      );
+
+      const updatedRecord = await store.get(messageId);
+      // Only a `failed` tail is held back for the channels still to come; a success ends the
+      // chain wherever it lands.
+      expect(updatedRecord?.chain.status).toBe('delivered');
+      expect(updatedRecord?.status).toBe('delivered');
     });
   });
 

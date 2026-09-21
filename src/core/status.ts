@@ -268,6 +268,53 @@ function getStatusPrecedence(status: DeliveryStatus): number {
 }
 
 /**
+ * How far the chain walk has actually got, independent of which attempts landed on the record.
+ * `attempted` counts channels tried; `last` is the outcome of the most recent one.
+ */
+export interface ChainProgress {
+  attempted: number;
+  last: Attempt['status'];
+}
+
+/**
+ * The chain's status right now, from the attempts on the record plus, when known, the walk's
+ * actual progress (attempts whose write was lost still count as attempted). A `failed` tail is
+ * terminal only once every configured fallback channel has been attempted; until then the chain
+ * is `pending`, because the next channel has yet to be tried.
+ *
+ * This is THE answer to "what is this chain's status"; do not derive it a second way. Both
+ * writers use it: the send pipeline's `attemptRecorder` after each synchronous attempt, and the
+ * webhook path's `applyStatusUpdate` after a delivery status arrives. Taking the latest
+ * attempt's raw status instead would write a terminal `failed` for, say, a `{ fallback:
+ * ['whatsapp', 'sms'] }` chain the moment WhatsApp failed — before SMS was tried — which a
+ * client polling `/status` reads as a false final failure, and which the fallback timer's
+ * terminal check reads as licence to clean up a chain that is still live.
+ *
+ * @param attempts - The chain attempts as they stand on the record.
+ * @param fallback - The chain's configured fallback channels, in order.
+ * @param progress - The walk's progress, when the caller knows it.
+ * @returns The chain status.
+ */
+export function chainStatus(
+  attempts: Attempt[],
+  fallback: Channel[],
+  progress?: ChainProgress
+): MessageRecord['chain']['status'] {
+  if (fallback.length === 0) {
+    return 'pending';
+  }
+  const attempted = Math.max(attempts.length, progress?.attempted ?? 0);
+  const last = progress?.last ?? attempts.at(-1)?.status;
+  if (last === undefined) {
+    return 'pending';
+  }
+  if (last === 'failed' && attempted < fallback.length) {
+    return 'pending';
+  }
+  return last;
+}
+
+/**
  * Derives overall delivery status from policy, chain state, and always attempts.
  *
  * Rules:

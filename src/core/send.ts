@@ -30,6 +30,8 @@ import { renderedContent, scrubError } from './redact.js';
 import { isTimedChain, releaseChain, type RenderInput, renderInputKey } from './render-input.js';
 import {
   type Attempt,
+  type ChainProgress,
+  chainStatus,
   deriveOverallStatus,
   type FallbackTimerClient,
   type MessageRecord,
@@ -282,14 +284,7 @@ async function attemptChannel(
       };
 }
 
-/**
- * How far the chain walk has actually got, independent of which attempts landed on the record.
- * `attempted` counts channels tried; `last` is the outcome of the most recent one.
- */
-export interface ChainProgress {
-  attempted: number;
-  last: Attempt['status'];
-}
+export type { ChainProgress } from './status.js';
 
 /**
  * Persists one attempt as soon as it settles. Called by `runChain` for chain attempts (with the
@@ -372,30 +367,6 @@ export async function runChain(
     throw persistError;
   }
   return attempts;
-}
-
-/**
- * Chain status from the attempts on the record plus, when known, the walk's actual progress
- * (attempts whose write was lost still count as attempted). A `failed` tail is terminal only
- * once every configured fallback channel has been attempted; until then the chain is `pending`.
- */
-function chainStatus(
-  attempts: Attempt[],
-  fallback: Channel[],
-  progress?: ChainProgress
-): MessageRecord['chain']['status'] {
-  if (fallback.length === 0) {
-    return 'pending';
-  }
-  const attempted = Math.max(attempts.length, progress?.attempted ?? 0);
-  const last = progress?.last ?? attempts.at(-1)?.status;
-  if (last === undefined) {
-    return 'pending';
-  }
-  if (last === 'failed' && attempted < fallback.length) {
-    return 'pending';
-  }
-  return last;
 }
 
 /**

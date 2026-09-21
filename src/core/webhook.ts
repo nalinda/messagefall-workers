@@ -13,6 +13,7 @@ import { extractTemplateSensitiveStrings, scrubError } from './redact.js';
 import { asRenderInput, renderInputKey } from './render-input.js';
 import {
   type Attempt,
+  chainStatus,
   deriveOverallStatus,
   kvStatusStore,
   type MessageRecord,
@@ -168,6 +169,11 @@ function updateAttempt(att: Attempt, event: StatusEvent, ref: ProviderRef): Atte
 
 /**
  * Applies a delivery status event to a MessageRecord.
+ *
+ * The chain's status is re-derived with `chainStatus` — the same function the send pipeline's
+ * recorder uses — rather than taken from the latest attempt's raw status, so a `failed` webhook
+ * for a chain with fallback channels still to try leaves the chain `pending` until the walk has
+ * actually exhausted them.
  */
 function applyStatusUpdate(
   record: MessageRecord,
@@ -183,8 +189,10 @@ function applyStatusUpdate(
   const chainAttempts = record.chain.attempts.map((att) => updateAttempt(att, event, ref));
   const alwaysAttempts = record.always.map((att) => updateAttempt(att, event, ref));
 
-  const latestAttempt = chainAttempts.at(-1);
-  const newChainStatus = latestAttempt ? latestAttempt.status : record.chain.status;
+  const newChainStatus =
+    chainAttempts.length > 0
+      ? chainStatus(chainAttempts, record.policy.fallback)
+      : record.chain.status;
 
   const newOverallStatus = deriveOverallStatus(
     record.policy,
