@@ -262,11 +262,18 @@ function applyStatusUpdate(
   return { updatedRecord, isChain, hasChanged };
 }
 
+/**
+ * Resolves the sensitive strings to scrub from an event's error message.
+ *
+ * Only called when the event actually carries an `error` — the KV read here (and the
+ * `existingRecord` lookup at the call site) exist solely to feed this scrub, so skipping the call
+ * for the common `sent`/`delivered`/`read` case (no error) saves them entirely.
+ */
 async function resolveWebhookSensitive(
   options: WebhookDispatchOptions,
   refId: string,
   existingRecord: MessageRecord | null,
-  error?: string
+  error: string
 ): Promise<unknown[]> {
   const sensitive: unknown[] = [];
   const kv = options.kv ?? (options.env?.MESSAGES_KV as KVNamespace | undefined);
@@ -284,7 +291,7 @@ async function resolveWebhookSensitive(
     }
   }
 
-  if (error && existingRecord && options.templates) {
+  if (existingRecord && options.templates) {
     sensitive.push(
       ...extractTemplateSensitiveStrings(options.templates, existingRecord.template, error)
     );
@@ -306,10 +313,16 @@ async function handleSingleEvent(
     return { wasHandled: false };
   }
 
-  const existingRecord = await store.get(ref.id);
-  const sensitive = await resolveWebhookSensitive(options, ref.id, existingRecord, event.error);
-  const scrubbedEvent: StatusEvent =
-    event.error === undefined ? event : { ...event, error: scrubError(event.error, sensitive) };
+  // The KV reads behind this are only needed to scrub `event.error` — for a normal
+  // `sent`/`delivered`/`read` callback (no error) there is nothing to scrub, so both the
+  // render-input read and this record lookup are skipped, letting `store.update`'s own read
+  // below serve the update instead of a separate preceding one.
+  let scrubbedEvent: StatusEvent = event;
+  if (event.error !== undefined) {
+    const existingRecord = await store.get(ref.id);
+    const sensitive = await resolveWebhookSensitive(options, ref.id, existingRecord, event.error);
+    scrubbedEvent = { ...event, error: scrubError(event.error, sensitive) };
+  }
 
   // Captured from `applyStatusUpdate`'s own result rather than recomputed from `existingRecord`:
   // that keeps this one match against the actual write, not a second guess at what it did. A
