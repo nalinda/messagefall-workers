@@ -6,6 +6,7 @@
  * @module
  */
 
+import { errorMessage } from '../../core/values.js';
 import { formatHttpError, isRetryableStatus } from '../_shared/http.js';
 import type { OutboundMeta, Provider, RenderedSms, SendResult, StatusEvent } from '../types.js';
 
@@ -149,7 +150,7 @@ export function httpSms(c: HttpSmsOptions): Provider<RenderedSms> {
       } catch (err) {
         return {
           ok: false,
-          error: err instanceof Error ? err.message : String(err),
+          error: errorMessage(err),
           retryable: true,
         };
       }

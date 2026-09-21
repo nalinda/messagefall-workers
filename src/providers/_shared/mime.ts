@@ -38,15 +38,21 @@ export interface MimeMessageOptions {
 }
 
 /**
- * Encodes a string to standard Base64 using Web API primitives.
+ * Encodes a string to Base64 using Web API primitives, standard alphabet by default.
+ *
+ * Pass `{ urlSafe: true }` for Base64URL without padding (`+`/`/` swapped for `-`/`_`, `=`
+ * stripped) — the encoding Gmail's API expects for a raw MIME message.
  */
-function encodeBase64(str: string): string {
+export function encodeBase64(str: string, opts?: { urlSafe?: boolean }): string {
   const bytes = new TextEncoder().encode(str);
   let binary = '';
   for (const byte of bytes) {
     binary += String.fromCodePoint(byte);
   }
-  return btoa(binary);
+  const standard = btoa(binary);
+  return opts?.urlSafe
+    ? standard.replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '')
+    : standard;
 }
 
 /**

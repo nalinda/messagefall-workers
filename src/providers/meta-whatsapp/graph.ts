@@ -4,7 +4,8 @@
  * @module
  */
 
-import { formatHttpError, isRetryableStatus } from '../_shared/http.js';
+import { errorMessage } from '../../core/values.js';
+import { formatHttpError, isRetryableStatus, parseJson } from '../_shared/http.js';
 import type { OutboundMeta, RenderedWhatsApp, SendResult } from '../types.js';
 
 /**
@@ -132,15 +133,6 @@ export function mapSuccessResponse(body: unknown): SendResult {
   return typeof id === 'string' ? { ok: true, providerId: id } : { ok: true };
 }
 
-function parseJson(text: string): unknown {
-  if (text.length === 0) return undefined;
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return undefined;
-  }
-}
-
 /**
  * Send a rendered message through the Cloud API and map the outcome.
  */
@@ -152,7 +144,7 @@ export async function sendViaGraph(
   try {
     body = JSON.stringify(buildMessageBody(message));
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 
   let response: Response;
@@ -170,7 +162,7 @@ export async function sendViaGraph(
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : String(err),
+      error: errorMessage(err),
       retryable: true,
     };
   }

@@ -9,7 +9,7 @@ import type { DurableObjectNamespace, KVNamespace } from '@cloudflare/workers-ty
 import type { MessagingOptions } from './core/messaging.js';
 import { providerSetProblems } from './core/provider-set.js';
 import { isDurableObjectNamespace } from './core/timer.js';
-import { isRecord } from './core/values.js';
+import { errorMessage, isRecord } from './core/values.js';
 import { type Channel, CHANNELS } from './providers/types.js';
 import { type TemplateDef, validateTemplateDef } from './templates.js';
 
@@ -113,9 +113,7 @@ function validateProviders(env: unknown, providersFn: unknown): string[] {
     const dummyEnv = isRecord(env) ? (env as MessagingEnv) : ({} as MessagingEnv);
     set = (providersFn as (e: MessagingEnv) => unknown)(dummyEnv);
   } catch (err: unknown) {
-    return [
-      `providers function threw an error during evaluation: ${err instanceof Error ? err.message : String(err)}`,
-    ];
+    return [`providers function threw an error during evaluation: ${errorMessage(err)}`];
   }
 
   if (!isRecord(set)) {
@@ -134,7 +132,7 @@ function validateTemplates(templates: unknown): string[] {
     try {
       validateTemplateDef(templateName, def as TemplateDef<unknown>);
     } catch (err: unknown) {
-      problems.push(err instanceof Error ? err.message : String(err));
+      problems.push(errorMessage(err));
     }
   }
   return problems;

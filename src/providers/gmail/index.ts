@@ -9,8 +9,9 @@
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 
-import { formatHttpError, isRetryableStatus } from '../_shared/http.js';
-import { buildMimeMessage } from '../_shared/mime.js';
+import { errorMessage } from '../../core/values.js';
+import { formatHttpError, isRetryableStatus, parseJson } from '../_shared/http.js';
+import { buildMimeMessage, encodeBase64 } from '../_shared/mime.js';
 import type { OutboundMeta, Provider, RenderedEmail, SendResult } from '../types.js';
 import { createGmailTokenManager, type GmailTokenManager } from './oauth.js';
 
@@ -60,21 +61,7 @@ interface GoogleErrorPayload {
  * Encodes a string to standard Base64URL without padding.
  */
 function encodeBase64Url(str: string): string {
-  const bytes = new TextEncoder().encode(str);
-  let binary = '';
-  for (const byte of bytes) {
-    binary += String.fromCodePoint(byte);
-  }
-  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
-}
-
-function parseJson(text: string): unknown {
-  if (text.length === 0) return undefined;
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return undefined;
-  }
+  return encodeBase64(str, { urlSafe: true });
 }
 
 function extractGoogleError(error: GoogleErrorPayload['error']): string | undefined {
@@ -124,7 +111,7 @@ async function sendWithToken(
     return {
       errorResult: {
         ok: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: errorMessage(err),
         retryable: true,
       },
     };
@@ -137,7 +124,7 @@ async function sendWithToken(
     return {
       errorResult: {
         ok: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: errorMessage(err),
         retryable: true,
       },
     };
@@ -152,7 +139,7 @@ async function sendWithToken(
       return {
         errorResult: {
           ok: false,
-          error: err instanceof Error ? err.message : String(err),
+          error: errorMessage(err),
           retryable: true,
         },
       };
