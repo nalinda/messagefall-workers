@@ -137,8 +137,11 @@ describe('defineTemplates type-level specifications', () => {
     >;
     assertType<TestUnknownTemplateRejected>(true);
 
-    // Runtime assertion: invalid input rejected during render
-    expect(() => render(templates.loginCode, 'sms', { code: '12' }, 'en')).toThrow();
+    // Runtime assertion: input the caller's own schema rejects fails during render. A short
+    // code is NOT such an input — `z.string()` accepts it, and code format is the caller's
+    // concern, so this package adds no length rule of its own.
+    expect(() => render(templates.loginCode, 'sms', { code: 12 }, 'en')).toThrow();
+    expect(render(templates.loginCode, 'sms', { code: '12' }, 'en')).toEqual({ text: 'Code: 12' });
   });
 
   it('verifies TemplateDef channel types and rejects delivery naming undefined channels at definition time', () => {

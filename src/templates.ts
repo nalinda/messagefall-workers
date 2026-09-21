@@ -209,9 +209,12 @@ function formatIssuePath(path?: StandardSchemaIssue['path']): string {
 }
 
 /**
- * Validate a raw input payload against a template's schema (and the OTP code length rule)
- * without rendering. Returns the schema's output so callers can hand the transformed value to
- * {@link renderValidated} exactly once.
+ * Validate a raw input payload against a template's schema without rendering. Returns the
+ * schema's output so callers can hand the transformed value to {@link renderValidated} exactly
+ * once.
+ *
+ * The caller's schema is the only rule. This package deliberately adds none of its own — an
+ * OTP's code format and length are the caller's concern, not ours.
  *
  * @param def - Template definition.
  * @param input - Input payload before validation.
@@ -219,9 +222,7 @@ function formatIssuePath(path?: StandardSchemaIssue['path']): string {
  * @throws {TemplateValidationError} If the input fails the schema.
  */
 export function validateInput<In>(def: TemplateDef<In>, input: unknown): In {
-  const validated = validateSchema(def, input);
-  validateOtpCode(def.kind, validated);
-  return validated;
+  return validateSchema(def, input);
 }
 
 function validateSchema<In>(def: TemplateDef<In>, input: unknown): In {
@@ -245,15 +246,6 @@ function validateSchema<In>(def: TemplateDef<In>, input: unknown): In {
     );
   }
   return result.value;
-}
-
-function validateOtpCode(kind: TemplateDef['kind'], input: unknown): void {
-  if (kind !== 'otp') return;
-  if (!input || typeof input !== 'object' || !('code' in input)) return;
-  const code = (input as Record<string, unknown>).code;
-  if (typeof code === 'string' && code.length < 4) {
-    throw new TemplateValidationError('OTP code must be at least 4 characters');
-  }
 }
 
 function resolveWhatsAppLanguage(
