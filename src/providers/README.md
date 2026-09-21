@@ -139,15 +139,17 @@ dropped rather than reported, so the chain is not advanced on it.
 
 Each provider may require specific environment variables:
 
-| Variable              | Description                   |
-| --------------------- | ----------------------------- |
-| `META_WHATSAPP_*`     | Meta WhatsApp API credentials |
-| `TWILIO_ACCOUNT_SID`  | Twilio account SID            |
-| `TWILIO_AUTH_TOKEN`   | Twilio auth token             |
-| `VONAGE_FROM`         | Vonage phone number           |
-| `GMAIL_CLIENT_ID`     | Gmail OAuth client ID         |
-| `GMAIL_CLIENT_SECRET` | Gmail OAuth client secret     |
-| `GMAIL_REFRESH_TOKEN` | Gmail OAuth refresh token     |
+| Variable                   | Description                                       |
+| -------------------------- | ------------------------------------------------- |
+| `WHATSAPP_TOKEN`           | Meta Cloud API access token                       |
+| `WHATSAPP_PHONE_NUMBER_ID` | The sending number's id                           |
+| `WHATSAPP_APP_SECRET`      | Verifies `X-Hub-Signature-256` on status webhooks |
+| `WHATSAPP_VERIFY_TOKEN`    | Answers Meta's webhook verification handshake     |
+| `SMS_GATEWAY_URL`          | Endpoint the `http-sms` skeleton posts to         |
+| `SMS_GATEWAY_KEY`          | Bearer token for that endpoint                    |
+| `GMAIL_CLIENT_ID`          | Gmail OAuth client ID                             |
+| `GMAIL_CLIENT_SECRET`      | Gmail OAuth client secret                         |
+| `GMAIL_REFRESH_TOKEN`      | Gmail OAuth refresh token, scope `gmail.send`     |
 
 These are read from the Worker bindings by the provider factory in the `providers` option.
 
