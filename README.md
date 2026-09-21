@@ -270,12 +270,14 @@ interface Provider<Rendered> {
   ): Promise<{ ok: true; providerId?: string } | { ok: false; error: string; retryable?: boolean }>;
   webhook?: {
     verify?(request: Request): Promise<Response | null>; // e.g. Meta's GET handshake
-    parse(request: Request): Promise<StatusEvent[]>; // must check the signature; throw to reject
+    parse(request: Request, options?: WebhookParseOptions): Promise<StatusEvent[]>; // must check the signature; throw to reject
   };
 }
 ```
 
 `StatusEvent` is `{ providerId, status: 'sent' | 'delivered' | 'read' | 'failed', error?, at }`. The package correlates `providerId` back to the attempt and drives fallback from there. A provider with no `webhook` still works; its attempts simply stay `sent` until the chain timeout.
+
+`WebhookParseOptions` is `{ devUnsigned?: boolean }`. The dispatcher sets `devUnsigned: true` only when `MESSAGING_DEV_UNSIGNED=true` and the request arrived on localhost; a `parse` that wants to support the local-dev signature bypass must check it and skip verification when set.
 
 ### Built in
 
