@@ -6,7 +6,7 @@ The name is the feature: a message _falls_ from the preferred channel to the nex
 
 It is deliberately small. Every provider, including WhatsApp, is a plugin behind one contract: a `send` function and, if the provider reports delivery, a webhook handler. Built-in providers cover the common vendors; a local SMS gateway is ten lines. State lives in KV, with an optional Durable Object for timed fallback. Nothing runs outside your Worker.
 
-> **Status:** pre-release. The API described here is the target for 0.1.0 and may change before then.
+> **Status:** `0.1.0`, the first release — see the [CHANGELOG](CHANGELOG.md) for what it contains. It is not published to npm (see [Installation](#installation)), and the API may still change in a `0.x` line.
 
 ## Contents
 
@@ -59,8 +59,10 @@ This package handles those four things and leaves the rest to you.
 
 ## Installation
 
+Not on npm. `0.1.0` is tagged in this repository and the package is marked `private`, so install it from git:
+
 ```sh
-npm install messagefall-workers
+npm install github:nalinda/messagefall-workers#v0.1.0
 ```
 
 No other runtime dependencies. Hono is an optional peer dependency for the ready-made app.
