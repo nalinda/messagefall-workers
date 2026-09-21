@@ -776,9 +776,11 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
         expect(updated?.status).toBe(expectedStatus);
         expect(updated?.updatedAt).toBe(isApplied ? EVENT_AT : RECORDED_AT);
 
-        // `onStatus` sees every parsed event, applied or not; `onStatusApplied` — the hook that
-        // drives fallback and the terminal-state release — fires only for a real change.
-        expect(seenEvents).toHaveLength(1);
+        // Both observers fire only for a real change: `onStatus` is documented as being called
+        // on every status *change*, and `onStatusApplied` drives fallback and the terminal-state
+        // release. A dropped event — a redelivery, a rewind, an overwrite of a terminal
+        // outcome — moved nothing, so neither fires.
+        expect(seenEvents).toHaveLength(isApplied ? 1 : 0);
         expect(statusApplied).toHaveLength(isApplied ? 1 : 0);
       });
     }

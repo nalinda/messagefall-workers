@@ -356,7 +356,12 @@ async function handleSingleEvent(
     });
   }
 
-  if (options.onStatus) {
+  // Gated on `hasChanged` for the same reason the log line above is: `onStatus` is documented as
+  // being called on every status *change*, so a vendor redelivering one `failed` callback five
+  // times must not be reported to the caller's observer five times over. An event
+  // `applyStatusUpdate` dropped — a redelivery, a rewind, an overwrite of a terminal outcome —
+  // changed nothing about the message, and there is nothing to observe.
+  if (applied.hasChanged && options.onStatus) {
     await options.onStatus(scrubbedEvent, ref);
   }
 
