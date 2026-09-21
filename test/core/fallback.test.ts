@@ -21,47 +21,15 @@ import { advanceChain, type AdvanceChainArgs } from '../../src/core/fallback.js'
 import type { DeliveryPolicy } from '../../src/core/policy.js';
 import { kvStatusStore, type MessageRecord, type StatusStore } from '../../src/core/status.js';
 import type {
-  Channel,
   OutboundMeta,
-  Provider,
   RenderedEmail,
   RenderedSms,
   RenderedWhatsApp,
-  SendResult,
 } from '../../src/providers/types.js';
 import { defineTemplates } from '../../src/templates.js';
 import { createMockFallbackTimer, type MockFallbackTimer } from '../helpers/fallback.js';
+import { recordingProvider } from '../helpers/messaging.js';
 import { createMiniflareKV } from '../helpers/status.js';
-
-interface SentCall<T = unknown> {
-  message: T & OutboundMeta;
-  at: Date;
-}
-
-function createRecordingProvider(
-  name: string,
-  channel: Channel,
-  sendImpl?: (meta: OutboundMeta & Record<string, unknown>) => Promise<SendResult>
-): Provider & { calls: SentCall[] } {
-  const calls: SentCall[] = [];
-  let seq = 0;
-  return {
-    name,
-    channel,
-    calls,
-    send: async (message: OutboundMeta & Record<string, unknown>): Promise<SendResult> => {
-      calls.push({ message, at: new Date() });
-      if (sendImpl) {
-        return sendImpl(message);
-      }
-      seq++;
-      return {
-        ok: true,
-        providerId: `${name}_${Date.now()}_${seq}`,
-      };
-    },
-  };
-}
 
 const testTemplates = defineTemplates({
   otpVerification: {
@@ -112,8 +80,8 @@ describe('Issue #7: Fallback on failed delivery status', () => {
 
   describe('WhatsApp failure advances to SMS (primary fallback progression)', () => {
     it('produces an SMS attempt rendered from the SMS template, and the record shows both attempts in order', async () => {
-      const waProvider = createRecordingProvider('meta-wa', 'whatsapp');
-      const smsProvider = createRecordingProvider('twilio-sms', 'sms');
+      const waProvider = recordingProvider('whatsapp', 'meta-wa');
+      const smsProvider = recordingProvider('sms', 'twilio-sms');
 
       const messageId = 'msg_01J9FB00000000000000000001';
       const initialRecord: MessageRecord = {
@@ -172,7 +140,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
 
       // Assertion: SMS provider was called with rendered SMS template content
       expect(smsProvider.calls).toHaveLength(1);
-      const smsCall = smsProvider.calls[0].message as RenderedSms & OutboundMeta;
+      const smsCall = smsProvider.calls[0] as RenderedSms & OutboundMeta;
       expect(smsCall.to).toBe('+94771234567');
       expect(smsCall.text).toBe('Your authentication code is 739104. Valid for 5m.');
       expect(smsCall.messageId).toBe(messageId);
@@ -203,13 +171,13 @@ describe('Issue #7: Fallback on failed delivery status', () => {
     });
 
     it('indexes the newly created SMS provider id in the status store', async () => {
-      const smsProvider = createRecordingProvider('mock-sms', 'sms', () =>
+      const smsProvider = recordingProvider('sms', 'mock-sms', () =>
         Promise.resolve({
           ok: true,
           providerId: 'sms_vendor_ref_999',
         })
       );
-      const waProvider = createRecordingProvider('mock-wa', 'whatsapp');
+      const waProvider = recordingProvider('whatsapp', 'mock-wa');
 
       const messageId = 'msg_01J9FB00000000000000000002';
       const initialRecord: MessageRecord = {
@@ -265,8 +233,8 @@ describe('Issue #7: Fallback on failed delivery status', () => {
     });
 
     it('re-arms fallback timer when timer binding is present in env', async () => {
-      const waProvider = createRecordingProvider('meta-wa', 'whatsapp');
-      const smsProvider = createRecordingProvider('twilio-sms', 'sms');
+      const waProvider = recordingProvider('whatsapp', 'meta-wa');
+      const smsProvider = recordingProvider('sms', 'twilio-sms');
 
       const messageId = 'msg_01J9FB00000000000000000003';
       const initialRecord: MessageRecord = {
@@ -325,8 +293,8 @@ describe('Issue #7: Fallback on failed delivery status', () => {
 
   describe('Exhausting fallback chain ends with failed chain status', () => {
     it('a subsequent failed SMS status ends with chain.status = "failed" and the SMS error as the final error', async () => {
-      const waProvider = createRecordingProvider('meta-wa', 'whatsapp');
-      const smsProvider = createRecordingProvider('twilio-sms', 'sms');
+      const waProvider = recordingProvider('whatsapp', 'meta-wa');
+      const smsProvider = recordingProvider('sms', 'twilio-sms');
 
       const messageId = 'msg_01J9FB00000000000000000004';
       const initialRecord: MessageRecord = {
@@ -503,9 +471,9 @@ describe('Issue #7: Fallback on failed delivery status', () => {
 
   describe('Always attempts independence', () => {
     it('a failed email status on an always attempt changes only that attempt and never touches the chain', async () => {
-      const waProvider = createRecordingProvider('meta-wa', 'whatsapp');
-      const smsProvider = createRecordingProvider('twilio-sms', 'sms');
-      const emailProvider = createRecordingProvider('postmark', 'email');
+      const waProvider = recordingProvider('whatsapp', 'meta-wa');
+      const smsProvider = recordingProvider('sms', 'twilio-sms');
+      const emailProvider = recordingProvider('email', 'postmark');
 
       const messageId = 'msg_01J9FB00000000000000000007';
       const record: MessageRecord = {
@@ -581,9 +549,9 @@ describe('Issue #7: Fallback on failed delivery status', () => {
     });
 
     it('advancing fallback chain does not modify or re-dispatch always attempts', async () => {
-      const waProvider = createRecordingProvider('meta-wa', 'whatsapp');
-      const smsProvider = createRecordingProvider('twilio-sms', 'sms');
-      const emailProvider = createRecordingProvider('postmark', 'email');
+      const waProvider = recordingProvider('whatsapp', 'meta-wa');
+      const smsProvider = recordingProvider('sms', 'twilio-sms');
+      const emailProvider = recordingProvider('email', 'postmark');
 
       const messageId = 'msg_01J9FB00000000000000000008';
       const record: MessageRecord = {
@@ -653,8 +621,8 @@ describe('Issue #7: Fallback on failed delivery status', () => {
 
   describe('Idempotency and Terminal State Protection', () => {
     it('calling advanceChain twice for the same failure produces one extra attempt, not two', async () => {
-      const waProvider = createRecordingProvider('meta-wa', 'whatsapp');
-      const smsProvider = createRecordingProvider('twilio-sms', 'sms');
+      const waProvider = recordingProvider('whatsapp', 'meta-wa');
+      const smsProvider = recordingProvider('sms', 'twilio-sms');
 
       const messageId = 'msg_01J9FB00000000000000000009';
       const record: MessageRecord = {
@@ -717,7 +685,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
     });
 
     it('does nothing when chain.status is already delivered', async () => {
-      const smsProvider = createRecordingProvider('twilio-sms', 'sms');
+      const smsProvider = recordingProvider('sms', 'twilio-sms');
 
       const messageId = 'msg_01J9FB00000000000000000010';
       const record: MessageRecord = {
@@ -762,7 +730,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
     });
 
     it('does nothing when chain.status is already read', async () => {
-      const smsProvider = createRecordingProvider('twilio-sms', 'sms');
+      const smsProvider = recordingProvider('sms', 'twilio-sms');
 
       const messageId = 'msg_01J9FB00000000000000000011';
       const record: MessageRecord = {
@@ -807,7 +775,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
     });
 
     it('does nothing when chain.status is already failed and terminal', async () => {
-      const smsProvider = createRecordingProvider('twilio-sms', 'sms');
+      const smsProvider = recordingProvider('sms', 'twilio-sms');
 
       const messageId = 'msg_01J9FB00000000000000000012';
       const record: MessageRecord = {
@@ -860,8 +828,8 @@ describe('Issue #7: Fallback on failed delivery status', () => {
 
   describe('Fallback advancement via timeout reason', () => {
     it('advances from WhatsApp to SMS when advanceChain is called with reason: "timeout"', async () => {
-      const waProvider = createRecordingProvider('meta-wa', 'whatsapp');
-      const smsProvider = createRecordingProvider('twilio-sms', 'sms');
+      const waProvider = recordingProvider('whatsapp', 'meta-wa');
+      const smsProvider = recordingProvider('sms', 'twilio-sms');
 
       const messageId = 'msg_01J9FB00000000000000000013';
       const record: MessageRecord = {
@@ -911,7 +879,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
 
       // SMS provider was called with rendered SMS template
       expect(smsProvider.calls).toHaveLength(1);
-      const smsCall = smsProvider.calls[0].message as RenderedSms & OutboundMeta;
+      const smsCall = smsProvider.calls[0] as RenderedSms & OutboundMeta;
       expect(smsCall.text).toBe('Your authentication code is 409281. Valid for 5m.');
 
       const updatedRecord = await store.get(messageId);
@@ -924,16 +892,16 @@ describe('Issue #7: Fallback on failed delivery status', () => {
 
   describe('Immediate provider send failure and recursion', () => {
     it('recurses to next channel when immediate send fails on the next fallback provider', async () => {
-      const waProvider = createRecordingProvider('meta-wa', 'whatsapp');
+      const waProvider = recordingProvider('whatsapp', 'meta-wa');
       // SMS provider fails immediately on send
-      const smsProvider = createRecordingProvider('twilio-sms', 'sms', () =>
+      const smsProvider = recordingProvider('sms', 'twilio-sms', () =>
         Promise.resolve({
           ok: false,
           error: 'Twilio SMS service unavailable (503)',
         })
       );
       // Email provider succeeds
-      const emailProvider = createRecordingProvider('postmark', 'email', () =>
+      const emailProvider = recordingProvider('email', 'postmark', () =>
         Promise.resolve({
           ok: true,
           providerId: 'email_ok_114',
@@ -991,7 +959,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       expect(smsProvider.calls).toHaveLength(1);
       expect(emailProvider.calls).toHaveLength(1);
 
-      const emailCall = emailProvider.calls[0].message as RenderedEmail & OutboundMeta;
+      const emailCall = emailProvider.calls[0] as RenderedEmail & OutboundMeta;
       expect(emailCall.to).toBe('recipient14@example.com');
       expect(emailCall.subject).toBe('Your verification code');
       expect(emailCall.text).toBe('Your security code is 887766');
@@ -1016,8 +984,8 @@ describe('Issue #7: Fallback on failed delivery status', () => {
     });
 
     it('records the email channel failed rather than emailing the phone number when no address was recovered', async () => {
-      const waProvider = createRecordingProvider('meta-wa', 'whatsapp');
-      const emailProvider = createRecordingProvider('postmark', 'email', () =>
+      const waProvider = recordingProvider('whatsapp', 'meta-wa');
+      const emailProvider = recordingProvider('email', 'postmark', () =>
         Promise.resolve({ ok: true, providerId: 'email_ok_014b' })
       );
 
@@ -1073,8 +1041,8 @@ describe('Issue #7: Fallback on failed delivery status', () => {
     });
 
     it('sets chain.status = "failed" when all subsequent fallback providers fail immediately', async () => {
-      const waProvider = createRecordingProvider('meta-wa', 'whatsapp');
-      const smsProvider = createRecordingProvider('twilio-sms', 'sms', () =>
+      const waProvider = recordingProvider('whatsapp', 'meta-wa');
+      const smsProvider = recordingProvider('sms', 'twilio-sms', () =>
         Promise.resolve({
           ok: false,
           error: 'SMS network error',
@@ -1139,8 +1107,8 @@ describe('Issue #7: Fallback on failed delivery status', () => {
 
   describe('Synchronous input pass-through vs KV in:<id>', () => {
     it('uses synchronous input argument directly when provided without reading KV', async () => {
-      const waProvider = createRecordingProvider('meta-wa', 'whatsapp');
-      const smsProvider = createRecordingProvider('twilio-sms', 'sms');
+      const waProvider = recordingProvider('whatsapp', 'meta-wa');
+      const smsProvider = recordingProvider('sms', 'twilio-sms');
 
       const messageId = 'msg_01J9FB00000000000000000016';
       const record: MessageRecord = {
@@ -1188,13 +1156,13 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       });
 
       expect(smsProvider.calls).toHaveLength(1);
-      const smsCall = smsProvider.calls[0].message as RenderedSms & OutboundMeta;
+      const smsCall = smsProvider.calls[0] as RenderedSms & OutboundMeta;
       expect(smsCall.text).toBe('Your authentication code is 505050. Valid for 5m.');
     });
 
     it('records a failed attempt without dispatching when no render input can be recovered', async () => {
-      const waProvider = createRecordingProvider('meta-wa', 'whatsapp');
-      const smsProvider = createRecordingProvider('twilio-sms', 'sms');
+      const waProvider = recordingProvider('whatsapp', 'meta-wa');
+      const smsProvider = recordingProvider('sms', 'twilio-sms');
 
       const messageId = 'msg_01J9FB00000000000000000017';
       await store.create({
@@ -1250,8 +1218,8 @@ describe('Issue #7: Fallback on failed delivery status', () => {
 
   describe('Custom Fallback Policies with Skipped Channels', () => {
     it('advances in exact order defined by policy.fallback (e.g. SMS first then WhatsApp)', async () => {
-      const waProvider = createRecordingProvider('meta-wa', 'whatsapp');
-      const smsProvider = createRecordingProvider('twilio-sms', 'sms');
+      const waProvider = recordingProvider('whatsapp', 'meta-wa');
+      const smsProvider = recordingProvider('sms', 'twilio-sms');
 
       const customPolicy: DeliveryPolicy = { fallback: ['sms', 'whatsapp'], always: [] };
       const messageId = 'msg_01J9FB00000000000000000017';
@@ -1301,7 +1269,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
 
       // Next channel in policy ['sms', 'whatsapp'] after sms is whatsapp
       expect(waProvider.calls).toHaveLength(1);
-      const waCall = waProvider.calls[0].message as RenderedWhatsApp & OutboundMeta;
+      const waCall = waProvider.calls[0] as RenderedWhatsApp & OutboundMeta;
       expect(waCall.text).toBe('[ALERT] High CPU usage detected');
 
       const updatedRecord = await store.get(messageId);

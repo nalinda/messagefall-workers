@@ -27,15 +27,13 @@ import { createMessagingApp } from '../../src/app/hono.js';
 import type { Attempt, MessageRecord } from '../../src/core/status.js';
 import type { MessagingEnv } from '../../src/env.js';
 import type {
-  Channel,
   Provider,
   RenderedEmail,
   RenderedSms,
   RenderedWhatsApp,
-  SendResult,
 } from '../../src/providers/types.js';
 import { defineTemplates } from '../../src/templates.js';
-import { waitFor } from '../helpers/messaging.js';
+import { recordingProvider, waitFor } from '../helpers/messaging.js';
 import { createMiniflareKV } from '../helpers/status.js';
 import { createMockExecutionContext } from '../helpers/webhook.js';
 
@@ -70,26 +68,6 @@ async function pollStatus(
     return hasSettled(record);
   });
   return latest as MessageRecord;
-}
-
-function createRecordingProvider<R>(
-  name: string,
-  channel: Channel,
-  handler?: (msg: unknown) => Promise<SendResult>
-): Provider<R> & { calls: unknown[] } {
-  const calls: unknown[] = [];
-  return {
-    name,
-    channel,
-    calls,
-    send: (message: unknown) => {
-      calls.push(message);
-      if (handler) {
-        return handler(message);
-      }
-      return Promise.resolve({ ok: true, providerId: `${name}_${calls.length}` });
-    },
-  };
 }
 
 describe('createMessagingApp Hono routes and miniflare integration (Issue #13)', () => {
@@ -139,9 +117,9 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
   });
 
   it('serves all three routes in a worker built from README quick start under miniflare', async () => {
-    const waProvider = createRecordingProvider<RenderedWhatsApp>('meta-whatsapp', 'whatsapp');
-    const smsProvider = createRecordingProvider<RenderedSms>('http-sms', 'sms');
-    const emailProvider = createRecordingProvider<RenderedEmail>('gmail', 'email');
+    const waProvider = recordingProvider<RenderedWhatsApp>('whatsapp', 'meta-whatsapp');
+    const smsProvider = recordingProvider<RenderedSms>('sms', 'http-sms');
+    const emailProvider = recordingProvider<RenderedEmail>('email', 'gmail');
 
     // Add webhook handling to waProvider for route testing
     waProvider.webhook = {
@@ -235,9 +213,9 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
   });
 
   it('POST /send with delivery: "all" produces parallel attempts in the record', async () => {
-    const waProvider = createRecordingProvider<RenderedWhatsApp>('meta-whatsapp', 'whatsapp');
-    const smsProvider = createRecordingProvider<RenderedSms>('http-sms', 'sms');
-    const emailProvider = createRecordingProvider<RenderedEmail>('gmail', 'email');
+    const waProvider = recordingProvider<RenderedWhatsApp>('whatsapp', 'meta-whatsapp');
+    const smsProvider = recordingProvider<RenderedSms>('sms', 'http-sms');
+    const emailProvider = recordingProvider<RenderedEmail>('email', 'gmail');
 
     const app = createMessagingApp({
       templates: testTemplates,
@@ -297,7 +275,7 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
       gate.resolve();
     }, 2000);
 
-    const smsProvider = createRecordingProvider<RenderedSms>('http-sms', 'sms', async () => {
+    const smsProvider = recordingProvider<RenderedSms>('sms', 'http-sms', async () => {
       await gate.promise;
       return { ok: true, providerId: 'gated_sms_1' };
     });
@@ -354,7 +332,7 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
   });
 
   it('POST /send returns 400 on input validation, missing fields, or invalid phone number', async () => {
-    const smsProvider = createRecordingProvider<RenderedSms>('http-sms', 'sms');
+    const smsProvider = recordingProvider<RenderedSms>('sms', 'http-sms');
     const app = createMessagingApp({
       templates: testTemplates,
       providers: () => ({ sms: smsProvider }),
@@ -422,7 +400,7 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
   });
 
   it('POST /send returns 404 for unknown template', async () => {
-    const smsProvider = createRecordingProvider<RenderedSms>('http-sms', 'sms');
+    const smsProvider = recordingProvider<RenderedSms>('sms', 'http-sms');
     const app = createMessagingApp({
       templates: testTemplates,
       providers: () => ({ sms: smsProvider }),
@@ -448,7 +426,7 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
   });
 
   it('POST /send returns 422 for policy error (delivery names channel template does not define)', async () => {
-    const smsProvider = createRecordingProvider<RenderedSms>('http-sms', 'sms');
+    const smsProvider = recordingProvider<RenderedSms>('sms', 'http-sms');
     const app = createMessagingApp({
       templates: testTemplates,
       providers: () => ({ sms: smsProvider }),
@@ -475,7 +453,7 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
   });
 
   it('GET /status/:id returns the MessageRecord shape exported by #6 verbatim', async () => {
-    const smsProvider = createRecordingProvider<RenderedSms>('http-sms', 'sms');
+    const smsProvider = recordingProvider<RenderedSms>('sms', 'http-sms');
     const app = createMessagingApp({
       templates: testTemplates,
       providers: () => ({ sms: smsProvider }),
@@ -537,7 +515,7 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
   });
 
   it('GET /status/:id returns 404 when record does not exist', async () => {
-    const smsProvider = createRecordingProvider<RenderedSms>('http-sms', 'sms');
+    const smsProvider = recordingProvider<RenderedSms>('sms', 'http-sms');
     const app = createMessagingApp({
       templates: testTemplates,
       providers: () => ({ sms: smsProvider }),
@@ -553,7 +531,7 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
   });
 
   it('GET, POST /webhooks/:provider dispatches to handleWebhook and returns 404 for unknown provider', async () => {
-    const waProvider = createRecordingProvider<RenderedWhatsApp>('meta-whatsapp', 'whatsapp');
+    const waProvider = recordingProvider<RenderedWhatsApp>('whatsapp', 'meta-whatsapp');
     waProvider.webhook = {
       parse: async (req: Request) => {
         const body = (await req.json()) as { id: string; status: 'delivered' };
@@ -592,7 +570,7 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
   });
 
   it('normalises basePath so "/messaging" and "/messaging/" behave identically', async () => {
-    const smsProvider = createRecordingProvider<RenderedSms>('http-sms', 'sms');
+    const smsProvider = recordingProvider<RenderedSms>('sms', 'http-sms');
 
     // 1. basePath without trailing slash
     const appWithoutSlash = createMessagingApp({

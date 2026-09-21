@@ -99,22 +99,29 @@ export interface RecordingProvider<R> extends Provider<R> {
  *
  * @param channel - Channel the provider serves.
  * @param name - Provider name reported in attempts.
- * @param results - Results to return, in order, one per call.
+ * @param resultsOrSend - Either results to return, in order, one per call (the queue answers
+ *   `{ ok: true }` once exhausted), or a function computing the result per call — for a test
+ *   that needs the result to depend on the call (a specific `providerId`, a rejection, one
+ *   channel behaving differently from another).
  * @returns A provider that records calls.
  */
 export function recordingProvider<R>(
   channel: Channel,
   name: string,
-  results: SendResult[] = []
+  resultsOrSend: SendResult[] | ((message: RecordedCall<R>) => Promise<SendResult>) = []
 ): RecordingProvider<R> {
   const calls: RecordedCall<R>[] = [];
-  const queue = [...results];
+  const send = Array.isArray(resultsOrSend) ? undefined : resultsOrSend;
+  const queue = Array.isArray(resultsOrSend) ? [...resultsOrSend] : [];
   return {
     name,
     channel,
     calls,
     send: (message: R & OutboundMeta): Promise<SendResult> => {
       calls.push(message);
+      if (send) {
+        return send(message);
+      }
       const next = queue.shift() ?? { ok: true, providerId: `${name}_${calls.length}` };
       return Promise.resolve(next);
     },
