@@ -394,8 +394,8 @@ describe('Issue #10: No message bodies in logs, enforced in code', () => {
         offendingCalls.push(...fileMatches);
       }
 
-      // In the RED phase, this assertion will fail because src/core/send.ts and
-      // src/core/webhook.ts currently contain raw console.* calls.
+      // Every log line goes through `createLogger`, which is what keeps message content out of
+      // them; the console provider is the one place that prints a message on purpose.
       expect(offendingCalls).toEqual([]);
     });
   });
