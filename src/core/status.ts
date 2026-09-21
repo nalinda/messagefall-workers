@@ -213,6 +213,12 @@ function providerIdKey(provider: string, providerId: string): string {
   return `pid:${provider}:${providerId}`;
 }
 
+const TERMINAL_CHAIN_STATUSES: ReadonlySet<DeliveryStatus | 'pending'> = new Set([
+  'delivered',
+  'read',
+  'failed',
+]);
+
 /**
  * Whether a chain status is terminal: nothing further can happen to the chain, so the fallback
  * timer is cancelled (or, when it fires anyway, only cleans up). `sent` and `pending` are not.
@@ -223,12 +229,6 @@ function providerIdKey(provider: string, providerId: string): string {
 export function isTerminalChainStatus(status: DeliveryStatus | 'pending'): boolean {
   return TERMINAL_CHAIN_STATUSES.has(status);
 }
-
-const TERMINAL_CHAIN_STATUSES: ReadonlySet<DeliveryStatus | 'pending'> = new Set([
-  'delivered',
-  'read',
-  'failed',
-]);
 
 /**
  * Whether a status is a confirmed delivery: the message demonstrably reached the recipient.
