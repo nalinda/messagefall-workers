@@ -17,23 +17,21 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import * as v from 'valibot';
 import { z } from 'zod';
 
 import type { Channel } from '../src/providers/types.js';
-import { definedChannels, defineTemplates, render, type TemplateDef } from '../src/templates.js';
-import type { StandardSchemaV1 } from '../src/types.js';
+import {
+  definedChannels,
+  defineTemplates,
+  render,
+  type TemplateDef,
+  TemplateValidationError,
+} from '../src/templates.js';
 
 interface UserScore {
   username: string;
   score: number;
-}
-
-function isUserScore(val: unknown): val is UserScore {
-  if (typeof val !== 'object' || val === null) {
-    return false;
-  }
-  const obj = val as Record<string, unknown>;
-  return typeof obj.username === 'string' && typeof obj.score === 'number';
 }
 
 describe('defineTemplates: Definition-time validation', () => {
@@ -408,36 +406,19 @@ describe('Zod and Valibot interoperability via Standard Schema only', () => {
     expect(() => render(zodCatalog.zodOtp, 'sms', { code: 'too_short' }, 'en')).toThrow();
   });
 
-  it('works with Valibot schemas via Standard Schema (~standard) without direct dependency', () => {
-    // Pure Standard Schema compliant validator simulating Valibot
-    const valibotStandardSchema: StandardSchemaV1<unknown, UserScore> = {
-      '~standard': {
-        version: 1,
-        vendor: 'valibot',
-        validate: (value: unknown) => {
-          if (isUserScore(value)) {
-            return {
-              value: {
-                username: value.username,
-                score: value.score,
-              },
-            };
-          }
-          return {
-            issues: [
-              {
-                message: 'Invalid username or score',
-                path: ['username'],
-              },
-            ],
-          };
-        },
-      },
-    };
+  it('works with a real Valibot schema via Standard Schema (~standard)', () => {
+    // The actual `valibot` package, not a hand-written object literal claiming
+    // `vendor: 'valibot'`: only a real schema proves this package reads nothing but
+    // `~standard` and works against a second vendor's implementation of it.
+    const scoreSchema = v.object({
+      username: v.pipe(v.string(), v.minLength(1)),
+      score: v.number(),
+    });
+    expect(scoreSchema['~standard'].vendor).toBe('valibot');
 
     const valibotCatalog = defineTemplates({
       gameNotification: {
-        input: valibotStandardSchema,
+        input: scoreSchema,
         kind: 'notification',
         sms: ({ username, score }: UserScore) => `Player ${username} scored ${score}`,
       },
@@ -451,9 +432,47 @@ describe('Zod and Valibot interoperability via Standard Schema only', () => {
     );
     expect(rendered).toEqual({ text: 'Player alice scored 100' });
 
+    // A wrong field type and a missing field both fail, through Valibot's own issues.
     expect(() =>
       render(valibotCatalog.gameNotification, 'sms', { username: 'alice', score: 'NaN' }, 'en'),
-    ).toThrow();
+    ).toThrow(TemplateValidationError);
+    expect(() =>
+      render(valibotCatalog.gameNotification, 'sms', { username: 'alice' }, 'en'),
+    ).toThrow(TemplateValidationError);
+  });
+
+  it('reports the Valibot issue path in the validation error message', () => {
+    const catalog = defineTemplates({
+      order: {
+        input: v.object({ orderId: v.string() }),
+        kind: 'notification',
+        sms: ({ orderId }: { orderId: string }) => `Order ${orderId}`,
+      },
+    });
+
+    let message = '';
+    try {
+      render(catalog.order, 'sms', { orderId: 42 }, 'en');
+    } catch (error) {
+      message = (error as Error).message;
+    }
+
+    expect(message).toContain('orderId');
+  });
+
+  it('transforms through a Valibot pipe and renders the transformed value', () => {
+    const trimmedName = v.pipe(v.string(), v.trim());
+    const catalog = defineTemplates({
+      greeting: {
+        input: v.object({ name: trimmedName }),
+        kind: 'notification',
+        sms: ({ name }: { name: string }) => `Hi ${name}!`,
+      },
+    });
+
+    expect(render(catalog.greeting, 'sms', { name: '  alice  ' }, 'en')).toEqual({
+      text: 'Hi alice!',
+    });
   });
 });
 
