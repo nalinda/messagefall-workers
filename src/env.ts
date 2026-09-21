@@ -110,8 +110,11 @@ function validateProviders(env: unknown, providersFn: unknown): string[] {
 
   let set: unknown;
   try {
-    const dummyEnv = isRecord(env) ? (env as MessagingEnv) : ({} as MessagingEnv);
-    set = (providersFn as (e: MessagingEnv) => unknown)(dummyEnv);
+    // The caller's real bindings, not a stand-in: the factory is invoked with the very `env` the
+    // Worker runs on, so a provider that reads a secret at construction sees the real one. Only
+    // an `env` that is not an object at all falls back to `{}`.
+    const validationEnv = isRecord(env) ? (env as MessagingEnv) : ({} as MessagingEnv);
+    set = (providersFn as (e: MessagingEnv) => unknown)(validationEnv);
   } catch (err: unknown) {
     return [`providers function threw an error during evaluation: ${errorMessage(err)}`];
   }
