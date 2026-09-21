@@ -61,8 +61,9 @@ export function renderInputKey(id: string): string {
  * Reads the render input for a message back out of KV.
  *
  * A payload that is not the {@link RenderInput} envelope (an older or hand-written entry) is
- * treated as the bare template input. Unreadable or absent entries yield `undefined`: the
- * fallback path degrades to rendering from an empty input rather than failing.
+ * treated as the bare template input. Unreadable or absent entries yield `undefined`, and the
+ * fallback path then records the next channel as a failed attempt rather than dispatching a
+ * message rebuilt from nothing — which would reach a real gateway with a blank recipient.
  *
  * @param kv - KV namespace holding the key, if the deployment has one.
  * @param id - Internal message identifier.

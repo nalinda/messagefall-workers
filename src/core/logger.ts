@@ -41,6 +41,7 @@ export type LogEvent =
   | 'webhook.applied'
   | 'webhook.received'
   | 'fallback.advance'
+  | 'fallback.input-lost'
   | 'timer.armed'
   | 'timer.arm-failed'
   | 'timer.cancelled'

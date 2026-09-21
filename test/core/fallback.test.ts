@@ -1138,6 +1138,58 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       const smsCall = smsProvider.calls[0].message as RenderedSms & OutboundMeta;
       expect(smsCall.text).toBe('Your authentication code is 505050. Valid for 5m.');
     });
+
+    it('records a failed attempt without dispatching when no render input can be recovered', async () => {
+      const waProvider = createRecordingProvider('meta-wa', 'whatsapp');
+      const smsProvider = createRecordingProvider('twilio-sms', 'sms');
+
+      const messageId = 'msg_01J9FB00000000000000000017';
+      await store.create({
+        id: messageId,
+        template: 'otpVerification',
+        kind: 'otp',
+        policy: { fallback: ['whatsapp', 'sms'], always: [] },
+        chain: {
+          status: 'pending',
+          attempts: [
+            {
+              channel: 'whatsapp',
+              provider: 'meta-wa',
+              status: 'failed',
+              error: 'WA rejected',
+              at: '2026-09-20T10:00:00.000Z',
+            },
+          ],
+        },
+        always: [],
+        status: 'pending',
+        createdAt: '2026-09-20T10:00:00.000Z',
+        updatedAt: '2026-09-20T10:00:00.000Z',
+      });
+
+      // The in:<id> entry expired before the failed status arrived, and no timer holds it.
+      expect(await kv.get(`in:${messageId}`)).toBeNull();
+
+      await advanceChain({
+        id: messageId,
+        reason: 'failed',
+        env: { MESSAGES_KV: kv },
+        options: { templates: testTemplates, providers: [waProvider, smsProvider] },
+        store,
+      });
+
+      // No provider is called: a rebuilt payload would carry a blank recipient.
+      expect(smsProvider.calls).toHaveLength(0);
+
+      const updated = await store.get(messageId);
+      expect(updated?.chain.attempts).toHaveLength(2);
+      const smsAttempt = updated!.chain.attempts[1];
+      expect(smsAttempt.channel).toBe('sms');
+      expect(smsAttempt.provider).toBe('twilio-sms');
+      expect(smsAttempt.status).toBe('failed');
+      expect(smsAttempt.error).toContain('Render input is no longer available');
+      expect(updated?.chain.status).toBe('failed');
+    });
   });
 
   describe('Custom Fallback Policies with Skipped Channels', () => {

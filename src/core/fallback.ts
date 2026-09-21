@@ -18,6 +18,7 @@
 import type { KVNamespace } from '@cloudflare/workers-types';
 
 import type { MessagingEnv } from '../env.js';
+import type { Channel } from '../providers/types.js';
 import { type TemplateDef, validateInput } from '../templates.js';
 import { createLogger } from './logger.js';
 import type { MessagingOptions } from './messaging.js';
@@ -32,6 +33,7 @@ import {
 } from './render-input.js';
 import {
   attemptRecorder,
+  NO_PROVIDER,
   notifyStatus,
   type ProviderSet,
   runChain,
@@ -138,7 +140,7 @@ function extractFromTimer(
 async function resolveInputPayload(
   args: AdvanceChainArgs,
   kv: KVNamespace | undefined
-): Promise<RenderInput> {
+): Promise<RenderInput | undefined> {
   if (args.input !== undefined && args.input !== null) {
     // The timer stores input and locale but not necessarily the recipient (#8): the `in:<id>`
     // entry the send wrote fills in whatever the pass-through lacks.
@@ -153,12 +155,16 @@ async function resolveInputPayload(
     return fromTimer;
   }
 
-  const fromKV = await readRenderInput(kv, args.id);
-  if (fromKV) {
-    return fromKV;
-  }
+  return readRenderInput(kv, args.id);
+}
 
-  return { input: {} };
+/**
+ * Whether a recovered payload can actually rebuild the send. Without a recipient there is
+ * nothing to address the next channel to, and dispatching anyway would hand a real gateway a
+ * blank `to`.
+ */
+function isRenderable(payload: RenderInput | undefined): payload is RenderInput & { to: string } {
+  return payload !== undefined && typeof payload.to === 'string' && payload.to.length > 0;
 }
 
 function resolveTemplate(
@@ -234,6 +240,58 @@ async function finalizeExhaustion(
 }
 
 /**
+ * The name the configured provider for a channel would be recorded under, or {@link NO_PROVIDER}
+ * when the channel has none.
+ */
+function providerNameFor(providers: ProviderSet, channel: Channel): string {
+  switch (channel) {
+    case 'whatsapp': {
+      return providers.whatsapp?.name ?? NO_PROVIDER;
+    }
+    case 'sms': {
+      return providers.sms?.name ?? NO_PROVIDER;
+    }
+    case 'email': {
+      return providers.email?.name ?? NO_PROVIDER;
+    }
+  }
+}
+
+/**
+ * Seals a chain whose render input can no longer be recovered — neither the timer nor the
+ * `in:<id>` KV entry has it, because the entry expired before the `failed` status arrived.
+ *
+ * There is nothing to render from and nowhere to address it, so the next channel is recorded as
+ * a failed attempt and the chain released. It is NOT dispatched: a payload rebuilt from nothing
+ * carries a blank recipient, and a real gateway would accept it.
+ */
+async function finalizeMissingInput(
+  args: AdvanceChainArgs,
+  record: MessageRecord,
+  providers: ProviderSet,
+  nextChannel: Channel,
+  kv: KVNamespace | undefined
+): Promise<void> {
+  logger.warn('fallback.input-lost', { id: args.id, kind: record.kind, channel: nextChannel });
+  const recorder = attemptRecorder(sendDeps(args, providers, record), args.id, record.policy);
+  await recorder.record(
+    {
+      channel: nextChannel,
+      provider: providerNameFor(providers, nextChannel),
+      status: 'failed',
+      error: 'Render input is no longer available; the message cannot be rebuilt for fallback',
+      at: new Date().toISOString(),
+    },
+    'chain',
+    {
+      attempted: Math.max(record.policy.fallback.length, record.chain.attempts.length + 1),
+      last: 'failed',
+    }
+  );
+  await release(args, record, kv);
+}
+
+/**
  * This module's call into the shared terminal-state cleanup, with the timer resolved the same
  * way every other path here resolves it.
  */
@@ -266,13 +324,14 @@ function missingTemplate(kind: MessageRecord['kind']): TemplateDef<unknown> {
 function rebuildRequest(
   record: MessageRecord,
   template: TemplateDef<unknown> | undefined,
-  payload: RenderInput
+  payload: RenderInput & { to: string }
 ): ValidatedSendRequest {
   const locale = payload.locale ?? DEFAULT_LOCALE;
   return {
     templateName: record.template,
     template: template ?? missingTemplate(record.kind),
-    to: payload.to ?? '',
+    // Guaranteed by `isRenderable`: an advance with no recoverable recipient never gets here.
+    to: payload.to,
     email: payload.email ?? payload.to,
     locale,
     input: payload.input,
@@ -311,8 +370,13 @@ export async function advanceChain(args: AdvanceChainArgs): Promise<void> {
   }
 
   const payload = await resolveInputPayload(args, kv);
-  const template = resolveTemplate(args.options.templates, initialRecord.template);
   const providers = toProviderSet(args.options.providers, args.env);
+  if (!isRenderable(payload)) {
+    await finalizeMissingInput(args, initialRecord, providers, nextChannels[0], kv);
+    return;
+  }
+
+  const template = resolveTemplate(args.options.templates, initialRecord.template);
   const recorder = attemptRecorder(
     sendDeps(args, providers, initialRecord),
     args.id,
