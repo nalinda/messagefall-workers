@@ -274,8 +274,8 @@ const INPUT_INVALID: UnusableInput = {
 
 /**
  * Seals a chain whose render input cannot be used — either it can no longer be recovered
- * (neither the timer nor the `in:<id>` KV entry has it, because the entry expired before the
- * `failed` status arrived), or it no longer validates against the template's schema, which a
+ * (the `in:<id>` KV entry no longer has it and no pass-through was supplied, because the entry
+ * expired before the `failed` status arrived), or it no longer validates against the template's schema, which a
  * redeploy that tightened that schema inside the chain's timeout window will do.
  *
  * There is nothing to render from, so the next channel is recorded as a failed attempt and the
@@ -361,7 +361,7 @@ function missingTemplate(kind: MessageRecord['kind']): TemplateDef<unknown> {
 
 /**
  * Rebuilds the `ValidatedSendRequest` that `runChain` renders from, out of the record and the
- * input payload recovered from KV / the timer / the caller.
+ * input payload recovered from KV / the caller.
  */
 function rebuildRequest(
   record: MessageRecord,

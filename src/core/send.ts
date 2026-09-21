@@ -360,9 +360,10 @@ export interface AttemptRecorder {
  * Inputs for that async path: `runChain` needs a `ValidatedSendRequest` (to, locale, validated
  * input). The `MessageRecord` deliberately carries none of them, so they live in a separate KV
  * key, `in:<id>`, written by `runSend` below with a TTL matching the chain timeout and stashed
- * with the fallback timer too. The fallback path reads whichever of the two it finds (or takes
- * a synchronous `input` pass-through) to rebuild the render with `validateInput` +
- * `renderValidated`, and drops the key once the chain reaches a terminal state.
+ * with the fallback timer too. The fallback path reads the `in:<id>` entry, or takes the
+ * synchronous `input` pass-through the alarm hands it, to rebuild the render with
+ * `validateInput` + `renderValidated`, and drops the key once the chain reaches a terminal
+ * state.
  */
 export async function runChain(
   req: ValidatedSendRequest,
