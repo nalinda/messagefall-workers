@@ -10,30 +10,6 @@
  * @module
  */
 
-export type {
-  Channel,
-  DeliveryStatus,
-  OutboundMeta,
-  Provider,
-  RenderedEmail,
-  RenderedSms,
-  RenderedWhatsApp,
-  SendResult,
-  StatusEvent,
-  TemplateKind,
-} from './providers/types.js';
-export { CHANNELS } from './providers/types.js';
-export type {
-  AnyRendered,
-  EmailTemplateConfig,
-  InputOf,
-  Locale,
-  TemplateDef,
-  Templates,
-  WhatsAppTemplateConfig,
-} from './templates.js';
-export { definedChannels, defineTemplates, render, TemplateValidationError } from './templates.js';
-
 /**
  * Issue reported by standard schema validation.
  */
@@ -82,3 +58,26 @@ export type { StatusApplied, WebhookDispatchOptions, WebhookHandler } from './co
 export { handleWebhook } from './core/webhook.js';
 export type { MessagingEnv } from './env.js';
 export { validateEnv } from './env.js';
+export type {
+  Channel,
+  DeliveryStatus,
+  OutboundMeta,
+  Provider,
+  RenderedEmail,
+  RenderedSms,
+  RenderedWhatsApp,
+  SendResult,
+  StatusEvent,
+  TemplateKind,
+} from './providers/types.js';
+export { CHANNELS } from './providers/types.js';
+export type {
+  AnyRendered,
+  EmailTemplateConfig,
+  InputOf,
+  Locale,
+  TemplateDef,
+  Templates,
+  WhatsAppTemplateConfig,
+} from './templates.js';
+export { definedChannels, defineTemplates, render, TemplateValidationError } from './templates.js';
