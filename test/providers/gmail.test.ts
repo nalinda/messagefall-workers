@@ -206,11 +206,11 @@ describe('Gmail provider (Issue #20)', () => {
   it('floors the token cache expirationTtl at 60 seconds for a short-lived token', async () => {
     // expires_in 30 leaves a usable life of 1s after the safety buffer, and KV rejects an
     // expirationTtl below its own 60-second minimum outright.
-    const puts: { key: string; ttl: number | undefined }[] = [];
+    const puts: { key: string; value: string; ttl: number | undefined }[] = [];
     const recordingCache = {
       get: () => Promise.resolve(null),
-      put: (key: string, _value: string, opts?: { expirationTtl?: number }) => {
-        puts.push({ key, ttl: opts?.expirationTtl });
+      put: (key: string, value: string, opts?: { expirationTtl?: number }) => {
+        puts.push({ key, value, ttl: opts?.expirationTtl });
         return Promise.resolve();
       },
       delete: () => Promise.resolve(),
@@ -232,6 +232,47 @@ describe('Gmail provider (Issue #20)', () => {
     expect(result.ok).toBe(true);
     expect(puts).toHaveLength(1);
     expect(puts[0]?.ttl).toBe(60);
+    // The entry carries the token's own expiry, because the floored KV TTL cannot: without it a
+    // reader has no way to tell that this entry deliberately outlives its token.
+    expect(puts[0]?.value).toMatch(/"expiresAt":\d+/);
+  });
+
+  it('re-exchanges rather than serving a cached token that has already expired', async () => {
+    // The KV entry's TTL is floored at 60s, so a short-lived token's entry survives the token.
+    // The reader has to honour the stored `expiresAt`, or every send in that window costs a 401
+    // and a re-exchange on top of the cache read.
+    const expiredEntry = JSON.stringify({
+      token: 'ya29.already_expired',
+      expiresAt: Date.now() - 1000,
+    });
+    const expiredCache = {
+      get: () => Promise.resolve(expiredEntry),
+      put: () => Promise.resolve(),
+      delete: () => Promise.resolve(),
+    } as unknown as GmailConfig['tokenCache'];
+
+    let tokenExchangeCount = 0;
+    const authorizations: (string | null)[] = [];
+    mockFetchHandler((url, init) => {
+      if (url.includes('oauth2.googleapis.com/token')) {
+        tokenExchangeCount++;
+        return Response.json({ access_token: 'ya29.freshly_exchanged' }, { status: 200 });
+      }
+      if (url.includes('gmail.googleapis.com/gmail/v1/users/me/messages/send')) {
+        authorizations.push(
+          new Headers(init?.headers as Record<string, string> | undefined).get('authorization')
+        );
+        return Response.json({ id: 'gmail_after_expiry' }, { status: 200 });
+      }
+      return new Response('Not Found', { status: 404 });
+    });
+
+    const provider = gmail({ ...testConfig, tokenCache: expiredCache });
+    const result = await provider.send(sampleEmail);
+
+    expect(result.ok).toBe(true);
+    expect(tokenExchangeCount).toBe(1);
+    expect(authorizations).toEqual(['Bearer ya29.freshly_exchanged']);
   });
 
   it('still reports the send as successful when the token cache write fails', async () => {

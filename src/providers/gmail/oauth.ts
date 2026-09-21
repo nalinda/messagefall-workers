@@ -68,6 +68,42 @@ async function computeCacheKey(clientId: string, refreshToken: string): Promise<
 }
 
 /**
+ * What the cross-isolate cache holds: the token plus the epoch-millisecond instant it stops being
+ * usable. The expiry travels with the token because the KV entry's own TTL cannot carry it — it is
+ * floored at {@link KV_MIN_EXPIRATION_TTL}, so a short-lived token's entry deliberately outlives
+ * the token, and a reader with only the bare string had no way to tell.
+ */
+interface CachedToken {
+  token: string;
+  expiresAt: number;
+}
+
+/**
+ * Reads a cache entry, or null when it is absent, unparseable or already past its expiry. A value
+ * this function cannot vouch for is treated as a miss: re-exchanging the refresh token is cheap
+ * and always correct.
+ */
+function parseCachedToken(raw: string | null): CachedToken | null {
+  if (raw === null) {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    return null;
+  }
+  const { token, expiresAt } = parsed as Partial<CachedToken>;
+  if (typeof token !== 'string' || typeof expiresAt !== 'number') {
+    return null;
+  }
+  return Date.now() < expiresAt ? { token, expiresAt } : null;
+}
+
+/**
  * Creates a token manager instance for the provided OAuth credentials.
  *
  * @param options - Gmail OAuth credentials and optional KV cache.
@@ -92,10 +128,10 @@ export function createGmailTokenManager(options: GmailOAuthOptions): GmailTokenM
    * retryable send failure for a send that could have gone out. The only cost of a lost write
    * is that the next isolate exchanges the refresh token again.
    */
-  async function cacheToken(accessToken: string, ttlSeconds: number): Promise<void> {
+  async function cacheToken(entry: CachedToken, ttlSeconds: number): Promise<void> {
     try {
       const key = await getCacheKey();
-      await options.tokenCache?.put(key, accessToken, { expirationTtl: ttlSeconds });
+      await options.tokenCache?.put(key, JSON.stringify(entry), { expirationTtl: ttlSeconds });
     } catch (error) {
       logger.warn('provider.token-cache-failed', {
         provider: 'gmail',
@@ -146,15 +182,17 @@ export function createGmailTokenManager(options: GmailOAuthOptions): GmailTokenM
     // The token's usable life, with a safety buffer for clock skew and the request in flight.
     const lifetimeSeconds = Math.max(expiresIn - 60, 1);
 
+    const expiresAt = Date.now() + lifetimeSeconds * 1000;
     inMemoryToken = data.access_token;
-    inMemoryExpiresAt = Date.now() + lifetimeSeconds * 1000;
+    inMemoryExpiresAt = expiresAt;
 
     if (options.tokenCache) {
       // Floored at KV's own minimum, which the usable life can fall below for a short-lived
-      // token. A cached entry outliving the token by up to a minute is harmless: the send path
-      // invalidates and re-exchanges on a 401, which is exactly what an expired one produces.
+      // token. A cached entry outliving the token by up to a minute is harmless: the stored
+      // `expiresAt` is what the reader honours, and the send path invalidates and re-exchanges on
+      // a 401 in any case.
       const ttlSeconds = Math.max(lifetimeSeconds, KV_MIN_EXPIRATION_TTL);
-      await cacheToken(data.access_token, ttlSeconds);
+      await cacheToken({ token: data.access_token, expiresAt }, ttlSeconds);
     }
 
     return data.access_token;
@@ -168,11 +206,15 @@ export function createGmailTokenManager(options: GmailOAuthOptions): GmailTokenM
 
       if (options.tokenCache) {
         const key = await getCacheKey();
-        const cached = await options.tokenCache.get(key);
-        if (cached !== null) {
-          inMemoryToken = cached;
-          inMemoryExpiresAt = Date.now() + 60 * 1000;
-          return cached;
+        const cached = parseCachedToken(await options.tokenCache.get(key));
+        if (cached) {
+          // Pinned in memory to the token's own remaining life, not a flat 60s: a fixed pin on
+          // top of the KV entry's floored TTL could serve a short-lived token for the best part
+          // of two minutes past expiry, costing a 401 and a re-exchange on every send in that
+          // window.
+          inMemoryToken = cached.token;
+          inMemoryExpiresAt = cached.expiresAt;
+          return cached.token;
         }
       }
 
