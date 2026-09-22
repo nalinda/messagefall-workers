@@ -90,7 +90,7 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
     async () => {
       const sendRes = await harness.send({
         template: 'orderUpdate',
-        to: '+94771234567',
+        to: '+1771234567',
         email: 'shopper@example.com',
         locale: 'en',
         input: {
@@ -127,7 +127,7 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
       // 1. Send notification message
       const sendRes = await harness.send({
         template: 'orderUpdate',
-        to: '+94771234568',
+        to: '+1771234568',
         email: 'shopper2@example.com',
         locale: 'en',
         input: {
@@ -167,7 +167,7 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
                       id: waProviderId,
                       status: 'failed',
                       timestamp: String(Math.floor(Date.now() / 1000)),
-                      recipient_id: '+94771234568',
+                      recipient_id: '+1771234568',
                       errors: [{ code: 131_026, title: 'Message undeliverable' }],
                     },
                   ],
@@ -202,7 +202,7 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
       // Send notification message without sending status webhook
       const sendRes = await harnessFastTimer.send({
         template: 'orderUpdate',
-        to: '+94771234569',
+        to: '+1771234569',
         email: 'shopper3@example.com',
         locale: 'en',
         input: {
@@ -247,7 +247,7 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
       const start = performance.now();
       const sendRes = await harnessSlowProvider.send({
         template: 'loginCode',
-        to: '+94779998888',
+        to: '+1779998888',
         locale: 'en',
         input: {
           code: '581932',
@@ -283,7 +283,7 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
       // 1. Send message and advance to SMS
       const sendRes = await harnessTimerCleanup.send({
         template: 'orderUpdate',
-        to: '+94771234570',
+        to: '+1771234570',
         email: 'shopper5@example.com',
         locale: 'en',
         input: {
@@ -341,7 +341,7 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
     async () => {
       const sendRes = await harness.send({
         template: 'orderUpdate',
-        to: '+94771234571',
+        to: '+1771234571',
         email: 'shopper7@example.com',
         locale: 'en',
         delivery: 'all',

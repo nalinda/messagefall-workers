@@ -36,10 +36,10 @@ const templates = defineTemplates({
     kind: 'otp',
     whatsapp: {
       template: 'login_code', // approved authentication template
-      language: { en: 'en', si: 'si_LK', ta: 'ta_LK' },
+      language: { en: 'en' },
       params: ({ code }) => [code],
     },
-    sms: ({ code }, locale) => (locale === 'si' ? `ඔබගේ කේතය ${code}` : `Your code is ${code}`),
+    sms: ({ code }) => `Your code is ${code}`,
   },
   matchFound: {
     input: z.object({ title: z.string(), url: z.string().url() }),

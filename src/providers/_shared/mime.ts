@@ -153,7 +153,7 @@ function normalizeCrlf(str: string): string {
  * The `Content-Transfer-Encoding` that honestly describes a body written into the message
  * verbatim, as this builder writes them: `8bit` once any character needs more than one UTF-8
  * byte, `7bit` otherwise. Declaring it matters — a `charset=utf-8` part with no encoding header
- * defaults to `7bit`, so a Sinhala or emoji body would be an undeclared 8-bit message, which a
+ * defaults to `7bit`, so a non-ASCII or emoji body would be an undeclared 8-bit message, which a
  * strict relay may reject or mangle.
  */
 function transferEncoding(body: string): '7bit' | '8bit' {

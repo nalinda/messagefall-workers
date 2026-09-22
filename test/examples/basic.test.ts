@@ -194,7 +194,7 @@ describe('Issue #14: Example Worker under examples/basic', () => {
       // 1. POST /send for notification template
       const sendRes = await post('/send', {
         template: 'orderUpdate',
-        to: '+94771234567',
+        to: '+1771234567',
         email: 'shopper@example.com',
         locale: 'en',
         input: {
@@ -252,7 +252,7 @@ describe('Issue #14: Example Worker under examples/basic', () => {
       // 1. POST /send for OTP template
       const sendRes = await post('/send', {
         template: 'loginCode',
-        to: '+94779998888',
+        to: '+1779998888',
         locale: 'en',
         input: {
           code: '839201',

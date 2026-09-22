@@ -83,7 +83,7 @@ describe('createMessagingClient type-level specifications (Issue #12)', () => {
    * suppresses the very error the test claims to check for.
    */
   async function rejectedSends(client: MessagingClient<Catalog>): Promise<void> {
-    const envelope = { to: '+94770000001', locale: 'en' } as const;
+    const envelope = { to: '+1770000001', locale: 'en' } as const;
 
     // @ts-expect-error - "nonExistentTemplate" is not a template in the catalogue.
     await client.send('nonExistentTemplate', { ...envelope, input: { code: '123456' } });
@@ -135,7 +135,7 @@ describe('createMessagingClient type-level specifications (Issue #12)', () => {
 
     const client = createMessagingClient<Catalog>({ binding: fetcher });
     const result = await client.send('loginCode', {
-      to: '+94770000001',
+      to: '+1770000001',
       locale: 'en',
       input: { code: '123456' },
     });
@@ -157,7 +157,7 @@ describe('createMessagingClient type-level specifications (Issue #12)', () => {
     const client = createMessagingClient<Catalog>({ binding: fetcher });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await client.send('nonExistentTemplate' as any, {
-      to: '+94770000001',
+      to: '+1770000001',
       locale: 'en',
       input: { code: '123456' },
     });
@@ -186,7 +186,7 @@ describe('createMessagingClient type-level specifications (Issue #12)', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const invalidInput: any = { code: 123_456 };
     const result = await client.send('loginCode', {
-      to: '+94770000001',
+      to: '+1770000001',
       locale: 'en',
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       input: invalidInput,
@@ -248,7 +248,7 @@ describe('createMessagingClient type-level specifications (Issue #12)', () => {
 
     const client = createMessagingClient<Catalog>({ binding: fetcher });
     const result = await client.send('orderShipped', {
-      to: '+94770000001',
+      to: '+1770000001',
       email: 'user@example.com',
       locale: 'en',
       input: { orderId: 'ord_100', trackingUrl: 'https://example.com/t/100' },
@@ -281,7 +281,7 @@ describe('createMessagingClient type-level specifications (Issue #12)', () => {
 
     const client = createMessagingClient<Catalog>({ binding: fetcher });
     const result = await client.send('multiChannel', {
-      to: '+94770000001',
+      to: '+1770000001',
       locale: 'en',
       input: { alert: 'System Alert' },
       delivery: 'all',
@@ -327,7 +327,7 @@ describe('createMessagingClient type-level specifications (Issue #12)', () => {
       basePath: '/custom',
     });
     const result = await client.send('loginCode', {
-      to: '+94770000001',
+      to: '+1770000001',
       locale: 'en',
       input: { code: '123456' },
     });

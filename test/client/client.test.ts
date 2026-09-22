@@ -73,7 +73,7 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
 
       const client = createMessagingClient<TestCatalog>({ binding: fetcher });
       const result = await client.send('loginCode', {
-        to: '+94770000001',
+        to: '+1770000001',
         locale: 'en',
         input: { code: '123456' },
       });
@@ -102,7 +102,7 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
         });
 
         const result = await client.send('loginCode', {
-          to: '+94770000001',
+          to: '+1770000001',
           locale: 'en',
           input: { code: '123456' },
         });
@@ -122,14 +122,14 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
 
       const client = createMessagingClient<TestCatalog>({ binding: fetcher });
       await client.send('loginCode', {
-        to: '+94770000001',
+        to: '+1770000001',
         locale: 'en',
         input: { code: '654321' },
       });
 
       expect(receivedBody).toEqual({
         template: 'loginCode',
-        to: '+94770000001',
+        to: '+1770000001',
         locale: 'en',
         input: { code: '654321' },
       });
@@ -144,7 +144,7 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
 
       const client = createMessagingClient<TestCatalog>({ binding: fetcher });
       await client.send('matchFound', {
-        to: '+94770000002',
+        to: '+1770000002',
         email: 'alice@example.com',
         locale: 'en',
         input: { title: 'Apartment', url: 'https://example.com/apt/1' },
@@ -156,7 +156,7 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
 
       expect(receivedBody).toEqual({
         template: 'matchFound',
-        to: '+94770000002',
+        to: '+1770000002',
         email: 'alice@example.com',
         locale: 'en',
         input: { title: 'Apartment', url: 'https://example.com/apt/1' },
@@ -176,7 +176,7 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
 
       const client = createMessagingClient<TestCatalog>({ binding: fetcher });
       await client.send('matchFound', {
-        to: '+94770000002',
+        to: '+1770000002',
         locale: 'en',
         input: { title: 'Apartment', url: 'https://example.com/apt/1' },
         delivery: 'all',
@@ -184,7 +184,7 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
 
       expect(receivedBody).toEqual({
         template: 'matchFound',
-        to: '+94770000002',
+        to: '+1770000002',
         locale: 'en',
         input: { title: 'Apartment', url: 'https://example.com/apt/1' },
         delivery: 'all',
@@ -200,7 +200,7 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
 
       const client = createMessagingClient<TestCatalog>({ binding: fetcher });
       const result = await client.send('loginCode', {
-        to: '+94770000001',
+        to: '+1770000001',
         locale: 'en',
         input: { code: '123456' },
       });
@@ -218,7 +218,7 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
 
       const client = createMessagingClient<TestCatalog>({ binding: fetcher });
       const result = await client.send('loginCode', {
-        to: '+94770000001',
+        to: '+1770000001',
         locale: 'en',
         input: { code: '12' },
       });
@@ -238,7 +238,7 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
       const client = createMessagingClient<TestCatalog>({ binding: fetcher });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await client.send('nonExistent' as any, {
-        to: '+94770000001',
+        to: '+1770000001',
         locale: 'en',
         input: { code: '123456' },
       });
@@ -260,7 +260,7 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
 
       const client = createMessagingClient<TestCatalog>({ binding: fetcher });
       const result = await client.send('smsOnly', {
-        to: '+94770000001',
+        to: '+1770000001',
         locale: 'en',
         input: { message: 'hello' },
       });
@@ -279,7 +279,7 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
 
       const client = createMessagingClient<TestCatalog>({ binding: fetcher });
       const result = await client.send('loginCode', {
-        to: '+94770000001',
+        to: '+1770000001',
         locale: 'en',
         input: { code: '123456' },
       });
@@ -302,7 +302,7 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
 
       const client = createMessagingClient<TestCatalog>({ binding: fetcher });
       const result = await client.send('loginCode', {
-        to: '+94770000001',
+        to: '+1770000001',
         locale: 'en',
         input: { code: '123456' },
       });
@@ -326,7 +326,7 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
       const client = createMessagingClient<TestCatalog>({ binding: fetcher });
       const error = await rejection(
         client.send('loginCode', {
-          to: '+94770000001',
+          to: '+1770000001',
           locale: 'en',
           input: { code: '123456' },
         })

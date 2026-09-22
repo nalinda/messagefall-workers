@@ -45,7 +45,7 @@ function bodyOf(call: Captured | undefined): Record<string, unknown> {
  */
 function withoutRecipient(body: Record<string, unknown>): Record<string, unknown> {
   const { to, ...rest } = body;
-  expect(to).toBe('+94771234567');
+  expect(to).toBe('+1771234567');
   return rest;
 }
 
@@ -56,7 +56,7 @@ type WhatsAppMessage = RenderedWhatsApp & OutboundMeta;
 // can be written out in full — no cast, and both concepts survive the merge.
 function message(rendered: RenderedWhatsApp, kind: OutboundMeta['kind']): WhatsAppMessage {
   const meta: OutboundMeta = {
-    to: '+94771234567',
+    to: '+1771234567',
     messageId: 'msg_test_001',
     template: 'loginCode',
     kind,
@@ -167,7 +167,7 @@ describe('metaWhatsApp provider: send', () => {
       Response.json(
         {
           messaging_product: 'whatsapp',
-          contacts: [{ input: '+94771234567', wa_id: '94771234567' }],
+          contacts: [{ input: '+1771234567', wa_id: '1771234567' }],
           messages: [{ id: 'wamid.sent.200.first' }, { id: 'wamid.sent.200.second' }],
         },
         { status: 200 }
@@ -276,7 +276,7 @@ describe('metaWhatsApp provider: end to end from the template catalogue', () => 
 
     const { id } = await messaging.send({
       template: 'loginCode',
-      to: '+94771234567',
+      to: '+1771234567',
       locale: 'en',
       input: { code: '482910' },
     });

@@ -49,7 +49,7 @@ import {
 const T0 = Date.parse('2026-09-20T10:00:00.000Z');
 const OTP_TIMEOUT = 30_000;
 const NOTIFICATION_TIMEOUT = 300_000;
-const TO = '+94771234567';
+const TO = '+1771234567';
 const CODE = '482913';
 
 type TimerMessagingOptions = MessagingOptions<typeof timerTemplates>;
@@ -429,7 +429,7 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
       });
       const second = await messaging.send({
         template: 'loginCode',
-        to: '+94770000002',
+        to: '+1770000002',
         locale: 'en',
         input: { code: '111111' },
       });
@@ -754,7 +754,7 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
         const cancelled = cancelTimer(undefined, 'msg_none');
         expect(await cancelled).toBeUndefined();
 
-        for (const to of [TO, '+94770000002']) {
+        for (const to of [TO, '+1770000002']) {
           const response = await app.request('/send', sendInit(to), bare);
           expect(response.status).toBe(200);
           const body = (await response.json()) as { id: string };
@@ -775,7 +775,7 @@ describe('Issue #8: FallbackTimer Durable Object for timed fallback', () => {
       const secondApp = createMessagingApp(options);
       const secondCapture = captureConsole(['log', 'info', 'warn']);
       try {
-        for (const to of [TO, '+94770000003']) {
+        for (const to of [TO, '+1770000003']) {
           const response = await secondApp.request('/send', sendInit(to), bare);
           expect(response.status).toBe(200);
         }

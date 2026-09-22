@@ -127,7 +127,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         `in:${messageId}`,
         JSON.stringify({
           input: { code: '739104' },
-          to: '+94771234567',
+          to: '+1771234567',
           locale: 'en',
         })
       );
@@ -154,7 +154,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       // Assertion: SMS provider was called with rendered SMS template content
       expect(smsProvider.calls).toHaveLength(1);
       const smsCall = smsProvider.calls[0] as RenderedSms & OutboundMeta;
-      expect(smsCall.to).toBe('+94771234567');
+      expect(smsCall.to).toBe('+1771234567');
       expect(smsCall.text).toBe('Your authentication code is 739104. Valid for 5m.');
       expect(smsCall.messageId).toBe(messageId);
       expect(smsCall.template).toBe('otpVerification');
@@ -279,7 +279,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         `in:${messageId}`,
         JSON.stringify({
           input: { code: '112233' },
-          to: '+94770000003',
+          to: '+1770000003',
           locale: 'en',
         })
       );
@@ -347,7 +347,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         `in:${messageId}`,
         JSON.stringify({
           input: { code: '998877' },
-          to: '+94770000004',
+          to: '+1770000004',
           locale: 'en',
         })
       );
@@ -526,7 +526,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         `in:${messageId}`,
         JSON.stringify({
           input: { text: 'Server overload' },
-          to: '+94770000007',
+          to: '+1770000007',
           locale: 'en',
         })
       );
@@ -604,7 +604,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         `in:${messageId}`,
         JSON.stringify({
           input: { text: 'Disk almost full' },
-          to: '+94770000008',
+          to: '+1770000008',
           locale: 'en',
         })
       );
@@ -667,7 +667,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         `in:${messageId}`,
         JSON.stringify({
           input: { code: '654321' },
-          to: '+94770000009',
+          to: '+1770000009',
           locale: 'en',
         })
       );
@@ -735,7 +735,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         `in:${messageId}`,
         JSON.stringify({
           input: { code: '313131' },
-          to: '+94770000031',
+          to: '+1770000031',
           locale: 'en',
         })
       );
@@ -1025,7 +1025,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         `in:${messageId}`,
         JSON.stringify({
           input: { code: '409281' },
-          to: '+94770000013',
+          to: '+1770000013',
           locale: 'en',
         })
       );
@@ -1103,7 +1103,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         `in:${messageId}`,
         JSON.stringify({
           input: { code: '887766' },
-          to: '+94770000014',
+          to: '+1770000014',
           email: 'recipient14@example.com',
           locale: 'en',
         })
@@ -1182,7 +1182,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       // The recovered input carries the phone number and no email address at all.
       await kv.put(
         `in:${messageId}`,
-        JSON.stringify({ input: { code: '887766' }, to: '+94770000014', locale: 'en' })
+        JSON.stringify({ input: { code: '887766' }, to: '+1770000014', locale: 'en' })
       );
 
       await advanceChain({
@@ -1243,7 +1243,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         `in:${messageId}`,
         JSON.stringify({
           input: { code: '332211' },
-          to: '+94770000015',
+          to: '+1770000015',
           locale: 'en',
         })
       );
@@ -1315,7 +1315,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         store,
         input: {
           input: { code: '505050' },
-          to: '+94770000016',
+          to: '+1770000016',
           locale: 'en',
         },
       });
@@ -1420,7 +1420,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
           timer: mockTimer,
         },
         store,
-        input: { input: { code: '12345' }, to: '+94770000018', locale: 'en' },
+        input: { input: { code: '12345' }, to: '+1770000018', locale: 'en' },
       });
 
       // Nothing is dispatched from an input that cannot be rendered.
@@ -1477,7 +1477,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
         `in:${messageId}`,
         JSON.stringify({
           input: { text: 'High CPU usage detected' },
-          to: '+94770000017',
+          to: '+1770000017',
           locale: 'en',
         })
       );
@@ -1541,7 +1541,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       });
       await kv.put(
         `in:${messageId}`,
-        JSON.stringify({ input: { code: '739104' }, to: '+94771234567', locale: 'en' })
+        JSON.stringify({ input: { code: '739104' }, to: '+1771234567', locale: 'en' })
       );
 
       const finished: string[] = [];

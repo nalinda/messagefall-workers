@@ -27,7 +27,7 @@ import type { MessageRecord } from '../../src/core/status.js';
 const OTP_TIMEOUT = 30_000;
 const NOTIFICATION_TIMEOUT = 500;
 const TOLERANCE = 5000;
-const TO = '+94771234567';
+const TO = '+1771234567';
 const CODE = '482913';
 
 /**

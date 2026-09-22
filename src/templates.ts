@@ -15,7 +15,7 @@ import type {
 import type { StandardSchemaIssue, StandardSchemaV1 } from './types.js';
 
 /**
- * Locale identifier string (e.g. 'en', 'si', 'ta').
+ * Locale identifier string (e.g. 'en', 'fr', 'de').
  */
 // eslint-disable-next-line sonarjs/redundant-type-aliases
 export type Locale = string;

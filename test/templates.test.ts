@@ -219,16 +219,16 @@ describe('Locale resolution of language for WhatsApp templates', () => {
       kind: 'otp',
       whatsapp: {
         template: 'auth_otp',
-        language: { en: 'en_US', si: 'si_LK', ta: 'ta_LK', default: 'en_US' },
+        language: { en: 'en_US', de: 'de_DE', es: 'es_ES', default: 'en_US' },
         params: ({ code }) => [code],
       },
     };
 
-    const rendered = render(template, 'whatsapp', { code: '123456' }, 'si');
+    const rendered = render(template, 'whatsapp', { code: '123456' }, 'de');
     expect(rendered).toEqual({
       templateConfig: {
         name: 'auth_otp',
-        language: 'si_LK',
+        language: 'de_DE',
         params: ['123456'],
       },
     });
@@ -240,7 +240,7 @@ describe('Locale resolution of language for WhatsApp templates', () => {
       kind: 'otp',
       whatsapp: {
         template: 'auth_otp',
-        language: { en: 'en_US', si: 'si_LK', default: 'en_US' },
+        language: { en: 'en_US', de: 'de_DE', default: 'en_US' },
         params: ({ code }) => [code],
       },
     };
@@ -261,7 +261,7 @@ describe('Locale resolution of language for WhatsApp templates', () => {
       kind: 'otp',
       whatsapp: {
         template: 'auth_otp',
-        language: { en: 'en_US', si: 'si_LK' },
+        language: { en: 'en_US', de: 'de_DE' },
         params: ({ code }) => [code],
       },
     };
@@ -334,12 +334,12 @@ describe('render() returns exact shapes from #18 and never mutates input', () =>
     const template: TemplateDef<{ code: string }> = {
       input: z.object({ code: z.string() }),
       kind: 'otp',
-      sms: ({ code }, locale) => (locale === 'si' ? `කේතය: ${code}` : `Code: ${code}`),
+      sms: ({ code }, locale) => (locale === 'de' ? `[de] Code: ${code}` : `Code: ${code}`),
     };
 
-    const resultSi = render(template, 'sms', { code: '778899' }, 'si');
-    expect(resultSi).toEqual({
-      text: 'කේතය: 778899',
+    const resultDe = render(template, 'sms', { code: '778899' }, 'de');
+    expect(resultDe).toEqual({
+      text: '[de] Code: 778899',
     });
 
     const resultEn = render(template, 'sms', { code: '778899' }, 'en');

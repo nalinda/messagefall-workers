@@ -40,7 +40,7 @@ const sendTypingCatalog = defineTemplates({
  * assertion — the build fails if the error it marks stops happening.
  */
 async function rejectedSends(messaging: Messaging<typeof sendTypingCatalog>): Promise<void> {
-  const envelope = { to: '+94770000001', locale: 'en' } as const;
+  const envelope = { to: '+1770000001', locale: 'en' } as const;
 
   // @ts-expect-error - "nonExistentTemplate" is not a template in the catalogue.
   await messaging.send({ template: 'nonExistentTemplate', ...envelope, input: { code: '123456' } });

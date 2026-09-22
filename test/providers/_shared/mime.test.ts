@@ -98,7 +98,7 @@ describe('MIME message builder (Issue #20)', () => {
       { raw: 'Welcome 👋 to our service!', desc: 'emoji' },
       { raw: 'Überprüfung Ihrer Bestellung #987', desc: 'German umlaut' },
       { raw: 'Café & Résumé confirmation', desc: 'French accents' },
-      { raw: 'ගිණුම් තහවුරු කිරීම', desc: 'Sinhala unicode' },
+      { raw: 'アカウント確認のお知らせ', desc: 'Japanese unicode' },
     ];
 
     for (const { raw } of testSubjects) {
@@ -256,13 +256,14 @@ describe('MIME message builder (Issue #20)', () => {
   });
 
   describe('RFC 2047 encoded-word folding', () => {
-    const longSinhalaSubject = 'ඔබගේ ගිණුම සඳහා වූ සත්‍යාපන කේතය සහ ආරක්ෂක දැනුම්දීම පිළිබඳ විස්තර';
+    const longNonAsciiSubject =
+      'アカウントの確認コードとセキュリティに関するお知らせの詳細についてこちらをご確認ください';
 
     it('folds a long non-ASCII subject into several encoded-words, none over 75 characters', () => {
       const mime = buildMimeMessage({
         from: 'sender@example.com',
         to: 'recipient@example.com',
-        subject: longSinhalaSubject,
+        subject: longNonAsciiSubject,
         text: 'Body',
       });
 
@@ -288,7 +289,7 @@ describe('MIME message builder (Issue #20)', () => {
       const mime = buildMimeMessage({
         from: 'sender@example.com',
         to: 'recipient@example.com',
-        subject: longSinhalaSubject,
+        subject: longNonAsciiSubject,
         text: 'Body',
       });
 
@@ -297,7 +298,7 @@ describe('MIME message builder (Issue #20)', () => {
         headerBlock.indexOf('Subject: ') + 'Subject: '.length,
         headerBlock.indexOf('\r\nDate: ')
       );
-      expect(decodeRfc2047(subjectHeader)).toBe(longSinhalaSubject);
+      expect(decodeRfc2047(subjectHeader)).toBe(longNonAsciiSubject);
     });
 
     it('keeps a short non-ASCII subject in a single unfolded encoded-word', () => {

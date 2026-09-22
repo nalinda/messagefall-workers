@@ -231,13 +231,13 @@ describe('Issue #10: No message bodies in logs, enforced in code', () => {
       expect(scrubbed).toBe('400 Bad Request (retryable: true, attempt 2 of 3)');
     });
 
-    // Regression: only numbers had a length floor, so a one- or two-character string input —
-    // `{ initial: 'a' }`, `{ locale: 'si' }` — replaced every occurrence of those characters in
+    // Regression: only numbers had a length floor, so a one- or two-character string input,
+    // `{ initial: 'a' }`, `{ locale: 'fr' }`, replaced every occurrence of those characters in
     // the vendor's error, the exact failure the numeric floor exists to prevent.
     it('leaves short strings in the input out of the redaction targets', () => {
       const scrubbed = scrubError('Invalid sender id for this account', {
         initial: 'a',
-        locale: 'si',
+        locale: 'fr',
         kind: 'otp',
       });
 

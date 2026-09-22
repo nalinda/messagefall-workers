@@ -1,16 +1,15 @@
 # messagefall-workers
 
-Outbound messaging for Cloudflare Workers. Send over WhatsApp first and fall back to SMS when delivery fails or times out, send email alongside or instead, define templates once with typed inputs, receive delivery-status webhooks, and let other Workers send through a service binding.
+Outbound messaging for Cloudflare Workers. Send over a chain of channels (WhatsApp, SMS, email, in whatever order you configure) and fall back to the next one when delivery fails or times out, send other channels alongside the chain, define templates once with typed inputs, receive delivery-status webhooks, and let other Workers send through a service binding.
 
-The name is the feature: a message _falls_ from the preferred channel to the next one, driven by real delivery status rather than hope.
+The name is the feature: a message _falls_ from one channel to the next in the order you configure, driven by real delivery status rather than hope.
 
 It is deliberately small. Every provider, including WhatsApp, is a plugin behind one contract: a `send` function and, if the provider reports delivery, a webhook handler. Built-in providers cover the common vendors; a local SMS gateway is ten lines. State lives in KV, with an optional Durable Object for timed fallback. Nothing runs outside your Worker.
 
-> **Status:** `0.1.0`, the first release — see the [CHANGELOG](CHANGELOG.md) for what it contains. It is not published to npm (see [Installation](#installation)), and the API may still change in a `0.x` line.
+> **Status:** `0.1.0`, the first release. See the [CHANGELOG](CHANGELOG.md) for what it contains. It is not published to npm (see [Installation](#installation)), and the API may still change in a `0.x` line.
 
 ## Contents
 
-- [Why this exists](#why-this-exists)
 - [Features](#features)
 - [Installation](#installation)
 - [Quick start](#quick-start)
@@ -28,23 +27,9 @@ It is deliberately small. Every provider, including WhatsApp, is a plugin behind
 - [Contributing](#contributing)
 - [License](#license)
 
-## Why this exists
-
-WhatsApp is cheaper and more reliable than SMS in many markets, but not everyone has it and Meta's delivery is not instant. The usual answer is a verification service that does WhatsApp-then-SMS for you, at the vendor's SMS rates. If you have a local SMS gateway that is materially cheaper, or you want notifications and codes to share one pipeline, you end up writing the fallback yourself.
-
-On Workers that has some specific shape:
-
-- **Delivery status arrives as a webhook**, not a return value. Deciding to fall back means correlating a status event with a message you sent a moment ago, across isolates.
-- **"Fall back after N seconds" needs a timer.** Workers have no `setTimeout` that outlives the request. A Durable Object alarm is the clean answer.
-- **Credentials belong in one place.** Every Worker that sends should hold a service binding, not the WhatsApp token.
-- **Vendors change.** A gateway that is cheapest this year is not next year. Swapping one should touch a config line, not the pipeline.
-- **Codes must never be logged.** A one-time code passing through a messaging layer is a secret in transit.
-
-This package handles those five things and leaves the rest to you.
-
 ## Features
 
-- **WhatsApp first, SMS fallback**, triggered by a failed delivery status or by a timeout you configure per message kind.
+- **Configurable fallback chain** across WhatsApp, SMS and email, in whatever order you set, triggered by a failed delivery status or by a timeout you configure per message kind.
 - **Always-on channels** that send in parallel with the fallback chain, for example email with every message.
 - **Delivery policy at three levels**: a default, a per-template override, and a per-send override, including "every channel this template defines".
 - **Email** as a channel with the same template and provider contract.
@@ -59,7 +44,7 @@ This package handles those five things and leaves the rest to you.
 
 ## Installation
 
-Not on npm, and the package is marked `private`. The published entry points all
+Not on npm yet. The published entry points all
 resolve into `dist/`, which is not committed, so a package-manager install
 straight from a git URL would give you a package with nothing to import. Clone
 it and build it instead:
@@ -85,7 +70,7 @@ No other runtime dependencies. Hono is an optional peer dependency for the ready
 
 ## Quick start
 
-A Worker that sends WhatsApp with SMS fallback through a local gateway, and receives Meta's status webhooks.
+A Worker that sends WhatsApp with SMS fallback through a local gateway, and receives Meta's status webhooks. (The order below is an example; see [Overriding the policy](#overriding-the-policy) for SMS-first, WhatsApp-first, or any other arrangement.)
 
 **wrangler.jsonc**
 
@@ -125,10 +110,10 @@ export const templates = defineTemplates({
     kind: 'otp',
     whatsapp: {
       template: 'login_code', // approved authentication template
-      language: { en: 'en', si: 'si_LK', ta: 'ta_LK' },
+      language: { en: 'en' },
       params: ({ code }) => [code],
     },
-    sms: ({ code }, locale) => (locale === 'si' ? `ඔබගේ කේතය ${code}` : `Your code is ${code}`),
+    sms: ({ code }) => `Your code is ${code}`,
   },
   matchFound: {
     input: z.object({ title: z.string(), url: z.string().url() }),
@@ -215,17 +200,17 @@ Sending:
 
 ```sh
 curl -X POST https://messaging.example.com/send \
-  -d '{"template":"loginCode","to":"+94771234567","locale":"si","input":{"code":"482913"}}'
+  -d '{"template":"loginCode","to":"+15551234567","locale":"en","input":{"code":"482913"}}'
 ```
 
 ## How delivery works
 
 A delivery policy has two parts:
 
-- **`fallback`**: an ordered chain. The first channel the template defines is tried; the next is tried only if the previous one fails or times out.
+- **`fallback`**: an ordered chain, in whichever order you list the channels. The first channel the template defines is tried; the next is tried only if the previous one fails or times out.
 - **`always`**: a set of channels sent in parallel with the chain, every time, regardless of how the chain goes.
 
-With `fallback: ['whatsapp', 'sms']` and `always: ['email']`, a message goes out over WhatsApp and email at once; SMS follows only if WhatsApp fails.
+With `fallback: ['sms', 'whatsapp']` and `always: ['email']`, a message goes out over SMS and email at once; WhatsApp follows only if SMS fails. Reverse the list to `['whatsapp', 'sms']` and WhatsApp goes first instead. Neither order is favored by the package; pick whichever fits your market and vendors.
 
 The chain runs like this:
 
@@ -236,11 +221,59 @@ The chain runs like this:
 5. If the alarm fires and the chain's current attempt is still `sent`, the next channel is tried.
 6. When no chain channels remain, the chain is marked `failed` with the last error. `always` channels do not affect the chain's outcome.
 
+The same sequence, with the timer and a retry in the picture:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Caller as Your Worker<br/>(or another, via service binding)
+    participant Core as createMessaging /<br/>createMessagingApp
+    participant KV as KV<br/>(status + render input)
+    participant Timer as FallbackTimer<br/>(Durable Object alarm)
+    participant Ch1 as Channel 1 provider
+    participant Ch2 as Channel 2 provider
+    participant Vendor as Vendor webhook<br/>POST /webhooks/:provider
+
+    Caller->>Core: send(template, { to, locale, input })
+    Core->>KV: write status record (pending) + render input
+    Core->>Ch1: dispatch first fallback channel
+    Core->>Timer: arm alarm for this kind's timeout
+    Note right of Core: always channels (e.g. email) dispatch<br/>in parallel, independent of the chain
+    Core-->>Caller: response returns<br/>(OTP sends run in ctx.waitUntil)
+
+    Vendor-->>Ch1: attempts delivery
+    Vendor->>Core: POST /webhooks/ch1 (delivery status)
+    Core->>Core: verify signature, match to attempt
+
+    alt delivered or read
+        Core->>KV: mark attempt delivered/read
+        Core->>Timer: cancel alarm
+    else failed, retryable
+        Core->>Ch1: retry once
+    else failed (not retryable, or retry used up)
+        Core->>KV: mark attempt failed
+        Core->>Ch2: dispatch next channel in the chain
+        Core->>Timer: re-arm for next channel's timeout
+    end
+
+    opt no status arrives before the timeout
+        Timer->>Core: alarm fires
+        alt chain's current attempt still marked sent
+            Core->>Ch2: advance to next fallback channel
+            Core->>Timer: re-arm
+        else chain already terminal
+            Core->>Timer: clean up, no-op
+        end
+    end
+
+    Note over Core,KV: When no channels remain, the chain is marked failed with the last error.<br/>The render input is deleted as soon as the chain reaches a terminal state.
+```
+
 Without the Durable Object binding, steps 3 and 5 do not happen: chain fallback is driven only by explicit failure statuses, and the app logs one `timer.off` line on its first request so the missing binding is visible. That is enough for notifications. For one-time codes you want the timer, because "no status yet" after thirty seconds is the common failure mode, not an explicit rejection.
 
 The timer is one Durable Object per message, named by the message id. Its alarm re-creates the messaging core from the options passed to `createMessagingApp` (or `createMessaging`) in the same isolate, and an isolate woken only by an alarm runs nothing but module evaluation before the handler. So `FallbackTimer` must be exported from the same Worker module that calls `createMessagingApp`, and that call must run at module top level (`const app = createMessagingApp({...})` at module scope, as the quick start does), not lazily inside a request handler; the last registration in an isolate wins, so configure one set of options per Worker. If an alarm fires with no options registered it throws and keeps its state for the platform's retry. A chain with only one channel, or a `'all'` policy, never arms it: there is nothing a timeout could move on to.
 
-One case beyond steps 3 and 5: the timer is armed before the first attempt is dispatched (for one-time codes the dispatch runs in `ctx.waitUntil` after the response), so an alarm can find the chain still `pending` — no attempt recorded yet. It does not treat that as terminal. It re-schedules itself for another timeout, up to three times (`MAX_PENDING_RECHECKS`), and advances normally once the chain shows `sent`; only after those re-checks does it give up, log `timer.gave-up` and clear its storage. A chain that is `delivered`, `read` or `failed` when the alarm fires is only cleaned up.
+One case beyond steps 3 and 5: the timer is armed before the first attempt is dispatched (for one-time codes the dispatch runs in `ctx.waitUntil` after the response), so an alarm can find the chain still `pending`, with no attempt recorded yet. It does not treat that as terminal. It re-schedules itself for another timeout, up to three times (`MAX_PENDING_RECHECKS`), and advances normally once the chain shows `sent`; only after those re-checks does it give up, log `timer.gave-up` and clear its storage. A chain that is `delivered`, `read` or `failed` when the alarm fires is only cleaned up.
 
 ### Overriding the policy
 
@@ -260,14 +293,14 @@ Each level may set `fallback`, `always`, or both; unset parts inherit from the n
 // Worker" below); the core sender created by `createMessaging` takes one object instead.
 const messages = createMessagingClient<typeof templates>({ binding: env.MESSAGES });
 
-// default is WhatsApp -> SMS, always email
+// example config's default is WhatsApp -> SMS, always email; set `delivery.fallback` to any order you need
 await messages.send('matchFound', { to, locale, input, delivery: 'all' }); // all three at once
 await messages.send('matchFound', { to, locale, input, delivery: { always: [] } }); // chain only, no email
 ```
 
 A channel that appears in both `fallback` and `always` is sent once, as part of `always`. A template that defines none of the resolved channels is a send-time error with a clear message.
 
-Send calls carry `to` (the E.164 phone number) and an optional `email` field (`{ to, email?, ... }`) so a template can reach an inbox. When the resolved policy includes `email` and no `email` address is provided, the email channel is dropped from the policy with a logged `send.channel-skipped` event rather than failing the send, and phone channels proceed normally. The one exception is when dropping it would leave nothing to send on — an email-only template called without an address: that throws `PolicyError`, the same fault an unsatisfiable policy throws, rather than creating a record that would sit `pending` for ever with no provider ever called.
+Send calls carry `to` (the E.164 phone number) and an optional `email` field (`{ to, email?, ... }`) so a template can reach an inbox. When the resolved policy includes `email` and no `email` address is provided, the email channel is dropped from the policy with a logged `send.channel-skipped` event rather than failing the send, and phone channels proceed normally. The one exception is when dropping it would leave nothing to send on: an email-only template called without an address. That throws `PolicyError`, the same fault an unsatisfiable policy throws, rather than creating a record that would sit `pending` for ever with no provider ever called.
 
 Fallback never re-renders with a different input. The same input renders each channel's version of the same template.
 
@@ -396,7 +429,7 @@ Every send gets a message id. `GET /status/:id` returns:
 ```
 
 Each attempt names the `provider` it was dispatched through, which is also the `<name>` in that
-provider's `/webhooks/<name>` route — so an incoming delivery receipt can be traced back to the
+provider's `/webhooks/<name>` route, so an incoming delivery receipt can be traced back to the
 attempt it belongs to. `policy` is the delivery policy as resolved for this send.
 
 `sealed` is an internal marker: it records that this chain's fallback processing has already run
@@ -406,9 +439,9 @@ The top-level `status` is the chain's status, or the worst of the `always` attem
 
 ### Known gap: the render input is stored unencrypted
 
-The status record itself holds no message content, but the fallback chain has to be able to re-render the message on the next channel once the first one fails. So every send with a chain writes its **render input** to a second KV key, `in:<id>`, and hands the same payload to the fallback timer. That payload is the raw input you passed to `send`, plus the recipient and locale — for an `otp` template it therefore contains **the code itself, in plaintext**.
+The status record itself holds no message content, but the fallback chain has to be able to re-render the message on the next channel once the first one fails. So every send with a chain writes its **render input** to a second KV key, `in:<id>`, and hands the same payload to the fallback timer. That payload is the raw input you passed to `send`, plus the recipient and locale, so for an `otp` template it therefore contains **the code itself, in plaintext**.
 
-It is stored **unencrypted**, for the duration of the chain timeout, and deleted as soon as the chain reaches a terminal state. The key's TTL is the chain timeout rounded up to whole seconds, floored at KV's sixty-second minimum — so **sixty seconds for `otp`** (whose thirty-second timeout is shorter than KV will accept) and five minutes for `notification`, by default. Anyone who can read that KV namespace can read the code while the key is there.
+It is stored **unencrypted**, for the duration of the chain timeout, and deleted as soon as the chain reaches a terminal state. The key's TTL is the chain timeout rounded up to whole seconds, floored at KV's sixty-second minimum, so **sixty seconds for `otp`** (whose thirty-second timeout is shorter than KV will accept) and five minutes for `notification`, by default. Anyone who can read that KV namespace can read the code while the key is there.
 
 Encrypting `in:<id>` is a known gap, **deliberately deferred past 0.1.0**. Until it is closed, treat the messaging Worker's KV namespace as holding secrets: do not share it with anything that does not need it, and keep the chain timeouts no longer than your fallback actually requires.
 
@@ -428,10 +461,10 @@ import type { templates } from '../../messaging/src/templates';
 const messages = createMessagingClient<typeof templates>({ binding: env.MESSAGES });
 
 await messages.send('matchFound', {
-  to: '+94771234567',
+  to: '+15551234567',
   email: 'user@example.com', // optional: required if resolved policy includes email, otherwise email is skipped
   locale: 'en',
-  input: { title: 'Bicycle, Kandy', url: 'https://example.com/m/123' },
+  input: { title: 'Bicycle, downtown', url: 'https://example.com/m/123' },
   delivery: 'all', // optional per-send override
 });
 ```
@@ -440,7 +473,7 @@ Service-binding calls stay inside Cloudflare's network. The API Worker never hol
 
 ## Configuration
 
-`createMessagingApp(options)` returns a Hono app and is imported from the `messagefall-workers/app` entry point — it is deliberately not on the root barrel, so the root entry never reaches for the optional `hono` peer. `createMessaging(env, options)` returns the underlying sender for use in any framework.
+`createMessagingApp(options)` returns a Hono app and is imported from the `messagefall-workers/app` entry point. It is deliberately not on the root barrel, so the root entry never reaches for the optional `hono` peer. `createMessaging(env, options)` returns the underlying sender for use in any framework.
 
 | Option              | Type                                      | Default                                | Description                                                                                                           |
 | ------------------- | ----------------------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
@@ -455,7 +488,7 @@ Service-binding calls stay inside Cloudflare's network. The API Worker never hol
 | `onStatus`          | `(event) => void \| Promise<void>`        | none                                   | Called on every status change. Receives ids and statuses, never bodies.                                               |
 | `basePath`          | `string`                                  | `'/'`                                  | Path prefix for the routes.                                                                                           |
 
-The `providers` factory always receives a `MessagingEnv`, whose custom bindings are typed `unknown` — the `<Env>` type parameter on `createMessagingApp` types the Hono bindings only, never this factory. A Worker with typed bindings narrows the argument itself (`const e = env as Env`) before reading its secrets, as the quick start does.
+The `providers` factory always receives a `MessagingEnv`, whose custom bindings are typed `unknown`. The `<Env>` type parameter on `createMessagingApp` types the Hono bindings only, never this factory. A Worker with typed bindings narrows the argument itself (`const e = env as Env`) before reading its secrets, as the quick start does.
 
 ## Routing and webhooks
 

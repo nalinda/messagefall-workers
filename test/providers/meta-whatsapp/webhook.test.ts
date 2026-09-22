@@ -46,14 +46,14 @@ function statusPayload(): unknown {
                   id: 'wamid.SENT1',
                   status: 'sent',
                   timestamp: '1700000000',
-                  recipient_id: '94771234567',
+                  recipient_id: '1771234567',
                   conversation: { id: 'conv1', origin: { type: 'authentication' } },
                 },
                 {
                   id: 'wamid.DELIVERED1',
                   status: 'delivered',
                   timestamp: '1700000010',
-                  recipient_id: '94771234567',
+                  recipient_id: '1771234567',
                 },
               ],
             },
@@ -68,7 +68,7 @@ function statusPayload(): unknown {
                   id: 'wamid.READ1',
                   status: 'read',
                   timestamp: '1700000020',
-                  recipient_id: '94771234567',
+                  recipient_id: '1771234567',
                 },
               ],
             },
@@ -88,7 +88,7 @@ function statusPayload(): unknown {
                   id: 'wamid.FAILED1',
                   status: 'failed',
                   timestamp: '1700000030',
-                  recipient_id: '94771234567',
+                  recipient_id: '1771234567',
                   errors: [
                     {
                       code: 131_026,
@@ -119,10 +119,10 @@ function messageReceivedPayload(): unknown {
             value: {
               messaging_product: 'whatsapp',
               metadata: { display_phone_number: '15550001111', phone_number_id: '123456789012345' },
-              contacts: [{ profile: { name: 'Nalinda' }, wa_id: '94771234567' }],
+              contacts: [{ profile: { name: 'Nalinda' }, wa_id: '1771234567' }],
               messages: [
                 {
-                  from: '94771234567',
+                  from: '1771234567',
                   id: 'wamid.INBOUND1',
                   timestamp: '1700000100',
                   type: 'text',
@@ -298,7 +298,7 @@ describe('metaWhatsApp provider: webhook', () => {
         const status: Record<string, unknown> = {
           id: 'wamid.NOTIME1',
           status: 'failed',
-          recipient_id: '94771234567',
+          recipient_id: '1771234567',
           errors: [{ code: 131_026, title: 'Message undeliverable' }],
         };
         if (timestamp !== undefined) status.timestamp = timestamp;

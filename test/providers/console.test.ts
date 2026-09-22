@@ -145,7 +145,7 @@ describe('Console provider send test', () => {
     const capture = captureConsole();
     try {
       const message: RenderedSms & OutboundMeta = {
-        to: '+94771234567',
+        to: '+1771234567',
         messageId: 'msg_test_001',
         template: 'orderUpdate',
         kind: 'notification',
@@ -161,7 +161,7 @@ describe('Console provider send test', () => {
       }
 
       const allLogs = capture.logs.join(' ');
-      expect(allLogs).toContain('+94771234567');
+      expect(allLogs).toContain('+1771234567');
       expect(allLogs).toContain('sms');
       expect(allLogs).toContain('orderUpdate');
       expect(allLogs).toContain('msg_test_001');
@@ -182,7 +182,7 @@ describe('Console provider send test', () => {
     try {
       const secretCode = 'SECRET-OTP-884219';
       const message: RenderedSms & OutboundMeta = {
-        to: '+94779876543',
+        to: '+1779876543',
         messageId: 'msg_otp_secret_002',
         template: 'loginCode',
         kind: 'otp',
@@ -199,7 +199,7 @@ describe('Console provider send test', () => {
 
       const allLogs = capture.logs.join(' ');
       // Metadata must be logged
-      expect(allLogs).toContain('+94779876543');
+      expect(allLogs).toContain('+1779876543');
       expect(allLogs).toContain('sms');
       expect(allLogs).toContain('loginCode');
       expect(allLogs).toContain('msg_otp_secret_002');
@@ -224,7 +224,7 @@ describe('Console provider send test', () => {
     try {
       const secretParam = 'AUTH-KEY-9911';
       const message = {
-        to: '+94773334444',
+        to: '+1773334444',
         messageId: 'msg_wa_otp_003',
         template: 'authTemplate',
         kind: 'otp' as const,
@@ -236,7 +236,7 @@ describe('Console provider send test', () => {
       expect(result.ok).toBe(true);
 
       const allLogs = capture.logs.join(' ');
-      expect(allLogs).toContain('+94773334444');
+      expect(allLogs).toContain('+1773334444');
       expect(allLogs).toContain('whatsapp');
       expect(allLogs).toContain('authTemplate');
       expect(allLogs).not.toContain(secretParam);
@@ -260,7 +260,7 @@ describe('Console provider send test', () => {
       // the catalogue name under `template`, the Meta config under `templateConfig`. The two
       // no longer share a key, so both survive the merge and no cast is needed.
       const message = {
-        to: '+94775556666',
+        to: '+1775556666',
         messageId: 'msg_wa_otp_004',
         template: 'loginCode',
         templateConfig: { name: 'auth_code', language: 'en_US', params: [code] },
@@ -356,7 +356,7 @@ describe('Simulated status test', () => {
 
     const messageId = 'msg_sim_fail_001';
     const result = await provider.send({
-      to: '+94770000001',
+      to: '+1770000001',
       messageId,
       template: 'testFail',
       kind: 'notification',
@@ -404,7 +404,7 @@ describe('Simulated status test', () => {
 
     const messageId = 'msg_sim_deliv_002';
     const result = await provider.send({
-      to: '+94770000002',
+      to: '+1770000002',
       messageId,
       template: 'testDelivered',
       kind: 'notification',

@@ -17,7 +17,7 @@ import { getTemplate, type TemplateDef, type Templates } from '../templates.js';
  *
  * A value in the input is redaction-worthy when it could be the message content itself — a
  * numeric OTP, say. Short ones cannot be: they are `{ retries: 4 }`, `{ attempt: 2 }`,
- * `{ initial: 'a' }` or `{ locale: 'si' }`, and collecting them shreds ordinary vendor error
+ * `{ initial: 'a' }` or `{ locale: 'fr' }`, and collecting them shreds ordinary vendor error
  * text that happens to contain the same characters, turning "400 Bad Request" into
  * "[redacted]00 Bad Request" and "Invalid sender" into "Inv[redacted]lid sender". Four
  * characters is the shortest OTP anyone issues, so that is the floor.
@@ -170,7 +170,7 @@ function extractRenderedStrings(rendered: unknown): string[] {
  * The payload handed to a provider is the rendered message merged over an `OutboundMeta` —
  * `to`, `messageId`, `template`, `kind`, `locale`. Feeding the whole thing to {@link scrubError}
  * shreds ordinary vendor error messages, because those metadata values are short and share
- * substrings with real words: with `to: '+9477…'` harmless, but `kind: 'otp'` or a template
+ * substrings with real words: with `to: '+1555…'` harmless, but `kind: 'otp'` or a template
  * named `to` turns "Token expired" into "T[redacted]n expired". Only the content can actually
  * leak the message, so only the content is scrubbed for.
  *

@@ -37,7 +37,7 @@ curl -X POST http://localhost:8787/send \
   -H "Content-Type: application/json" \
   -d '{
     "template": "orderUpdate",
-    "to": "+94771234567",
+    "to": "+1771234567",
     "email": "customer@example.com",
     "locale": "en",
     "input": {
@@ -66,7 +66,7 @@ curl -X POST http://localhost:8787/send \
   -H "Content-Type: application/json" \
   -d '{
     "template": "loginCode",
-    "to": "+94771234567",
+    "to": "+1771234567",
     "locale": "en",
     "input": {
       "code": "482913"

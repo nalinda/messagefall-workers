@@ -41,7 +41,7 @@ describe('httpSms provider', () => {
 
   const sampleMeta: RenderedSms & OutboundMeta = {
     text: 'Your verification code is 482910',
-    to: '+94771234567',
+    to: '+1771234567',
     messageId: 'msg_test_001',
     template: 'otp',
     kind: 'otp',
@@ -75,7 +75,7 @@ describe('httpSms provider', () => {
     const headers = capturedInit?.headers as Record<string, string>;
     expect(headers['content-type']).toBe('application/json');
     expect(capturedInit?.body).toBe(
-      JSON.stringify({ to: '+94771234567', text: 'Your verification code is 482910' })
+      JSON.stringify({ to: '+1771234567', text: 'Your verification code is 482910' })
     );
 
     expect(result.ok).toBe(true);
@@ -364,7 +364,7 @@ describe('httpSms provider', () => {
 
     const { id } = await messaging.send({
       template: 'ping',
-      to: '+94771234567',
+      to: '+1771234567',
       locale: 'en',
       input: undefined,
     });
