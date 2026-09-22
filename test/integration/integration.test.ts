@@ -36,6 +36,10 @@ const SLOW_SEND_DELAY_MS = 300;
 
 const TEST_TIMEOUT = 15_000;
 const SETTLE_TIMEOUT = 2500;
+// Five wrangler dev instances start sequentially in beforeAll, each with up to a 15s internal
+// startup timeout of its own (see harness.ts) — bun's default 5s hook timeout is nowhere near
+// enough headroom for that, especially on colder CI runners.
+const SETUP_TIMEOUT = 60_000;
 
 describe('Issue #15: Integration tests under wrangler dev', () => {
   let harness: IntegrationHarness;
@@ -69,7 +73,7 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
       vars: { MESSAGING_DEV_UNSIGNED: 'true' },
       entrypoint: SLOW_PROVIDER_ENTRYPOINT,
     });
-  });
+  }, SETUP_TIMEOUT);
 
   afterAll(async () => {
     await Promise.all([
@@ -79,7 +83,7 @@ describe('Issue #15: Integration tests under wrangler dev', () => {
       harnessTimerCleanup.stop(),
       harnessSlowProvider.stop(),
     ]);
-  });
+  }, SETUP_TIMEOUT);
 
   it(
     'Scenario 1: Send notification template; record shows chain whatsapp and always email',
