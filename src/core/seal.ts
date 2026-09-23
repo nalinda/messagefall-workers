@@ -20,6 +20,7 @@
 
 import type { MessagingEnv } from '../env.js';
 import { hasOtpTemplate } from '../templates.js';
+import { DEFAULT_LOCALE } from './render-input.js';
 
 /**
  * The env binding holding the key: 32 random bytes, base64-encoded
@@ -41,9 +42,16 @@ export interface SealContext {
   locale?: string;
 }
 
+/**
+ * The additional data for a context. `locale` is normalised to the one default every path
+ * renders with (`DEFAULT_LOCALE`): the timer fills a missing locale in when it is armed while the
+ * KV entry leaves it out, so binding the raw value would make the two copies of one input
+ * disagree and the timed fallback fail to open it.
+ */
 function additionalData(context: SealContext): Uint8Array<ArrayBuffer> {
   const { id, to, email, locale } = context;
-  return new TextEncoder().encode(JSON.stringify([id, to ?? null, email ?? null, locale ?? null]));
+  const bound = [id, to ?? null, email ?? null, locale ?? DEFAULT_LOCALE];
+  return new TextEncoder().encode(JSON.stringify(bound));
 }
 
 /**

@@ -158,6 +158,32 @@ describe('sign-in codes: no plaintext code at rest', () => {
     expect(everythingAtRest(kv, ns)).not.toContain(CODE);
   });
 
+  it('falls back on the timer for a send that gave no locale (sealed and opened alike)', async () => {
+    const sms = recordingProvider<RenderedSms>('sms', 'sms');
+    const wa = recordingProvider<RenderedWhatsApp>('whatsapp', 'wa');
+    // One language for every locale, so WhatsApp accepts and only the timer can reach SMS.
+    const anyLocale = defineTemplates({
+      loginCode: {
+        ...templates.loginCode,
+        whatsapp: { ...templates.loginCode.whatsapp, language: 'en' },
+      },
+    });
+    const messaging = createMessaging(bindings, {
+      templates: anyLocale,
+      providers: () => ({ whatsapp: wa, sms }),
+    });
+
+    // A JavaScript caller, or one that casts past `locale: string`.
+    await messaging.send({ template: 'loginCode', to: TO, input: { code: CODE } } as Parameters<
+      typeof messaging.send
+    >[0]);
+    expect(wa.calls).toHaveLength(1);
+    expect(sms.calls).toHaveLength(0);
+    await clock.advance(30_000);
+
+    expect(sms.calls.map((c) => c.text)).toEqual([`Your sign-in code is ${CODE}`]);
+  });
+
   it("uses the template's own timeout over the per-kind default", async () => {
     const sms = recordingProvider<RenderedSms>('sms', 'sms');
     const quick = defineTemplates({ loginCode: { ...templates.loginCode, timeout: 10_000 } });
