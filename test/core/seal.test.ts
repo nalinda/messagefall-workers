@@ -4,7 +4,8 @@
  * sealed stash.
  */
 
-import { describe, expect, it } from 'bun:test';
+import type { DurableObjectNamespace } from '@cloudflare/workers-types';
+import { describe, expect, it, spyOn } from 'bun:test';
 import { z } from 'zod';
 
 import { createMessaging, MessagingConfigError } from '../../src/core/messaging.js';
@@ -131,6 +132,51 @@ describe('seal key validation', () => {
         { templates: pingTemplates, providers: () => ({ sms }) }
       )
     ).toThrow(/MESSAGES_ENC_KEY must decode to 32 bytes/);
+  });
+});
+
+describe('a seal that fails at send time', () => {
+  it('writes neither in:<id> nor the timer, logs send.seal-failed, and still dispatches', async () => {
+    const kv = memoryKV();
+    const armed: string[] = [];
+    const providers = timerProviders();
+    const messaging = createMessaging(
+      { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
+      {
+        templates: timerTemplates,
+        providers: () => ({ whatsapp: providers.whatsapp, sms: providers.sms }),
+        timer: {
+          idFromName: (name: string) => ({ name }),
+          get: () => ({
+            arm: (args: { id: string }) => {
+              armed.push(args.id);
+              return Promise.resolve();
+            },
+            cancel: () => Promise.resolve(),
+          }),
+        } as unknown as DurableObjectNamespace,
+      }
+    );
+    const encrypt = spyOn(crypto.subtle, 'encrypt').mockRejectedValue(new Error('crypto fault'));
+    const { logs, restore } = captureConsole();
+    const sending = messaging.send({
+      template: 'loginCode',
+      to: TO,
+      locale: 'en',
+      input: { code: CODE },
+    });
+    const settled = await Promise.allSettled([sending]);
+    restore();
+    encrypt.mockRestore();
+    const [outcome] = settled;
+    if (outcome.status === 'rejected') throw outcome.reason;
+    const { id } = outcome.value;
+
+    expect(kv.dump().has(`in:${id}`)).toBe(false);
+    expect(armed).toHaveLength(0);
+    expect(logs.some((line) => line.includes('send.seal-failed'))).toBe(true);
+    expect(JSON.stringify(kv.dump().values().toArray())).not.toContain(CODE);
+    expect(providers.whatsapp.calls).toHaveLength(1);
   });
 });
 

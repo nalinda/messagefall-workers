@@ -201,7 +201,6 @@ describe('Entry points export documented functions', () => {
       'DEFAULT_STATUS_TTL',
       'E164',
       'EmailRecipientError',
-      'EncryptionKeyError',
       'MessageRecordNotFoundError',
       'MessagingConfigError',
       'NoTemplateLanguageError',

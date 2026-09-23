@@ -106,10 +106,8 @@ export class IntegrationHarness {
       MESSAGES_ENC_KEY: TEST_ENC_KEY,
       ...options.vars,
     };
-    {
-      for (const [key, value] of Object.entries(vars)) {
-        args.push('--var', `${key}:${value}`);
-      }
+    for (const [key, value] of Object.entries(vars)) {
+      args.push('--var', `${key}:${value}`);
     }
 
     const proc = spawn('bunx', args, {

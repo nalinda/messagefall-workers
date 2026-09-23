@@ -16,6 +16,13 @@ repository it resolves through the root `tsconfig.json`'s `paths` mapping, strai
 library's TypeScript source rather than to the built package. Copying these files out of the repo
 therefore needs the package installed first — see the root README's install instructions.
 
+The example's catalogue has a one-time-code template, so it needs `MESSAGES_ENC_KEY`. Copy the
+local-development key into place first (`.dev.vars` is gitignored):
+
+```sh
+cp examples/basic/.dev.vars.example examples/basic/.dev.vars
+```
+
 Run the example with `wrangler dev`:
 
 ```sh

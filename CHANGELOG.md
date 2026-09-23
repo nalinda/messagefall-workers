@@ -18,7 +18,7 @@ Hardens one-time-code delivery and makes the package installable. Built for a si
 - **Shared secret for `/send` and `/status/:id`**: `createMessagingApp({ secret: (env) => ... })` requires the `x-messagefall-secret` header (constant-time comparison, fails closed with `500` when the secret is missing); `createMessagingClient({ secret })` sends it. Webhook routes stay public. An app without `secret` logs `app.secret-off` once, at its first request.
 - **Failure codes**: `SendResult` and `StatusEvent` carry an optional content-free `code`, recorded on the attempt as `errorCode`. The built-in providers report `graph:<code>`, `http:<status>` and `network`.
 - **Per-template `timeout`**, overriding the per-kind `delivery.timeout`.
-- `NoTemplateLanguageError`, `EncryptionKeyError`, `OTP_ERROR_WITHHELD`, and the `SendOutcome` / `SendResponse` types on the root entry.
+- `NoTemplateLanguageError`, `OTP_ERROR_WITHHELD`, and the `SendOutcome` / `SendResponse` types on the root entry.
 
 ### Changed
 

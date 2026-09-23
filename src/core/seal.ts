@@ -16,6 +16,7 @@
  */
 
 import type { MessagingEnv } from '../env.js';
+import { hasOtpTemplate } from '../templates.js';
 
 /**
  * The env binding holding the key: 32 random bytes, base64-encoded
@@ -91,6 +92,27 @@ export function sealKeyProblem(raw: unknown): string | undefined {
   return bytes.length === KEY_BYTES
     ? undefined
     : `${ENC_KEY_BINDING} must decode to ${KEY_BYTES} bytes (got ${bytes.length}); generate one with \`openssl rand -base64 32\``;
+}
+
+/**
+ * What is wrong with a deployment's key configuration, or `undefined` when nothing is: the key is
+ * required when the catalogue has an `otp` template, and must be well-formed whenever it is set.
+ * The one statement of the rule, shared by `createMessaging` (which throws on it) and
+ * `validateEnv` (which collects it with every other startup problem).
+ *
+ * @param env - Worker bindings.
+ * @param templates - The template catalogue.
+ * @returns A problem description, or undefined.
+ */
+export function sealKeyConfigProblem(env: unknown, templates: unknown): string | undefined {
+  const raw = rawSealKey(env);
+  if (raw !== undefined) {
+    return sealKeyProblem(raw);
+  }
+  const catalogue = templates && typeof templates === 'object' ? templates : undefined;
+  return hasOtpTemplate(catalogue as Parameters<typeof hasOtpTemplate>[0])
+    ? `Missing required secret ${ENC_KEY_BINDING}: the catalogue has an otp template, whose code the fallback chain stores encrypted`
+    : undefined;
 }
 
 /**

@@ -8,13 +8,13 @@ import type { DurableObjectNamespace, KVNamespace } from '@cloudflare/workers-ty
 
 import type { MessagingEnv } from '../env.js';
 import type { StatusEvent } from '../providers/types.js';
-import { hasOtpTemplate, type InputOf, type TemplateDef, type Templates } from '../templates.js';
+import type { InputOf, TemplateDef, Templates } from '../templates.js';
 import { withAdvanceLock } from './advance-lock.js';
 import { advanceChain } from './fallback.js';
 import { DEFAULT_POLICY, type DeliveryOverride, type DeliveryPolicy } from './policy.js';
 import { validateProviderSet } from './provider-set.js';
 import { sealAndReleaseChain } from './render-input.js';
-import { ENC_KEY_BINDING, rawSealKey, sealKeyFor, sealKeyProblem } from './seal.js';
+import { sealKeyConfigProblem, sealKeyFor } from './seal.js';
 import {
   notifyStatus,
   type ProviderSet,
@@ -296,17 +296,7 @@ function requireSealKeyForOtp(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   templates: Templates<any>
 ): void {
-  const raw = rawSealKey(env);
-  if (raw === undefined) {
-    if (hasOtpTemplate(templates)) {
-      throw new MessagingConfigError(
-        `${ENC_KEY_BINDING} is required when the catalogue has an otp template: ` +
-          'the fallback chain stores the code between requests and it is encrypted with this key'
-      );
-    }
-    return;
-  }
-  const problem = sealKeyProblem(raw);
+  const problem = sealKeyConfigProblem(env, templates);
   if (problem) {
     throw new MessagingConfigError(problem);
   }

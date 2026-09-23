@@ -1871,7 +1871,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
     it('refuses to build an instance for an otp catalogue without MESSAGES_ENC_KEY', () => {
       expect(() =>
         createMessaging({ MESSAGES_KV: memoryKV() }, { templates, providers: () => ({}) })
-      ).toThrow(/MESSAGES_ENC_KEY is required/);
+      ).toThrow(/Missing required secret MESSAGES_ENC_KEY/);
     });
 
     it('does not write in:<id> when policy has no fallback chain (always-only)', async () => {

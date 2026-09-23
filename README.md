@@ -514,7 +514,7 @@ await messages.send('matchFound', {
 
 Service-binding calls stay inside Cloudflare's network. The API Worker never holds a provider credential.
 
-`send` resolves `{ ok: true, id }`, or `{ ok: false, status, error, code? }` for a request the messaging Worker refused (a `400` for bad input, `404` for an unknown template, `422` for an unsatisfiable policy). Pass `await: 'chain'` to wait for the outcome; see [Waiting for the outcome](#waiting-for-the-outcome).
+`send` resolves `{ ok: true, id }`, or `{ ok: false, status, error, code? }` for a request the messaging Worker refused: `400` for bad input, `404` for an unknown template, `422` for an unsatisfiable policy, and with a `secret` configured `401` for a missing or wrong secret or `500` when the messaging Worker has none to compare against. Pass `await: 'chain'` to wait for the outcome; see [Waiting for the outcome](#waiting-for-the-outcome).
 
 If the messaging Worker has a public hostname (it must, for vendor webhooks), protect `/send` and `/status` with a shared secret: set the same value on both sides.
 

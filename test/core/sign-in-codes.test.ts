@@ -24,7 +24,12 @@ import { httpSms } from '../../src/providers/http-sms/index.js';
 import type { RenderedSms, RenderedWhatsApp } from '../../src/providers/types.js';
 import { defineTemplates, NoTemplateLanguageError } from '../../src/templates.js';
 import { memoryKV, recordingProvider, TEST_ENC_KEY } from '../helpers/messaging.js';
-import { createFakeDurableRuntime, type FakeClock, type FakeNamespace } from '../helpers/timer.js';
+import {
+  createFakeDurableRuntime,
+  type FakeClock,
+  type FakeNamespace,
+  timerProviders,
+} from '../helpers/timer.js';
 import { createMockExecutionContext } from '../helpers/webhook.js';
 
 const TO = '+94771234567';
@@ -122,6 +127,34 @@ describe('sign-in codes: no plaintext code at rest', () => {
     expect(sms.calls).toHaveLength(1);
     expect(sms.calls[0].text).toBe(`Your sign-in code is ${CODE}`);
     // ...and nothing it left behind contains it.
+    expect(everythingAtRest(kv, ns)).not.toContain(CODE);
+  });
+
+  it('keeps the code out of KV, Durable Object storage and the record through a failed webhook', async () => {
+    const providers = timerProviders();
+    const messaging = createMessaging(bindings, {
+      templates,
+      providers: () => ({ whatsapp: providers.whatsapp, sms: providers.sms }),
+    });
+
+    const { id } = await messaging.send({
+      template: 'loginCode',
+      to: TO,
+      locale: 'en',
+      input: { code: CODE },
+    });
+    // Meta accepts, then reports failure quoting the code back.
+    await messaging.handleWebhook(
+      'wa',
+      new Request('https://worker.test/webhooks/wa', {
+        method: 'POST',
+        body: JSON.stringify({ providerId: 'wa_1', status: 'failed', error: `bad param ${CODE}` }),
+      })
+    );
+
+    expect(providers.sms.calls.map((c) => c.text)).toEqual([`Your sign-in code is ${CODE}`]);
+    const record = await messaging.status(id);
+    expect(record?.chain.attempts.at(0)?.error).toBe(OTP_ERROR_WITHHELD);
     expect(everythingAtRest(kv, ns)).not.toContain(CODE);
   });
 

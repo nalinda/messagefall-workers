@@ -8,11 +8,11 @@ import type { DurableObjectNamespace, KVNamespace } from '@cloudflare/workers-ty
 
 import type { MessagingOptions } from './core/messaging.js';
 import { providerSetProblems } from './core/provider-set.js';
-import { ENC_KEY_BINDING, rawSealKey, sealKeyProblem } from './core/seal.js';
+import { sealKeyConfigProblem } from './core/seal.js';
 import { isDurableObjectNamespace } from './core/timer.js';
 import { errorMessage, isRecord } from './core/values.js';
 import { type Channel, CHANNELS } from './providers/types.js';
-import { hasOtpTemplate, type TemplateDef, validateTemplateDef } from './templates.js';
+import { type TemplateDef, validateTemplateDef } from './templates.js';
 
 /**
  * Base environment bindings for messaging (Issue #13 interface).
@@ -128,25 +128,6 @@ function validateDeliveryPolicy(delivery: unknown): string[] {
   return problems;
 }
 
-/**
- * The seal key must be present when the catalogue has an `otp` template, and well-formed whenever
- * it is present at all — a malformed key would otherwise surface on the first send as a stash
- * that silently never happens.
- */
-function validateSealKey(env: unknown, templates: unknown): string[] {
-  const raw = rawSealKey(env);
-  if (raw === undefined) {
-    const isNeeded = hasOtpTemplate(isRecord(templates) ? templates : undefined);
-    return isNeeded
-      ? [
-          `Missing required secret ${ENC_KEY_BINDING}: the catalogue has an otp template, whose code the fallback chain stores encrypted`,
-        ]
-      : [];
-  }
-  const problem = sealKeyProblem(raw);
-  return problem ? [problem] : [];
-}
-
 function validateProviders(env: unknown, providersFn: unknown): string[] {
   if (typeof providersFn !== 'function') {
     return ['providers option must be a function'];
@@ -210,7 +191,7 @@ export function validateEnv(
   problems.push(
     ...validateDeliveryPolicy(options.delivery),
     ...validateTemplates(options.templates),
-    ...validateSealKey(env, options.templates),
+    ...[sealKeyConfigProblem(env, options.templates)].filter((p): p is string => p !== undefined),
     ...validateProviders(env, options.providers)
   );
 

@@ -7,12 +7,10 @@
   // this bypass on any host that is not loopback (localhost, 127.0.0.1, [::1]), so it cannot
   // weaken a deployed Worker — but do not copy it into a real config.
   //
-  // MESSAGES_ENC_KEY encrypts the stored one-time code; a catalogue with an otp template will not
-  // start without it. This fixed value is for local development only. In a deployed Worker set
-  // your own with `openssl rand -base64 32 | wrangler secret put MESSAGES_ENC_KEY`.
+  // MESSAGES_ENC_KEY is deliberately not here: a key in `vars` would be committed and deployed.
+  // For `wrangler dev`, copy `.dev.vars.example` to `.dev.vars` (gitignored).
   "vars": {
     "MESSAGING_DEV_UNSIGNED": "true",
-    "MESSAGES_ENC_KEY": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
   },
   "kv_namespaces": [
     {
