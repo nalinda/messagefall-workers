@@ -60,6 +60,11 @@ export interface CreateMessagingClientOptions {
    * Base path of the messaging app (e.g. '/api/v1'). Default is '/'.
    */
   basePath?: string;
+  /**
+   * Shared secret sent in the `x-messagefall-secret` header on every request, matching the
+   * messaging app's `secret` option.
+   */
+  secret?: string;
 }
 
 /**
@@ -177,6 +182,10 @@ export function createMessagingClient<
   T extends Templates<any> = Templates<any>,
 >(options: CreateMessagingClientOptions): MessagingClient<T> {
   const prefix = normalizeBasePath(options.basePath);
+  // Kept in step with `SECRET_HEADER` in the app module, which this entry must not import (it
+  // would pull in the optional `hono` peer).
+  const auth: Record<string, string> =
+    options.secret === undefined ? {} : { 'x-messagefall-secret': options.secret };
 
   return {
     async send<K extends keyof T & string>(
@@ -198,7 +207,7 @@ export function createMessagingClient<
 
       const res = await options.binding.fetch(`https://messaging${prefix}/send`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...auth },
         body: JSON.stringify(body),
       });
 
@@ -221,7 +230,7 @@ export function createMessagingClient<
       // different route.
       const res = await options.binding.fetch(
         `https://messaging${prefix}/status/${encodeURIComponent(id)}`,
-        { method: 'GET' }
+        { method: 'GET', headers: auth }
       );
 
       if (res.status === 404) {

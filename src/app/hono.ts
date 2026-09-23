@@ -4,7 +4,7 @@
  * @module
  */
 
-import { Hono } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
 
 import { normalizeBasePath } from '../core/base-path.js';
 import {
@@ -19,6 +19,31 @@ import { announceTimerOff, registerMessagingOptions } from '../core/timer.js';
 import { errorMessage, isRecord } from '../core/values.js';
 import { type MessagingEnv, validateEnv } from '../env.js';
 import { TemplateValidationError } from '../templates.js';
+
+/**
+ * The request header a caller presents the shared secret in. `createMessagingClient` sets it.
+ */
+export const SECRET_HEADER = 'x-messagefall-secret';
+
+/**
+ * Compares two strings without an early exit that would let response time reveal how much of a
+ * guess was right. Both sides are hashed first, so the comparison always walks 32 bytes whatever
+ * the lengths.
+ */
+async function isSecretMatch(given: string, expected: string): Promise<boolean> {
+  const encoder = new TextEncoder();
+  const [a, b] = await Promise.all([
+    crypto.subtle.digest('SHA-256', encoder.encode(given)),
+    crypto.subtle.digest('SHA-256', encoder.encode(expected)),
+  ]);
+  const left = new Uint8Array(a);
+  const right = new Uint8Array(b);
+  let diff = 0;
+  for (const [i, byte] of left.entries()) {
+    diff |= byte ^ (right.at(i) ?? 0);
+  }
+  return diff === 0;
+}
 
 function getExecutionContext(c: { executionCtx: unknown }): SendContext | undefined {
   try {
@@ -67,7 +92,17 @@ function mapSendError(err: unknown): { status: 400 | 404 | 422; message: string 
  */
 export function createMessagingApp<E extends MessagingEnv = MessagingEnv>(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  options: MessagingOptions<any> & { basePath?: string }
+  options: MessagingOptions<any> & {
+    basePath?: string;
+    /**
+     * Returns the shared secret `/send` and `/status/:id` require in the
+     * `x-messagefall-secret` header (pass the same value to `createMessagingClient`'s
+     * `secret`). When set, a request without the matching header gets `401`, and a function
+     * that returns nothing makes both routes answer `500` rather than open. Webhook routes are
+     * unaffected: they stay public and signature-verified.
+     */
+    secret?: (env: E) => string | undefined;
+  }
 ): Hono<{ Bindings: E }> {
   const app = new Hono<{ Bindings: E }>();
   const prefix = normalizeBasePath(options.basePath);
@@ -88,6 +123,25 @@ export function createMessagingApp<E extends MessagingEnv = MessagingEnv>(
     }
     await next();
   });
+
+  const { secret } = options;
+  if (secret) {
+    // Fails closed: a secret option whose value is missing at runtime locks the routes rather
+    // than silently leaving them open.
+    const guard: MiddlewareHandler<{ Bindings: E }> = async (c, next) => {
+      const expected = secret(c.env);
+      if (!expected) {
+        return c.json({ error: 'Messaging secret is not configured' }, 500);
+      }
+      const given = c.req.header(SECRET_HEADER);
+      if (given === undefined || !(await isSecretMatch(given, expected))) {
+        return c.json({ error: 'Unauthorized' }, 401);
+      }
+      await next();
+    };
+    app.use(`${prefix}/send`, guard);
+    app.use(`${prefix}/status/*`, guard);
+  }
 
   // POST <basePath>/send
   app.post(`${prefix}/send`, async (c) => {
