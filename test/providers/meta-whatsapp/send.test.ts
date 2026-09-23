@@ -135,6 +135,67 @@ describe('metaWhatsApp provider: send', () => {
     });
   });
 
+  it('sends an authentication template as the body + copy-code button pair Meta documents', async () => {
+    const calls = mockFetch(() =>
+      Response.json({ messages: [{ id: 'wamid.auth.1' }] }, { status: 200 })
+    );
+
+    const provider = metaWhatsApp(testConfig);
+    await provider.send(
+      message(
+        {
+          templateConfig: {
+            name: 'login_code',
+            language: 'si',
+            params: ['482910'],
+            authentication: true,
+          },
+        },
+        'otp'
+      )
+    );
+
+    expect(withoutRecipient(bodyOf(calls[0]))).toEqual({
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      type: 'template',
+      template: {
+        name: 'login_code',
+        language: { code: 'si' },
+        components: [
+          { type: 'body', parameters: [{ type: 'text', text: '482910' }] },
+          {
+            type: 'button',
+            sub_type: 'url',
+            index: '0',
+            parameters: [{ type: 'text', text: '482910' }],
+          },
+        ],
+      },
+    });
+  });
+
+  it('refuses an authentication template that does not carry exactly one param', async () => {
+    const calls = mockFetch(() => Response.json({}, { status: 200 }));
+
+    const result = await metaWhatsApp(testConfig).send(
+      message(
+        {
+          templateConfig: {
+            name: 'login_code',
+            language: 'en',
+            params: ['482910', '10'],
+            authentication: true,
+          },
+        },
+        'otp'
+      )
+    );
+
+    expect(result.ok).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
   it('honours a custom apiVersion in the endpoint', async () => {
     const calls = mockFetch(() =>
       Response.json({ messages: [{ id: 'wamid.version.1' }] }, { status: 200 })
@@ -191,6 +252,18 @@ describe('metaWhatsApp provider: send', () => {
     expect(result.retryable ?? false).toBe(false);
     expect(result.error).toContain('Number of parameters does not match');
     expect(result.error).toContain('132000');
+    expect(result.code).toBe('graph:132000');
+  });
+
+  it('reports http:<status> for a non-Graph error body and network for a thrown fetch', async () => {
+    mockFetch(() => new Response('Service Unavailable', { status: 503 }));
+    const http = await metaWhatsApp(testConfig).send(templateMessage);
+    expect(http.ok ? undefined : http.code).toBe('http:503');
+
+    fetchSpy.mockImplementation((() =>
+      Promise.reject(new Error('down'))) as unknown as typeof fetch);
+    const network = await metaWhatsApp(testConfig).send(templateMessage);
+    expect(network.ok ? undefined : network.code).toBe('network');
   });
 
   it.each([
@@ -307,6 +380,67 @@ describe('metaWhatsApp provider: end to end from the template catalogue', () => 
       channel: 'whatsapp',
       status: 'sent',
       providerId: 'wamid.e2e.1',
+    });
+  });
+});
+
+describe('metaWhatsApp provider: authentication template from the catalogue', () => {
+  let fetchSpy: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>>;
+
+  beforeEach(() => {
+    fetchSpy = spyOn(globalThis, 'fetch');
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+  });
+
+  it('a loginCode send produces the body + copy-code button components', async () => {
+    const calls: Captured[] = [];
+    fetchSpy.mockImplementation(((url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      return Promise.resolve(Response.json({ messages: [{ id: 'wamid.auth.e2e' }] }));
+    }) as unknown as typeof fetch);
+
+    const templates = defineTemplates({
+      loginCode: {
+        input: z.object({ code: z.string().regex(/^\d{6}$/) }),
+        kind: 'otp',
+        whatsapp: {
+          template: 'login_code',
+          language: { en: 'en', ta: 'ta' },
+          authentication: true,
+          params: ({ code }: { code: string }) => [code],
+        },
+        sms: ({ code }: { code: string }) => `Your code is ${code}`,
+      },
+    });
+
+    const messaging = createMessaging(newEnv(), {
+      templates,
+      providers: () => ({ whatsapp: metaWhatsApp(testConfig) }),
+      delivery: { fallback: ['whatsapp'] },
+    });
+
+    await messaging.send({
+      template: 'loginCode',
+      to: '+94771234567',
+      locale: 'ta',
+      input: { code: '482910' },
+    });
+
+    expect(bodyOf(calls[0]).template).toEqual({
+      name: 'login_code',
+      language: { code: 'ta' },
+      components: [
+        { type: 'body', parameters: [{ type: 'text', text: '482910' }] },
+        {
+          type: 'button',
+          sub_type: 'url',
+          index: '0',
+          parameters: [{ type: 'text', text: '482910' }],
+        },
+      ],
     });
   });
 });

@@ -105,6 +105,11 @@ export interface RenderedWhatsApp {
     name: string;
     language: string;
     params: string[];
+    /**
+     * A Meta authentication template: `params[0]` is the code, sent as the body parameter and
+     * again as the copy-code button's parameter.
+     */
+    authentication?: boolean;
   };
   /**
    * Free-form text for 24-hour service window customer support messages.

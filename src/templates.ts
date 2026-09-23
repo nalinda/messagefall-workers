@@ -33,6 +33,12 @@ export type WhatsAppTemplateConfig<In> =
       template: string;
       language: string | Record<Locale, string>;
       params: (input: In, locale: Locale) => string[];
+      /**
+       * The template is a Meta **authentication** template with a copy-code (or one-tap) button.
+       * `params` must then return exactly one value, the code: it is sent both as the body
+       * parameter and as the button's URL parameter, which is the component pair Meta requires.
+       */
+      authentication?: boolean;
       text?: never;
     }
   | {
@@ -370,11 +376,18 @@ function renderWhatsApp<In>(
   }
   if ('template' in wa && typeof wa.template === 'string' && wa.template.length > 0) {
     const lang = resolveWhatsAppLanguage(wa.language, locale, wa.template);
+    const params = wa.params(input, locale);
+    if (wa.authentication === true && params.length !== 1) {
+      throw new Error(
+        `WhatsApp authentication template "${wa.template}" must render exactly one param (the code), got ${params.length}`
+      );
+    }
     return {
       templateConfig: {
         name: wa.template,
         language: lang,
-        params: wa.params(input, locale),
+        params,
+        ...(wa.authentication === true && { authentication: true }),
       },
     };
   }
