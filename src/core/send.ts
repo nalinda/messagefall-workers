@@ -186,6 +186,30 @@ export interface SendRequest {
   locale: string;
   input: unknown;
   delivery?: DeliveryOverride;
+  /**
+   * `'chain'` makes the send wait for the synchronous chain walk — every channel tried until one
+   * accepts or all have failed — even for an `otp` template given an ExecutionContext, and report
+   * the {@link SendOutcome}. See {@link runSend}.
+   */
+  await?: 'chain';
+}
+
+/**
+ * What an awaited send knows once its synchronous chain walk is over.
+ *
+ * - `accepted`: at least one channel's provider accepted the message (its API call succeeded).
+ *   It is not delivered yet; a later `failed` status can still move the chain on, and a
+ *   delivery failure after that is a `status(id)` concern.
+ * - `undelivered`: every channel the send tried failed immediately; nothing was sent.
+ */
+export type SendOutcome = 'accepted' | 'undelivered';
+
+/**
+ * The result of {@link runSend}: the message id, plus the outcome when the send was awaited.
+ */
+export interface SendResponse {
+  id: string;
+  outcome?: SendOutcome;
 }
 
 /**
@@ -637,14 +661,16 @@ async function deliver(
   id: string,
   policy: DeliveryPolicy,
   ctx?: SendContext
-): Promise<void> {
+): Promise<Attempt[]> {
   const recorder = attemptRecorder(deps, id, policy);
   const chainTask =
     policy.fallback.length > 0
       ? runChain(req, id, deps.providers, policy.fallback, recorder)
       : Promise.resolve<Attempt[]>([]);
+  const alwaysAttempts: Attempt[] = [];
   const alwaysTasks = policy.always.map(async (channel) => {
     const attempt = await attemptChannel(req, id, deps.providers, channel);
+    alwaysAttempts.push(attempt);
     await recorder.record(attempt, 'always');
   });
 
@@ -658,6 +684,10 @@ async function deliver(
   if (rejected) {
     throw rejected.reason;
   }
+  const chainResult = results[0];
+  const chainAttempts =
+    chainResult.status === 'fulfilled' && Array.isArray(chainResult.value) ? chainResult.value : [];
+  return [...chainAttempts, ...alwaysAttempts];
 }
 
 /**
@@ -673,12 +703,26 @@ async function deliverGuarded(
   id: string,
   policy: DeliveryPolicy,
   ctx?: SendContext
-): Promise<void> {
+): Promise<Attempt[] | undefined> {
   try {
-    await deliver(deps, req, id, policy, ctx);
+    return await deliver(deps, req, id, policy, ctx);
   } catch {
     logger.error('send.persist-failed', { id });
+    return undefined;
   }
+}
+
+/**
+ * The outcome of an awaited send from the attempts it made. `undelivered` only when the attempts
+ * are known and every one failed; a lost record write leaves them unknown, and since a provider
+ * may already have accepted the message that reads as `accepted` rather than claiming nothing
+ * went out.
+ */
+function outcomeOf(attempts: Attempt[] | undefined): SendOutcome {
+  if (attempts && attempts.length > 0 && attempts.every((a) => a.status === 'failed')) {
+    return 'undelivered';
+  }
+  return 'accepted';
 }
 
 /**
@@ -856,18 +900,21 @@ async function stashChainInput(
  *
  * Validates the recipient and input, resolves the delivery policy, creates the pending record
  * and dispatches to the first fallback channel and every always channel in parallel. OTP sends
- * with an ExecutionContext defer dispatch to `ctx.waitUntil` and resolve once the record exists.
+ * with an ExecutionContext defer dispatch to `ctx.waitUntil` and resolve once the record exists,
+ * so response time does not reveal whether a number exists — unless `req.await` is `'chain'`,
+ * which runs delivery inline for every kind and resolves with the {@link SendOutcome}. A caller
+ * that opts in takes on hiding that timing itself.
  *
  * @param deps - Providers, status store, default policy and status callback.
  * @param req - The send request.
  * @param ctx - Optional execution context.
- * @returns The new message id.
+ * @returns The new message id, and the outcome when the send was awaited.
  */
 export async function runSend(
   deps: SendDeps,
   req: SendRequest,
   ctx?: SendContext
-): Promise<{ id: string }> {
+): Promise<SendResponse> {
   validateSendRequest(req);
   const validated: ValidatedSendRequest = {
     ...req,
@@ -903,6 +950,9 @@ export async function runSend(
 
   await stashChainInput(deps, req, id, policy);
 
+  if (req.await === 'chain') {
+    return { id, outcome: outcomeOf(await deliverGuarded(deps, validated, id, policy, ctx)) };
+  }
   if (ctx && req.template.kind === 'otp') {
     ctx.waitUntil(deliverGuarded(deps, validated, id, policy, ctx));
   } else {

@@ -34,9 +34,13 @@ export {
   RecipientError,
   type SendArgs,
   type SendContext,
+  type SendOutcome,
+  type SendResponse,
   type StatusCallbackEvent,
   UnknownTemplateError,
 } from './core/messaging.js';
+export { OTP_ERROR_WITHHELD } from './core/redact.js';
+export { EncryptionKeyError } from './core/seal.js';
 export { armTimer, type ArmTimerArgs, cancelTimer } from './core/timer.js';
 export * from './providers/index.js';
 export * from './types.js';

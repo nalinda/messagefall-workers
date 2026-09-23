@@ -20,6 +20,7 @@ import {
   type ProviderSet,
   runSend,
   type SendContext,
+  type SendResponse,
   type StatusCallbackEvent,
 } from './send.js';
 import {
@@ -39,7 +40,13 @@ import {
 import { applyStatusEvents, createWebhookHandler, type WebhookDispatchOptions } from './webhook.js';
 
 export { ProviderConfigError } from './provider-set.js';
-export type { ProviderSet, SendContext, StatusCallbackEvent } from './send.js';
+export type {
+  ProviderSet,
+  SendContext,
+  SendOutcome,
+  SendResponse,
+  StatusCallbackEvent,
+} from './send.js';
 export { E164, EmailRecipientError, isEmailAddress, RecipientError } from './send.js';
 
 /**
@@ -66,13 +73,18 @@ export interface SendArgs<T, K extends keyof T> {
   locale: string;
   input: InputOf<T, K>;
   delivery?: DeliveryOverride;
+  /**
+   * `'chain'` waits for the synchronous chain walk and resolves with an `outcome`
+   * (`'accepted'` or `'undelivered'`), even for an `otp` send given an ExecutionContext.
+   */
+  await?: 'chain';
 }
 
 /**
  * Messaging instance returned by createMessaging.
  */
 export interface Messaging<T> {
-  send<K extends keyof T>(args: SendArgs<T, K>, ctx?: SendContext): Promise<{ id: string }>;
+  send<K extends keyof T>(args: SendArgs<T, K>, ctx?: SendContext): Promise<SendResponse>;
   status(id: string): Promise<MessageRecord | null>;
   /**
    * Handles a provider's delivery-status webhook (#5): 404 for an unknown provider or one
@@ -460,6 +472,7 @@ export function createMessaging<T extends Templates<any>>(
           locale: args.locale,
           input: args.input,
           delivery: args.delivery,
+          ...(args.await === 'chain' && { await: 'chain' as const }),
         },
         ctx
       );

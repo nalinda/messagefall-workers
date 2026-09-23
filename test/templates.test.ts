@@ -106,6 +106,34 @@ describe('defineTemplates: Definition-time validation', () => {
     );
   });
 
+  it('rejects a template timeout that is not a positive number of milliseconds', () => {
+    for (const timeout of [0, -1, NaN, Infinity]) {
+      expect(() =>
+        defineTemplates({
+          ping: { input: z.object({}), kind: 'notification', sms: () => 'ping', timeout },
+        })
+      ).toThrow(/timeout must be a positive number/);
+    }
+  });
+
+  it('refuses to render an authentication template whose params are not exactly the code', () => {
+    const catalog = defineTemplates({
+      loginCode: {
+        input: z.object({ code: z.string() }),
+        kind: 'otp',
+        whatsapp: {
+          template: 'login_code',
+          language: 'en',
+          authentication: true,
+          params: ({ code }: { code: string }) => [code, '10'],
+        },
+      },
+    });
+    expect(() => render(catalog.loginCode, 'whatsapp', { code: '482910' }, 'en')).toThrow(
+      /exactly one param/
+    );
+  });
+
   it('allows kind: "otp" with whatsapp.template (Meta authentication template)', () => {
     const validOtpCatalog = {
       loginCode: {

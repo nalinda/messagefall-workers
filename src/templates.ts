@@ -261,6 +261,12 @@ export function validateTemplateDef(templateName: string, def: TemplateDef<unkno
     throw new Error(`Template "${templateName}" must define at least one channel rendering`);
   }
   assertNoOtpWhatsAppText(templateName, def);
+  if (
+    def.timeout !== undefined &&
+    (typeof def.timeout !== 'number' || !Number.isFinite(def.timeout) || def.timeout <= 0)
+  ) {
+    throw new Error(`Template "${templateName}" timeout must be a positive number of milliseconds`);
+  }
   if (def.delivery) {
     validateDeliveryChannels(templateName, def.delivery, channels);
   }

@@ -40,13 +40,41 @@ export interface ClientSendArgs<T, K extends keyof T> {
   locale: string;
   input: InputOf<T, K>;
   delivery?: DeliveryOverrideFor<T, K>;
+  /**
+   * `'chain'` waits for the synchronous chain walk before resolving: `{ ok: true, outcome:
+   * 'accepted' }` once a provider accepted the message, `{ ok: false, code: 'undelivered' }`
+   * when every channel failed immediately. Without it an `otp` send resolves as soon as the
+   * message is recorded, before any provider is called.
+   */
+  await?: 'chain';
 }
 
 /**
  * Result returned by client send.
  */
 export type ClientSendResult =
-  { ok: true; id: string } | { ok: false; status: number; error: string };
+  | {
+      ok: true;
+      id: string;
+      /**
+       * Present when the send was awaited (`await: 'chain'`): a provider accepted the message.
+       */
+      outcome?: 'accepted';
+    }
+  | {
+      ok: false;
+      status: number;
+      error: string;
+      /**
+       * Stable failure code when the messaging Worker gave one: `undelivered` when an awaited
+       * send found every channel failing immediately.
+       */
+      code?: string;
+      /**
+       * The message id, when a record was created before the failure (`undelivered`).
+       */
+      id?: string;
+    };
 
 /**
  * Options for creating a messaging client.
@@ -172,6 +200,36 @@ async function extractError(res: {
 }
 
 /**
+ * The error of a non-OK send response, with the `code` and `id` the messaging Worker adds to an
+ * `undelivered` answer. The body is read once, as {@link extractError} requires.
+ */
+async function extractFailure(res: Parameters<typeof extractError>[0]): Promise<{
+  error: string;
+  code?: string;
+  id?: string;
+}> {
+  const text = await tryReadText(res);
+  if (text === undefined) {
+    return { error: await extractError(res) };
+  }
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return { error: text };
+  }
+  const error = parseJsonError(body) ?? text;
+  if (!isRecord(body)) {
+    return { error };
+  }
+  return {
+    error,
+    ...(typeof body.code === 'string' && { code: body.code }),
+    ...(typeof body.id === 'string' && { id: body.id }),
+  };
+}
+
+/**
  * Create a typed client for sending messages over a service binding.
  *
  * @param options - Client configuration options with Fetcher binding and optional basePath.
@@ -204,6 +262,9 @@ export function createMessagingClient<
       if (args.delivery !== undefined) {
         body.delivery = args.delivery;
       }
+      if (args.await !== undefined) {
+        body.await = args.await;
+      }
 
       const res = await options.binding.fetch(`https://messaging${prefix}/send`, {
         method: 'POST',
@@ -212,16 +273,13 @@ export function createMessagingClient<
       });
 
       if (res.ok) {
-        const data = await res.json<{ id: string }>();
-        return { ok: true, id: data.id };
+        const data = await res.json<{ id: string; outcome?: 'accepted' }>();
+        return data.outcome === undefined
+          ? { ok: true, id: data.id }
+          : { ok: true, id: data.id, outcome: data.outcome };
       }
 
-      const error = await extractError(res);
-      return {
-        ok: false,
-        status: res.status,
-        error,
-      };
+      return { ok: false, status: res.status, ...(await extractFailure(res)) };
     },
 
     async status(id: string): Promise<MessageRecord | null> {

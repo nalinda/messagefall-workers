@@ -168,10 +168,18 @@ export function createMessagingApp<E extends MessagingEnv = MessagingEnv>(
           locale: body.locale as string,
           input: body.input,
           delivery: body.delivery as SendArgs<Record<string, unknown>, string>['delivery'],
+          ...(body.await === 'chain' && { await: 'chain' }),
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as SendArgs<any, any>,
         ctx
       );
+      if (result.outcome === 'undelivered') {
+        // Every channel failed before anything was sent: a stable `code` the caller can act on.
+        return c.json(
+          { error: 'No channel accepted the message', code: 'undelivered', id: result.id },
+          502
+        );
+      }
       return c.json(result, 200);
     } catch (err: unknown) {
       const mapped = mapSendError(err);
