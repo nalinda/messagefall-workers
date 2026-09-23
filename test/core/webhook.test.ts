@@ -12,6 +12,7 @@
 import type { ExecutionContext, KVNamespace } from '@cloudflare/workers-types';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
+import { OTP_ERROR_WITHHELD } from '../../src/core/redact.js';
 import { kvStatusStore, type MessageRecord } from '../../src/core/status.js';
 import {
   createWebhookHandler,
@@ -70,12 +71,13 @@ function singleAttemptRecord(
   providerId: string,
   template: string,
   channel: 'whatsapp' | 'email',
-  provider: string
+  provider: string,
+  kind: MessageRecord['kind'] = 'otp'
 ): MessageRecord {
   return {
     id: messageId,
     template,
-    kind: 'otp',
+    kind,
     policy: { fallback: [channel], always: [] },
     chain: {
       status: 'sent',
@@ -1710,7 +1712,10 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
       const providerId = 'resend_01J9REDACT_EMAIL';
       const secretCode = '913277';
 
-      await store.create(singleAttemptRecord(messageId, providerId, 'loginOtp', 'email', 'resend'));
+      // A notification: an otp record never keeps vendor text at all (see the test below).
+      await store.create(
+        singleAttemptRecord(messageId, providerId, 'loginOtp', 'email', 'resend', 'notification')
+      );
       await store.indexProviderId(providerId, {
         id: messageId,
         channel: 'email',
@@ -1719,7 +1724,7 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
 
       const templates = {
         loginOtp: {
-          kind: 'otp' as const,
+          kind: 'notification' as const,
           email: {
             subject: (input: { code: string }): string =>
               `Your login code is ${input.code} (expires in 5 minutes)`,
@@ -1764,7 +1769,14 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
       const secretCode = '480221';
 
       await store.create(
-        singleAttemptRecord(messageId, providerId, 'loginOtp', 'whatsapp', 'meta-wa')
+        singleAttemptRecord(
+          messageId,
+          providerId,
+          'loginOtp',
+          'whatsapp',
+          'meta-wa',
+          'notification'
+        )
       );
       await store.indexProviderId(providerId, {
         id: messageId,
@@ -1810,10 +1822,11 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
       expect(JSON.stringify(updated)).not.toContain(secretCode);
     });
 
-    it('leaves a vendor error intact when a WhatsApp params template offers no literal text to anchor on', async () => {
+    it('withholds the vendor text of an otp record, even a bare code no template text anchors', async () => {
       const store = kvStatusStore(kv);
       const messageId = 'msg_01J9REDACT000000000PARAM';
       const providerId = 'wamid.HBgL_01J9REDACT_PARAM';
+      const secretCode = '731904';
 
       await store.create(
         singleAttemptRecord(messageId, providerId, 'loginOtp', 'whatsapp', 'meta-wa')
@@ -1824,6 +1837,7 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
         provider: 'meta-wa',
       });
 
+      // `params` renders the bare code: the case scrubbing could not redact once in:<id> expired.
       const templates = {
         loginOtp: {
           kind: 'otp' as const,
@@ -1831,6 +1845,57 @@ describe('Issue #5: Webhook dispatch: /webhooks/:provider routed to provider han
             template: 'login_otp',
             language: 'en',
             params: (input: { code: string }): string[] => [input.code],
+          },
+        },
+      };
+
+      const event: StatusEvent = {
+        providerId,
+        status: 'failed',
+        error: `Parameter ${secretCode} rejected`,
+        code: 'graph:131008',
+        at: '2026-09-20T12:05:00.000Z',
+      };
+
+      const handleWebhook = createWebhookHandler({
+        providers: { whatsapp: providerEmitting('meta-wa', event) },
+        kv,
+        templates,
+      });
+
+      const response = await handleWebhook(
+        'meta-wa',
+        new Request('http://localhost/webhooks/meta-wa', { method: 'POST', body: '{}' })
+      );
+      expect(response.status).toBe(200);
+
+      const updated = await store.get(messageId);
+      expect(updated?.chain.attempts[0]?.error).toBe(OTP_ERROR_WITHHELD);
+      expect(updated?.chain.attempts[0]?.errorCode).toBe('graph:131008');
+      expect(JSON.stringify(updated)).not.toContain(secretCode);
+    });
+
+    it('leaves a notification vendor error intact when a params template offers no literal text to anchor on', async () => {
+      const store = kvStatusStore(kv);
+      const messageId = 'msg_01J9REDACT00000000PARAM2';
+      const providerId = 'wamid.HBgL_01J9REDACT_PARAM2';
+
+      await store.create(
+        singleAttemptRecord(messageId, providerId, 'alert', 'whatsapp', 'meta-wa', 'notification')
+      );
+      await store.indexProviderId(providerId, {
+        id: messageId,
+        channel: 'whatsapp',
+        provider: 'meta-wa',
+      });
+
+      const templates = {
+        alert: {
+          kind: 'notification' as const,
+          whatsapp: {
+            template: 'alert',
+            language: 'en',
+            params: (input: { ref: string }): string[] => [input.ref],
           },
         },
       };

@@ -47,6 +47,13 @@ export interface StatusEvent {
    */
   error?: string;
   /**
+   * Short machine-readable failure code, free of message content — `graph:<code>` for a Meta
+   * Graph error, `http:<status>` for an HTTP failure, `network` when the request never got a
+   * response. For an `otp` template it is all the status record keeps of a vendor error: the
+   * vendor's text is withheld because it can quote the code back.
+   */
+  code?: string;
+  /**
    * ISO timestamp of when the status event occurred.
    */
   at: string;
@@ -160,6 +167,13 @@ export type SendResult =
        * Whether the send attempt can be retried on the same channel.
        */
       retryable?: boolean;
+      /**
+       * Short machine-readable failure code, free of message content — `graph:<code>` for a Meta
+       * Graph error, `http:<status>` for an HTTP failure, `network` when the request never got a
+       * response. For an `otp` template it is all the status record keeps of a vendor error: the
+       * vendor's text is withheld because it can quote the code back.
+       */
+      code?: string;
     };
 
 /**

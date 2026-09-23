@@ -151,6 +151,7 @@ export function httpSms(c: HttpSmsOptions): Provider<RenderedSms> {
         return {
           ok: false,
           error: errorMessage(err),
+          code: 'network',
           retryable: true,
         };
       }
@@ -177,6 +178,7 @@ export function httpSms(c: HttpSmsOptions): Provider<RenderedSms> {
       return {
         ok: false,
         error: formatHttpError(response.status, payload.text),
+        code: `http:${response.status}`,
         retryable: isRetryable,
       };
     },

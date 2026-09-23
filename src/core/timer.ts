@@ -90,14 +90,21 @@ export const DEFAULT_CHAIN_TIMEOUT_MS: Readonly<Record<TemplateKind, number>> = 
 /**
  * The chain timeout for a template kind: the configured override, else the kind's default.
  *
+ * A template's own `timeout` wins over both.
+ *
  * @param kind - Template kind.
  * @param timeout - The `delivery.timeout` option, if configured.
+ * @param templateTimeout - The template's own `timeout`, if it sets one.
  * @returns Milliseconds before the chain moves on when no status has arrived.
  */
 export function chainTimeoutMs(
   kind: TemplateKind,
-  timeout?: { otp?: number; notification?: number }
+  timeout?: { otp?: number; notification?: number },
+  templateTimeout?: number
 ): number {
+  if (templateTimeout !== undefined) {
+    return templateTimeout;
+  }
   return kind === 'otp'
     ? (timeout?.otp ?? DEFAULT_CHAIN_TIMEOUT_MS.otp)
     : (timeout?.notification ?? DEFAULT_CHAIN_TIMEOUT_MS.notification);

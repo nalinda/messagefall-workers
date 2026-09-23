@@ -6,8 +6,13 @@
   // Lets the unsigned webhook curls in this example's README be accepted. The library refuses
   // this bypass on any host that is not loopback (localhost, 127.0.0.1, [::1]), so it cannot
   // weaken a deployed Worker — but do not copy it into a real config.
+  //
+  // MESSAGES_ENC_KEY encrypts the stored one-time code; a catalogue with an otp template will not
+  // start without it. This fixed value is for local development only. In a deployed Worker set
+  // your own with `openssl rand -base64 32 | wrangler secret put MESSAGES_ENC_KEY`.
   "vars": {
     "MESSAGING_DEV_UNSIGNED": "true",
+    "MESSAGES_ENC_KEY": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
   },
   "kv_namespaces": [
     {

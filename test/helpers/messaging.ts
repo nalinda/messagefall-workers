@@ -28,10 +28,17 @@ export interface TestExecutionContext {
 }
 
 /**
- * A fresh env with an in-memory MESSAGES_KV; one per test so provider memoisation never leaks.
+ * A fixed, valid `MESSAGES_ENC_KEY` (32 bytes, base64) for tests. An `otp` catalogue cannot be
+ * used without one.
+ */
+export const TEST_ENC_KEY = btoa(String.fromCodePoint(...Array.from({ length: 32 }, (_, i) => i)));
+
+/**
+ * A fresh env with an in-memory MESSAGES_KV and the test seal key; one per test so provider
+ * memoisation never leaks.
  */
 export function newEnv(): MessagingEnv {
-  return { MESSAGES_KV: memoryKV() };
+  return { MESSAGES_KV: memoryKV(), MESSAGES_ENC_KEY: TEST_ENC_KEY };
 }
 
 /**

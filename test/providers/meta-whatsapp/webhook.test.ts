@@ -249,6 +249,7 @@ describe('metaWhatsApp provider: webhook', () => {
           providerId: 'wamid.FAILED1',
           status: 'failed',
           error: 'Message undeliverable',
+          code: 'graph:131026',
           at: new Date(1_700_000_030_000).toISOString(),
         },
       ]);

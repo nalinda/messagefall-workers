@@ -61,6 +61,11 @@ export interface TemplateDef<In = unknown> {
   sms?: (input: In, locale: Locale) => string;
   email?: EmailTemplateConfig<In>;
   delivery?: DeliveryOverride;
+  /**
+   * Milliseconds before this template's chain moves to the next channel when no status has
+   * arrived. Overrides the instance's per-kind `delivery.timeout`.
+   */
+  timeout?: number;
 }
 
 /**
@@ -101,6 +106,20 @@ export function getTemplate(
   return templates
     ? (Reflect.get(templates, templateName) as TemplateDef<unknown> | undefined)
     : undefined;
+}
+
+/**
+ * Whether a catalogue has any `kind: 'otp'` template. Such a catalogue needs `MESSAGES_ENC_KEY`.
+ *
+ * @param templates - The catalogue.
+ * @returns True when at least one template is an `otp` template.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function hasOtpTemplate(templates: Templates<any> | undefined): boolean {
+  if (!templates || typeof templates !== 'object') return false;
+  return Object.values(templates).some(
+    (def) => !!def && typeof def === 'object' && (def as { kind?: unknown }).kind === 'otp'
+  );
 }
 
 /**
@@ -302,6 +321,27 @@ export function validateInput<In>(def: TemplateDef<In>, input: unknown): In {
   return result.value;
 }
 
+/**
+ * Thrown when a WhatsApp template has no approved language for the send's locale and no
+ * `default`. The send path records it as a failed WhatsApp attempt with `errorCode`
+ * `no-template-language` and moves on to the next channel (normally SMS) without calling Meta.
+ */
+export class NoTemplateLanguageError extends Error {
+  /**
+   * The `errorCode` a status record carries for this skip.
+   */
+  static readonly code = 'no-template-language';
+  readonly locale: Locale;
+  readonly template: string;
+
+  constructor(template: string, locale: Locale) {
+    super(`WhatsApp template "${template}" has no approved language for locale "${locale}"`);
+    this.name = 'NoTemplateLanguageError';
+    this.locale = locale;
+    this.template = template;
+  }
+}
+
 function resolveWhatsAppLanguage(
   language: string | Record<string, string>,
   locale: Locale,
@@ -317,9 +357,7 @@ function resolveWhatsAppLanguage(
   if (langMap.has('default')) {
     return langMap.get('default')!;
   }
-  throw new Error(
-    `Missing language mapping for locale "${locale}" in WhatsApp template "${templateName}" and no default language configured`
-  );
+  throw new NoTemplateLanguageError(templateName, locale);
 }
 
 function renderWhatsApp<In>(

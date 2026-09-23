@@ -30,9 +30,16 @@ export interface Attempt {
    */
   status: DeliveryStatus;
   /**
-   * Error message if attempt failed.
+   * Error message if attempt failed. For an `otp` template a vendor's own text is never stored
+   * here (it can quote the code back); see {@link Attempt.errorCode}.
    */
   error?: string;
+  /**
+   * Machine-readable failure code when one is known: a provider's `graph:<code>`,
+   * `http:<status>` or `network`, or `no-template-language` when WhatsApp was skipped because the
+   * template has no approved language for the send's locale.
+   */
+  errorCode?: string;
   /**
    * ISO 8601 timestamp when attempt occurred.
    */

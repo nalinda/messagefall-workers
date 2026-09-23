@@ -19,6 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { convertV4MiniflareOptions, Miniflare } from 'miniflare';
 
 import type { MessageRecord } from '../../src/core/status.js';
+import { TEST_ENC_KEY } from '../helpers/messaging.js';
 
 const rootDir = path.resolve(import.meta.dir, '../..');
 const exampleDir = path.join(rootDir, 'examples/basic');
@@ -152,7 +153,10 @@ describe('Issue #14: Example Worker under examples/basic', () => {
           compatibilityFlags: ['nodejs_compat'],
           kvNamespaces: ['MESSAGES_KV'],
           durableObjects: { FALLBACK_TIMER: { className: 'FallbackTimer', useSQLite: true } },
-          bindings: { MESSAGING_DEV_UNSIGNED: 'true' },
+          bindings: {
+            MESSAGING_DEV_UNSIGNED: 'true',
+            MESSAGES_ENC_KEY: TEST_ENC_KEY,
+          },
         })
       );
       await mf.ready;

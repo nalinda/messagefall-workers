@@ -113,6 +113,7 @@ export function mapErrorResponse(status: number, body: unknown, rawText: string)
     return {
       ok: false,
       error: `Graph error ${code}: ${message}`,
+      code: `graph:${code}`,
       retryable: isRetryableStatus(status) || RETRYABLE_GRAPH_CODES.has(code),
     };
   }
@@ -120,6 +121,7 @@ export function mapErrorResponse(status: number, body: unknown, rawText: string)
   return {
     ok: false,
     error: formatHttpError(status, rawText),
+    code: `http:${status}`,
     retryable: isRetryableStatus(status),
   };
 }
@@ -163,6 +165,7 @@ export async function sendViaGraph(
     return {
       ok: false,
       error: errorMessage(err),
+      code: 'network',
       retryable: true,
     };
   }

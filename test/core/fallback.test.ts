@@ -19,6 +19,7 @@ import { z } from 'zod';
 
 import { advanceChain, type AdvanceChainArgs } from '../../src/core/fallback.js';
 import type { DeliveryPolicy } from '../../src/core/policy.js';
+import { OTP_ERROR_WITHHELD } from '../../src/core/redact.js';
 import { kvStatusStore, type MessageRecord, type StatusStore } from '../../src/core/status.js';
 import type {
   OutboundMeta,
@@ -28,7 +29,7 @@ import type {
 } from '../../src/providers/types.js';
 import { defineTemplates } from '../../src/templates.js';
 import { createMockFallbackTimer, type MockFallbackTimer } from '../helpers/fallback.js';
-import { recordingProvider } from '../helpers/messaging.js';
+import { recordingProvider, TEST_ENC_KEY } from '../helpers/messaging.js';
 import { createMiniflareKV } from '../helpers/status.js';
 
 const testTemplates = defineTemplates({
@@ -136,7 +137,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       const args: AdvanceChainArgs = {
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           timer: mockTimer,
           templates: testTemplates,
@@ -230,7 +231,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           templates: testTemplates,
           providers: { whatsapp: waProvider, sms: smsProvider },
@@ -287,7 +288,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           timer: mockTimer,
           templates: testTemplates,
@@ -356,7 +357,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           timer: mockTimer,
           templates: testTemplates,
@@ -424,7 +425,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           timer: mockTimer,
           templates: testTemplates,
@@ -468,7 +469,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           templates: testTemplates,
           providers: {},
@@ -535,7 +536,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           templates: testTemplates,
           providers: { whatsapp: waProvider, sms: smsProvider, email: emailProvider },
@@ -612,7 +613,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           templates: testTemplates,
           providers: { whatsapp: waProvider, sms: smsProvider, email: emailProvider },
@@ -675,7 +676,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       const args: AdvanceChainArgs = {
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           templates: testTemplates,
           providers: { whatsapp: waProvider, sms: smsProvider },
@@ -757,7 +758,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       const args: AdvanceChainArgs = {
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           timer: mockTimer,
           templates: testTemplates,
@@ -810,7 +811,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           templates: testTemplates,
           providers: { sms: smsProvider },
@@ -855,7 +856,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           templates: testTemplates,
           providers: { sms: smsProvider },
@@ -907,7 +908,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           templates: testTemplates,
           providers: { sms: smsProvider },
@@ -963,7 +964,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       const args: AdvanceChainArgs = {
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           templates: testTemplates,
           providers: { sms: smsProvider },
@@ -1034,7 +1035,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'timeout',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           templates: testTemplates,
           providers: { whatsapp: waProvider, sms: smsProvider },
@@ -1112,7 +1113,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           templates: testTemplates,
           providers: { whatsapp: waProvider, sms: smsProvider, email: emailProvider },
@@ -1138,7 +1139,8 @@ describe('Issue #7: Fallback on failed delivery status', () => {
 
       expect(updatedRecord?.chain.attempts[1].channel).toBe('sms');
       expect(updatedRecord?.chain.attempts[1].status).toBe('failed');
-      expect(updatedRecord?.chain.attempts[1].error).toBe('Twilio SMS service unavailable (503)');
+      // An otp record withholds the vendor's text.
+      expect(updatedRecord?.chain.attempts[1].error).toBe(OTP_ERROR_WITHHELD);
 
       expect(updatedRecord?.chain.attempts[2].channel).toBe('email');
       expect(updatedRecord?.chain.attempts[2].status).toBe('sent');
@@ -1188,7 +1190,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           templates: testTemplates,
           providers: { whatsapp: waProvider, email: emailProvider },
@@ -1251,7 +1253,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           templates: testTemplates,
           providers: { whatsapp: waProvider, sms: smsProvider },
@@ -1263,7 +1265,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       expect(updatedRecord?.chain.status).toBe('failed');
       expect(updatedRecord?.status).toBe('failed');
       expect(updatedRecord?.chain.attempts).toHaveLength(2);
-      expect(updatedRecord?.chain.attempts[1].error).toBe('SMS network error');
+      expect(updatedRecord?.chain.attempts[1].error).toBe(OTP_ERROR_WITHHELD);
 
       // in:<id> deleted on exhaustion
       expect(await kv.get(`in:${messageId}`)).toBeNull();
@@ -1307,7 +1309,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           templates: testTemplates,
           providers: { whatsapp: waProvider, sms: smsProvider },
@@ -1359,7 +1361,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           templates: testTemplates,
           providers: { whatsapp: waProvider, sms: smsProvider },
@@ -1413,7 +1415,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           templates: testTemplates,
           providers: { sms: smsProvider },
@@ -1485,7 +1487,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           templates: testTemplates,
           providers: { sms: smsProvider, whatsapp: waProvider },
@@ -1548,7 +1550,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           timer: mockTimer,
           templates: testTemplates,
@@ -1597,7 +1599,7 @@ describe('Issue #7: Fallback on failed delivery status', () => {
       await advanceChain({
         id: messageId,
         reason: 'failed',
-        env: { MESSAGES_KV: kv },
+        env: { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         options: {
           timer: mockTimer,
           templates: testTemplates,

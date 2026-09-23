@@ -20,6 +20,7 @@ import {
   type AnyRendered,
   assertNoOtpWhatsAppText,
   definedChannels,
+  NoTemplateLanguageError,
   renderValidated,
   type TemplateDef,
   validateInput,
@@ -31,13 +32,14 @@ import {
   PolicyError,
   resolveDelivery,
 } from './policy.js';
-import { renderedContent, scrubError } from './redact.js';
+import { OTP_ERROR_WITHHELD, renderedContent, scrubError } from './redact.js';
 import {
   isTimedChain,
   type RenderInput,
   renderInputKey,
   sealAndReleaseChain,
 } from './render-input.js';
+import { sealInput } from './seal.js';
 import {
   type Attempt,
   type ChainProgress,
@@ -165,6 +167,11 @@ export interface SendDeps {
   kv?: KVNamespace;
   timer?: FallbackTimerClient;
   timeout?: { otp?: number; notification?: number };
+  /**
+   * Resolves the key the render input is sealed with before it is stashed (`MESSAGES_ENC_KEY`),
+   * or undefined when the deployment has none. See `./seal.js`.
+   */
+  sealKey?: () => Promise<CryptoKey | undefined>;
 }
 
 /**
@@ -286,7 +293,7 @@ async function attemptChannel(
     return {
       ...base,
       status: 'failed',
-      error: scrubError(errorMessage(error), [req.validatedInput, req.input]),
+      ...renderFailure(req, error),
       at: new Date().toISOString(),
     };
   }
@@ -298,19 +305,65 @@ async function attemptChannel(
   }
 
   const at = new Date().toISOString();
-  return result.ok
-    ? { ...base, status: 'sent', ...(result.providerId && { providerId: result.providerId }), at }
-    : {
-        ...base,
-        status: 'failed',
-        error: result.error
-          ? // Only the rendered content and the template input, never the payload's metadata
-            // (`to`, `messageId`, `template`, `kind`, `locale`): those cannot leak the message,
-            // and they shred ordinary vendor error strings they share substrings with.
-            scrubError(result.error, [renderedContent(payload), req.validatedInput, req.input])
-          : undefined,
-        at,
-      };
+  if (result.ok) {
+    return {
+      ...base,
+      status: 'sent',
+      ...(result.providerId && { providerId: result.providerId }),
+      at,
+    };
+  }
+  return {
+    ...base,
+    status: 'failed',
+    error: providerFailureText(req, payload, result.error),
+    ...(result.code !== undefined && { errorCode: result.code }),
+    at,
+  };
+}
+
+/**
+ * The `error` recorded for a provider's failure.
+ *
+ * For an `otp` template the vendor's text is withheld outright: it can quote the code back and
+ * the record is served over `/status/:id`. Otherwise it is scrubbed against the rendered content
+ * and the template input only, never the payload's metadata (`to`, `messageId`, `template`,
+ * `kind`, `locale`): those cannot leak the message, and they shred ordinary vendor error strings
+ * they share substrings with.
+ */
+function providerFailureText(
+  req: ValidatedSendRequest,
+  payload: AnyRendered & OutboundMeta,
+  error: string | undefined
+): string | undefined {
+  if (!error) {
+    return undefined;
+  }
+  return req.template.kind === 'otp'
+    ? OTP_ERROR_WITHHELD
+    : scrubError(error, [renderedContent(payload), req.validatedInput, req.input]);
+}
+
+/**
+ * The `error` / `errorCode` recorded when a channel cannot be rendered.
+ *
+ * A missing template language is the library's own, content-free error and is kept as it is. Any
+ * other render error came out of the caller's render function, which had the input in hand, so
+ * for an `otp` template it is withheld like a vendor's text and otherwise scrubbed.
+ */
+function renderFailure(
+  req: ValidatedSendRequest,
+  error: unknown
+): Pick<Attempt, 'error' | 'errorCode'> {
+  if (error instanceof NoTemplateLanguageError) {
+    return { error: error.message, errorCode: NoTemplateLanguageError.code };
+  }
+  return {
+    error:
+      req.template.kind === 'otp'
+        ? OTP_ERROR_WITHHELD
+        : scrubError(errorMessage(error), [req.validatedInput, req.input]),
+  };
 }
 
 export type { ChainProgress } from './status.js';
@@ -759,12 +812,21 @@ async function stashChainInput(
   if (policy.fallback.length === 0) {
     return;
   }
-  const timeoutMs = chainTimeoutMs(req.template.kind, deps.timeout);
-  const inputPayload: RenderInput = {
+  const timeoutMs = chainTimeoutMs(req.template.kind, deps.timeout, req.template.timeout);
+  let input: unknown;
+  try {
     // `JSON.stringify` drops a key whose value is `undefined`, and `asRenderInput` recognises
     // the envelope by its `input` field — so an input-less template would come back out of KV
     // as a bare payload and lose its recipient. `null` round-trips and renders the same.
-    input: req.input ?? null,
+    input = await sealInput(await deps.sealKey?.(), id, req.input ?? null);
+  } catch {
+    // Never fall back to writing the input in the clear: the send proceeds without a stash and a
+    // later fallback degrades through `finalizeUnusableInput`, exactly as a failed KV write does.
+    logger.warn('send.stash-failed', { id, kind: req.template.kind });
+    return;
+  }
+  const inputPayload: RenderInput = {
+    input,
     to: req.to,
     ...(req.email !== undefined && { email: req.email }),
     locale: req.locale,

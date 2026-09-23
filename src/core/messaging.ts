@@ -8,12 +8,13 @@ import type { DurableObjectNamespace, KVNamespace } from '@cloudflare/workers-ty
 
 import type { MessagingEnv } from '../env.js';
 import type { StatusEvent } from '../providers/types.js';
-import type { InputOf, TemplateDef, Templates } from '../templates.js';
+import { hasOtpTemplate, type InputOf, type TemplateDef, type Templates } from '../templates.js';
 import { withAdvanceLock } from './advance-lock.js';
 import { advanceChain } from './fallback.js';
 import { DEFAULT_POLICY, type DeliveryOverride, type DeliveryPolicy } from './policy.js';
 import { validateProviderSet } from './provider-set.js';
 import { sealAndReleaseChain } from './render-input.js';
+import { ENC_KEY_BINDING, rawSealKey, sealKeyFor } from './seal.js';
 import {
   notifyStatus,
   type ProviderSet,
@@ -268,6 +269,28 @@ function requireKv(env: MessagingEnv, options: { kv?: KVNamespace }): KVNamespac
 }
 
 /**
+ * A catalogue with an `otp` template must be deployed with `MESSAGES_ENC_KEY`: the fallback chain
+ * stashes the render input between requests, and for such a template that input is the code.
+ * Refusing to build the instance is what keeps the code from ever reaching KV or Durable Object
+ * storage in the clear. The key's format is checked where it is imported (`./seal.js`) and at
+ * startup by `validateEnv`.
+ *
+ * @throws {MessagingConfigError} If an `otp` template exists and the binding is absent.
+ */
+function requireSealKeyForOtp(
+  env: MessagingEnv,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  templates: Templates<any>
+): void {
+  if (rawSealKey(env) === undefined && hasOtpTemplate(templates)) {
+    throw new MessagingConfigError(
+      `${ENC_KEY_BINDING} is required when the catalogue has an otp template: ` +
+        'the fallback chain stores the code between requests and it is encrypted with this key'
+    );
+  }
+}
+
+/**
  * The status store `createMessaging` would use for `env` and `options`: `options.kv` else
  * `env.MESSAGES_KV`, memoised per namespace and TTL. The one resolution every path shares —
  * the request path, the webhook bridge and the `FallbackTimer` Durable Object — so a missing
@@ -399,6 +422,7 @@ export function createMessaging<T extends Templates<any>>(
   options: MessagingOptions<T>
 ): Messaging<T> {
   const kv = requireKv(env, options);
+  requireSealKeyForOtp(env, options.templates);
   registerMessagingOptions(options);
   announceTimerOff(env, options.timer);
   const defaults: DeliveryPolicy = {
@@ -426,6 +450,7 @@ export function createMessaging<T extends Templates<any>>(
           kv,
           timer: resolveTimer(env, options.timer),
           timeout: options.delivery?.timeout,
+          sealKey: () => sealKeyFor(env),
         },
         {
           templateName,

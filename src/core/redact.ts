@@ -27,6 +27,13 @@ import { getTemplate, type TemplateDef, type Templates } from '../templates.js';
  */
 const MIN_SENSITIVE_LENGTH = 4;
 
+/**
+ * What an `otp` template's status record says in place of a vendor's error text. The vendor's
+ * text can quote the code back and scrubbing cannot always find a bare code in it, so for
+ * one-time codes it is never persisted; the attempt's `errorCode` carries what can be acted on.
+ */
+export const OTP_ERROR_WITHHELD = 'Provider error (vendor text withheld for otp templates)';
+
 function collectFromString(data: string, out: Set<string>): void {
   const trimmed = data.trim();
   if (trimmed.length >= MIN_SENSITIVE_LENGTH) {

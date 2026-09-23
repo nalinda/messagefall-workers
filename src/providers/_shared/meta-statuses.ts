@@ -26,7 +26,7 @@ interface WebhookStatus {
   id?: unknown;
   status?: unknown;
   timestamp?: unknown;
-  errors?: { title?: unknown }[];
+  errors?: { title?: unknown; code?: unknown }[];
 }
 
 interface WebhookPayload {
@@ -66,6 +66,8 @@ function toStatusEvent(status: WebhookStatus): StatusEvent | null {
 
   const title = status.errors?.[0]?.title;
   if (typeof title === 'string') event.error = title;
+  const code = status.errors?.[0]?.code;
+  if (typeof code === 'number') event.code = `graph:${code}`;
 
   return event;
 }

@@ -17,6 +17,7 @@ import { z } from 'zod';
 
 import { createMessaging, RecipientError } from '../../src/core/messaging.js';
 import { PolicyError } from '../../src/core/policy.js';
+import { importSealKey, isSealed, openInput } from '../../src/core/seal.js';
 import { NO_PROVIDER } from '../../src/core/send.js';
 import * as statusModule from '../../src/core/status.js';
 import { kvStatusStore } from '../../src/core/status.js';
@@ -39,6 +40,7 @@ import {
   type RecordingProvider,
   recordingProvider,
   type StatusCallbackEvent,
+  TEST_ENC_KEY,
   type TestExecutionContext,
 } from '../helpers/messaging.js';
 
@@ -1511,7 +1513,7 @@ describe('Issue #3: createMessaging send pipeline', () => {
       const sms = recordingProvider<RenderedSms>('sms', 'rec-sms');
 
       const messaging = createMessaging(
-        { MESSAGES_KV: envKv },
+        { MESSAGES_KV: envKv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
         {
           templates,
           providers: () => ({ sms }),
@@ -1826,14 +1828,50 @@ describe('Issue #3: createMessaging send pipeline', () => {
 
       const inPut = puts.find((p) => p.key === `in:${id}`);
       expect(inPut).toBeDefined();
-      expect(JSON.parse(inPut!.value)).toEqual({
+      const stored = JSON.parse(inPut!.value) as Record<string, unknown>;
+      expect(isSealed(stored.input)).toBe(true);
+      expect(Object.keys(stored).toSorted((a, b) => a.localeCompare(b))).toEqual([
+        'email',
+        'input',
+        'locale',
+        'to',
+      ]);
+      expect([stored.to, stored.email, stored.locale]).toEqual([TO, 'customer@example.com', 'fr']);
+      // Sealed with the env's key and bound to this message id.
+      expect(await openInput(await importSealKey(TEST_ENC_KEY), id, stored.input)).toEqual({
+        ok: true,
         input: INPUT,
-        to: TO,
-        email: 'customer@example.com',
-        locale: 'fr',
       });
       // notification kind default: 300_000ms -> 300s TTL
       expect(inPut!.options?.expirationTtl).toBe(300);
+    });
+
+    it('stores the input unsealed when the deployment has no key and no otp template', async () => {
+      const env: MessagingEnv = { MESSAGES_KV: memoryKV() };
+      const messaging = createMessaging(env, {
+        templates: { orderUpdate: templates.orderUpdate },
+        providers: () => ({
+          whatsapp: recordingProvider<RenderedWhatsApp>('whatsapp', 'rec-wa'),
+          sms: recordingProvider<RenderedSms>('sms', 'rec-sms'),
+        }),
+        delivery: { fallback: ['whatsapp', 'sms'], always: [] },
+      });
+
+      const { id } = await messaging.send({
+        template: 'orderUpdate',
+        to: TO,
+        locale: 'fr',
+        input: INPUT,
+      });
+
+      const raw = await env.MESSAGES_KV.get(`in:${id}`);
+      expect((JSON.parse(raw!) as { input: unknown }).input).toEqual(INPUT);
+    });
+
+    it('refuses to build an instance for an otp catalogue without MESSAGES_ENC_KEY', () => {
+      expect(() =>
+        createMessaging({ MESSAGES_KV: memoryKV() }, { templates, providers: () => ({}) })
+      ).toThrow(/MESSAGES_ENC_KEY is required/);
     });
 
     it('does not write in:<id> when policy has no fallback chain (always-only)', async () => {

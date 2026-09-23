@@ -24,7 +24,7 @@ import { scrubError } from '../../src/core/redact.js';
 import type { Channel, Provider, RenderedSms } from '../../src/providers/types.js';
 import { defineTemplates, render } from '../../src/templates.js';
 import { assertType, type Expect, type Extends } from '../helpers/logger.js';
-import { captureConsole, memoryKV } from '../helpers/messaging.js';
+import { captureConsole, memoryKV, TEST_ENC_KEY } from '../helpers/messaging.js';
 
 interface ConsoleCallMatch {
   file: string;
@@ -256,10 +256,11 @@ describe('Issue #10: No message bodies in logs, enforced in code', () => {
     // a substring of "Token". Only content is sensitive; metadata is not, and must survive.
     it('leaves an ordinary vendor error intact while still redacting the message content', async () => {
       const code = '482913';
+      // A notification: an otp template withholds vendor text outright instead of scrubbing it.
       const otpCatalog = defineTemplates({
         loginOtp: {
           input: z.object({ code: z.string().length(6) }),
-          kind: 'otp' as const,
+          kind: 'notification' as const,
           sms: ({ code: c }: { code: string }) => `Your login code is ${c}`,
         },
       });
@@ -277,7 +278,7 @@ describe('Issue #10: No message bodies in logs, enforced in code', () => {
       };
 
       const messaging = createMessaging(
-        { MESSAGES_KV: memoryKV() },
+        { MESSAGES_KV: memoryKV(), MESSAGES_ENC_KEY: TEST_ENC_KEY },
         {
           templates: otpCatalog,
           providers: () => ({ sms: failingSms }),
@@ -325,7 +326,7 @@ describe('Issue #10: No message bodies in logs, enforced in code', () => {
       expect(smsText).toBe('Your verification code is 482913. Do not share this code with anyone.');
 
       const kv = memoryKV();
-      const env = { MESSAGES_KV: kv };
+      const env = { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY };
 
       // 2. Provider that fails and echoes the rendered SMS body and code in its error message
       const failingSmsProvider: Provider<RenderedSms> = {
