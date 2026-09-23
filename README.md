@@ -6,7 +6,7 @@ The name is the feature: a message _falls_ from one channel to the next in the o
 
 It is deliberately small. Every provider, including WhatsApp, is a plugin behind one contract: a `send` function and, if the provider reports delivery, a webhook handler. Built-in providers cover the common vendors; a local SMS gateway is ten lines. State lives in KV, with an optional Durable Object for timed fallback. Nothing runs outside your Worker.
 
-> **Status:** `0.1.0`, the first release. See the [CHANGELOG](CHANGELOG.md) for what it contains. It is not published to npm (see [Installation](#installation)), and the API may still change in a `0.x` line.
+> **Status:** `0.2.0`. See the [CHANGELOG](CHANGELOG.md) for what it contains. It is not published to npm; each release is a tarball on its GitHub Release (see [Installation](#installation)). The API may still change in a `0.x` line.
 
 ## Contents
 
@@ -44,27 +44,16 @@ It is deliberately small. Every provider, including WhatsApp, is a plugin behind
 
 ## Installation
 
-Not on npm yet. The published entry points all
-resolve into `dist/`, which is not committed, so a package-manager install
-straight from a git URL would give you a package with nothing to import. Clone
-it and build it instead:
+Not on npm. Every release attaches a built tarball to its
+[GitHub Release](https://github.com/nalinda/messagefall-workers/releases); install
+it by URL, which pins the exact version and needs no build step:
 
 ```sh
-git clone https://github.com/nalinda/messagefall-workers.git
-cd messagefall-workers
-bun install
-bun run build
+bun add messagefall-workers@https://github.com/nalinda/messagefall-workers/releases/download/v0.2.0/messagefall-workers-0.2.0.tgz
 ```
 
-Then depend on that checkout from your Worker, by path:
-
-```sh
-npm install ../messagefall-workers
-```
-
-Rebuild the checkout (`bun run build`) after you pull. A tagged, installable
-release is what the `0.x` line is working towards; until then this is the
-supported way in.
+`npm install <url>` and `pnpm add <url>` work the same way. Installing from a git
+URL does not: the entry points resolve into `dist/`, which is not committed.
 
 No other runtime dependencies. Hono is an optional peer dependency for the ready-made app.
 
@@ -97,6 +86,7 @@ Secrets, set with `wrangler secret put`:
 | `WHATSAPP_VERIFY_TOKEN`                                         | Answers Meta's webhook verification handshake.                       |
 | `SMS_GATEWAY_URL`, `SMS_GATEWAY_KEY`                            | Whatever your SMS gateway needs.                                     |
 | `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` | OAuth credentials for the sending Gmail account, scope `gmail.send`. |
+| `MESSAGES_ENC_KEY`                                              | Encrypts the stored one-time code. `openssl rand -base64 32`.        |
 
 **src/templates.ts**
 
@@ -111,6 +101,7 @@ export const templates = defineTemplates({
     whatsapp: {
       template: 'login_code', // approved authentication template
       language: { en: 'en' },
+      authentication: true, // sends the copy-code button with the code
       params: ({ code }) => [code],
     },
     sms: ({ code }) => `Your code is ${code}`,
@@ -316,10 +307,15 @@ Fallback never re-renders with a different input. The same input renders each ch
 | `sms`      | no       | Function from input and locale to text.                                                                                                                            |
 | `email`    | no       | Subject, text and optional HTML, each a function of input and locale.                                                                                              |
 | `delivery` | no       | Policy override for this template: `{ fallback?, always? }` or `'all'`. See [Overriding the policy](#overriding-the-policy).                                       |
+| `timeout`  | no       | Milliseconds before this template's chain moves on when no status has arrived. Overrides the per-kind `delivery.timeout`.                                          |
 
 A template with only `sms` defined skips WhatsApp regardless of the policy's `fallback`. Sending to a template that defines no channel in the resolved order is a send-time `PolicyError` with a clear message (mapped to `422` by the Hono app), not a startup error: the resolved policy depends on the call, so no startup check can see it coming.
 
-Meta requires one-time codes to use an approved **authentication-category** template. The package does not submit templates for you; it does refuse to send a `kind: 'otp'` template over WhatsApp as free text.
+Meta requires one-time codes to use an approved **authentication-category** template. The package does not submit templates for you; it does refuse to send a `kind: 'otp'` template over WhatsApp as free text. Set `authentication: true` on such a template: `params` then returns exactly one value, the code, and the Meta provider sends it both as the body parameter and as the copy-code (or one-tap) button's parameter, which Meta requires.
+
+**Locales without an approved template.** `language` maps each locale to the Meta template language to send. A send whose locale is not in the map uses the `default` entry if there is one. With no `default`, WhatsApp is skipped for that send without calling Meta: the attempt is recorded `failed` with `errorCode: 'no-template-language'` and the chain moves straight on to the next channel, normally SMS. So `language: { en: 'en', ta: 'ta' }` sends Sinhala (`si`) codes by SMS only, while `language: { en: 'en', default: 'en' }` sends them the English WhatsApp template.
+
+**SMS text is passed through as rendered.** The package does no length handling or encoding of its own: the string your `sms` function returns is exactly what an `http-sms` `body` builder receives, so Sinhala or Tamil text (UCS-2, 70 characters per segment) reaches the gateway unchanged. Set whatever Unicode flag your gateway needs in `body`.
 
 ## Providers
 
@@ -331,7 +327,10 @@ interface Provider<Rendered> {
   channel: 'whatsapp' | 'sms' | 'email';
   send(
     message: Rendered & { to: string; messageId: string }
-  ): Promise<{ ok: true; providerId?: string } | { ok: false; error: string; retryable?: boolean }>;
+  ): Promise<
+    | { ok: true; providerId?: string }
+    | { ok: false; error: string; code?: string; retryable?: boolean }
+  >;
   webhook?: {
     verify?(request: Request): Promise<Response | null>; // e.g. Meta's GET handshake
     parse(request: Request, options?: WebhookParseOptions): Promise<StatusEvent[]>; // must check the signature; throw to reject
@@ -339,7 +338,7 @@ interface Provider<Rendered> {
 }
 ```
 
-`StatusEvent` is `{ providerId, status: 'sent' | 'delivered' | 'read' | 'failed', error?, at }`. The package correlates `providerId` back to the attempt and drives fallback from there. A provider with no `webhook` still works; its attempts simply stay `sent` until the chain timeout.
+`StatusEvent` is `{ providerId, status: 'sent' | 'delivered' | 'read' | 'failed', error?, code?, at }`. `code` is a short failure code free of message content (the built-in providers use `graph:<code>`, `http:<status>` and `network`); it is recorded on the attempt as `errorCode`, and for an `otp` template it is all that is kept of a vendor's error. The package correlates `providerId` back to the attempt and drives fallback from there. A provider with no `webhook` still works; its attempts simply stay `sent` until the chain timeout.
 
 `WebhookParseOptions` is `{ devUnsigned?: boolean }`. The dispatcher sets `devUnsigned: true` only when `MESSAGING_DEV_UNSIGNED=true` and the request arrived on localhost; a `parse` that wants to support the local-dev signature bypass must check it and skip verification when set.
 
@@ -374,12 +373,50 @@ Phone numbers must be E.164 on the way in. A normaliser for one country is a few
 
 ## One-time codes
 
-Templates with `kind: 'otp'` get four behaviours:
+Templates with `kind: 'otp'` get these behaviours:
 
-- The send is dispatched under `ctx.waitUntil` and `POST /send` returns as soon as the message is accepted and recorded, so response time does not reveal whether a number exists.
-- The chain timeout is the `otp` value, defaulting to thirty seconds. `always` channels for an OTP template are allowed but unusual; most codes want the chain only.
-- Rendered bodies and inputs are never written to logs. Only the message id, channel, provider id and status are stored on the status record. Vendor error strings are scrubbed before they reach a record; see Known limitations in the CHANGELOG for the one case a bare-value OTP parameter can defeat that.
+- **The code is never stored in plaintext.** The fallback chain has to keep the input between requests to re-render it on the next channel. It is encrypted with AES-256-GCM under `MESSAGES_ENC_KEY` before it reaches KV or the fallback timer's storage (see [Encryption at rest](#encryption-at-rest)). A catalogue with an `otp` template refuses to start without the key.
+- **Vendor error text is never stored.** A vendor can quote the code back in an error, so an `otp` attempt's `error` is a fixed `'Provider error (vendor text withheld for otp templates)'` and its `errorCode` carries what can be acted on (`graph:131026`, `http:400`, …). Rendered bodies and inputs are never written to logs either.
+- **The send returns before delivery, unless you ask to wait.** By default the send is dispatched under `ctx.waitUntil` and `POST /send` returns as soon as the message is recorded, before any provider is called, so response time does not reveal whether a number exists. Pass `await: 'chain'` to wait instead; see below.
+- The chain timeout is the `otp` value, defaulting to thirty seconds, or the template's own `timeout`. `always` channels for an OTP template are allowed but unusual; most codes want the chain only.
 - Codes are never queued. If every channel fails, the status is `failed` and the caller decides what to do.
+
+### Waiting for the outcome
+
+A sign-in flow that wants to tell the user "we couldn't send your code" can send with `await: 'chain'`. The send then waits for the synchronous part of the chain: each channel is tried in order until one provider accepts the message or all of them have failed. It resolves with an `outcome`:
+
+| `outcome`     | Meaning                                                                                                                                                                                                                  | `POST /send`                             | `createMessagingClient().send()`                      |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------- | ----------------------------------------------------- |
+| `accepted`    | A provider accepted the message: its API call succeeded. It is **not yet delivered**. A later `failed` status or the timeout can still move the chain on, and a failure after that is only visible through `status(id)`. | `200 { id, outcome: 'accepted' }`        | `{ ok: true, id, outcome: 'accepted' }`               |
+| `undelivered` | Every channel the send tried failed immediately. Nothing was sent.                                                                                                                                                       | `502 { error, code: 'undelivered', id }` | `{ ok: false, status: 502, code: 'undelivered', id }` |
+
+If a status-record write fails partway through, the attempts are not known for certain and the send reports `accepted`, because a provider may already have taken the message. Opting in gives up the timing protection above; if that matters for your sign-in endpoint, even out the response time there.
+
+### A sign-in code template
+
+WhatsApp first with an authentication template approved in English and Tamil, SMS in all three locales:
+
+```ts
+const smsText: Record<string, (code: string) => string> = {
+  en: (code) => `${code} is your sign-in code. It expires in 10 minutes.`,
+  si: (code) => `${code} ඔබගේ පිවිසුම් කේතයයි. විනාඩි 10කින් කල් ඉකුත් වේ.`,
+  ta: (code) => `${code} உங்கள் உள்நுழைவுக் குறியீடு. 10 நிமிடங்களில் காலாவதியாகும்.`,
+};
+
+export const templates = defineTemplates({
+  loginCode: {
+    input: z.object({ code: z.string().regex(/^\d{6}$/) }),
+    kind: 'otp',
+    whatsapp: {
+      template: 'login_code',
+      language: { en: 'en', ta: 'ta' }, // no Sinhala template approved: `si` goes straight to SMS
+      authentication: true,
+      params: ({ code }) => [code],
+    },
+    sms: ({ code }, locale) => (smsText[locale] ?? smsText.en)(code),
+  },
+});
+```
 
 The package does not generate or verify codes. Pair it with your auth layer, which owns the code, and hand this package only the delivery.
 
@@ -401,6 +438,8 @@ Every send gets a message id. `GET /status/:id` returns:
         "provider": "meta-whatsapp",
         "providerId": "wamid.HBg...",
         "status": "failed",
+        "error": "Provider error (vendor text withheld for otp templates)",
+        "errorCode": "graph:131026",
         "at": "..."
       },
       {
@@ -428,7 +467,7 @@ Every send gets a message id. `GET /status/:id` returns:
 }
 ```
 
-Each attempt names the `provider` it was dispatched through, which is also the `<name>` in that
+A failed attempt carries `error` and, when one is known, a machine-readable `errorCode`: a provider's `graph:<code>`, `http:<status>` or `network`, or `no-template-language` when WhatsApp was skipped for a locale. Each attempt names the `provider` it was dispatched through, which is also the `<name>` in that
 provider's `/webhooks/<name>` route, so an incoming delivery receipt can be traced back to the
 attempt it belongs to. `policy` is the delivery policy as resolved for this send.
 
@@ -437,13 +476,17 @@ to its end, so a repeated webhook or timer cannot advance it again. Consumers sh
 
 The top-level `status` is the chain's status, or the worst of the `always` attempts when there is no chain. Records live in KV with a TTL, seven days by default. There is no history beyond that; if you want reporting, subscribe with `onStatus` in the configuration and write wherever you like.
 
-### Known gap: the render input is stored unencrypted
+### Encryption at rest
 
-The status record itself holds no message content, but the fallback chain has to be able to re-render the message on the next channel once the first one fails. So every send with a chain writes its **render input** to a second KV key, `in:<id>`, and hands the same payload to the fallback timer. That payload is the raw input you passed to `send`, plus the recipient and locale, so for an `otp` template it therefore contains **the code itself, in plaintext**.
+The status record itself holds no message content, but the fallback chain has to be able to re-render the message on the next channel once the first one fails. So every send with a chain writes its **render input** to a second KV key, `in:<id>`, and hands the same payload to the fallback timer's Durable Object. That payload is the input you passed to `send`, plus the recipient and locale; for an `otp` template the input is the code.
 
-It is stored **unencrypted**, for the duration of the chain timeout, and deleted as soon as the chain reaches a terminal state. The key's TTL is the chain timeout rounded up to whole seconds, floored at KV's sixty-second minimum, so **sixty seconds for `otp`** (whose thirty-second timeout is shorter than KV will accept) and five minutes for `notification`, by default. Anyone who can read that KV namespace can read the code while the key is there.
+With `MESSAGES_ENC_KEY` set, the input is encrypted with AES-256-GCM before either write and only decrypted in memory by the fallback advance that re-renders it (and by the webhook path that scrubs a `notification`'s vendor errors). The recipient and locale beside it stay readable, but they are authenticated with the ciphertext along with the message id: an entry copied to another message, or whose recipient has been rewritten, fails to decrypt instead of sending the code somewhere else. The key is required whenever the catalogue has an `otp` template and optional otherwise; without it a `notification`'s input is stored as it is.
 
-Encrypting `in:<id>` is a known gap, **deliberately deferred past 0.1.0**. Until it is closed, treat the messaging Worker's KV namespace as holding secrets: do not share it with anything that does not need it, and keep the chain timeouts no longer than your fallback actually requires.
+```sh
+openssl rand -base64 32 | wrangler secret put MESSAGES_ENC_KEY
+```
+
+The entry lives for the chain timeout (TTL floored at KV's sixty seconds) and is deleted as soon as the chain reaches a terminal state. Rotating the key strands only the chains in flight at that moment: their next fallback step is recorded as failed with the log event `fallback.input-unsealable`.
 
 ## Sending from another Worker
 
@@ -471,6 +514,40 @@ await messages.send('matchFound', {
 
 Service-binding calls stay inside Cloudflare's network. The API Worker never holds a provider credential.
 
+`send` resolves `{ ok: true, id }`, or `{ ok: false, status, error, code? }` for a request the messaging Worker refused: `400` for bad input, `404` for an unknown template, `422` for an unsatisfiable policy, and with a `secret` configured `401` for a missing or wrong secret or `500` when the messaging Worker has none to compare against. Pass `await: 'chain'` to wait for the outcome; see [Waiting for the outcome](#waiting-for-the-outcome).
+
+If the messaging Worker has a public hostname (it must, for vendor webhooks), protect `/send` and `/status` with a shared secret: set the same value on both sides.
+
+```ts
+// messaging Worker
+export default createMessagingApp<Env>({
+  templates,
+  providers,
+  secret: (env) => env.MESSAGING_SECRET,
+});
+
+// calling Worker
+const messages = createMessagingClient<typeof templates>({
+  binding: env.MESSAGES,
+  secret: env.MESSAGING_SECRET,
+});
+```
+
+**Testing the calling Worker.** The client only calls `binding.fetch`, so a unit test needs no KV or Durable Object: hand it a fake that records the request and answers like the messaging Worker does.
+
+```ts
+const sent: unknown[] = [];
+const binding = {
+  fetch: async (url: string, init?: RequestInit) => {
+    sent.push(JSON.parse(String(init?.body)));
+    return Response.json({ id: 'msg_test', outcome: 'accepted' });
+  },
+} as unknown as Fetcher;
+
+const messages = createMessagingClient<typeof templates>({ binding });
+// ...exercise your code, then assert on `sent`: [{ template: 'loginCode', to, locale, input, ... }]
+```
+
 ## Configuration
 
 `createMessagingApp(options)` returns a Hono app and is imported from the `messagefall-workers/app` entry point. It is deliberately not on the root barrel, so the root entry never reaches for the optional `hono` peer. `createMessaging(env, options)` returns the underlying sender for use in any framework.
@@ -487,6 +564,9 @@ Service-binding calls stay inside Cloudflare's network. The API Worker never hol
 | `statusTtl`         | `number`                                  | `604800`                               | Seconds to keep status records.                                                                                       |
 | `onStatus`          | `(event) => void \| Promise<void>`        | none                                   | Called on every status change. Receives ids and statuses, never bodies.                                               |
 | `basePath`          | `string`                                  | `'/'`                                  | Path prefix for the routes.                                                                                           |
+| `secret`            | `(env) => string \| undefined`            | none                                   | `createMessagingApp` only. Requires this value in the `x-messagefall-secret` header on `/send` and `/status/:id`.     |
+
+Bindings the package reads from `env`: `MESSAGES_KV` (unless `kv` is given), `FALLBACK_TIMER` (optional), `MESSAGES_ENC_KEY` (required with an `otp` template; see [Encryption at rest](#encryption-at-rest)) and `MESSAGING_DEV_UNSIGNED` (development only).
 
 The `providers` factory always receives a `MessagingEnv`, whose custom bindings are typed `unknown`. The `<Env>` type parameter on `createMessagingApp` types the Hono bindings only, never this factory. A Worker with typed bindings narrows the argument itself (`const e = env as Env`) before reading its secrets, as the quick start does.
 
@@ -502,7 +582,7 @@ Every provider that reports delivery gets its own route at `/webhooks/<provider 
 
 A request to `/webhooks/<name>` for a provider that is not configured returns 404. A provider whose `parse` throws returns 401. Unsigned payloads are never accepted outside development.
 
-The webhook routes are the only routes that need to be public. `/send` and `/status` are meant to be reached over a service binding. If the Worker is exposed on a public hostname, put those behind your own authentication or a Cloudflare Access policy; the package does not add auth of its own.
+The webhook routes are the only routes that need to be public. `/send` and `/status` are meant to be reached over a service binding, but a Worker with a public hostname serves them there too. Pass `secret` to `createMessagingApp` (and the same value to `createMessagingClient`) and both routes answer `401` without the matching `x-messagefall-secret` header, compared in constant time. If `secret` returns nothing at runtime they answer `500` rather than open. Webhook routes are unaffected. An app without `secret` logs `app.secret-off` once, at its first request, so an unprotected deployment is visible in the logs.
 
 ## Local development
 

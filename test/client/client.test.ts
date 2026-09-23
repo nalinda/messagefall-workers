@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import type { Fetcher } from '@cloudflare/workers-types';
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { z } from 'zod';
 
@@ -315,6 +316,53 @@ describe('createMessagingClient runtime behavior (Issue #12)', () => {
         // all the way back to `res.statusText` / `HTTP 502`, which is also a defined string and
         // would slip past a weaker assertion.
         expect(result.error).toBe('502 Bad Gateway');
+      }
+    });
+
+    it('passes an awaited outcome through on the ok path', async () => {
+      const fetcher = createMockFetcher(() =>
+        Response.json({ id: 'msg_01J8AWAIT01', outcome: 'accepted' }, { status: 200 })
+      );
+
+      const client = createMessagingClient<TestCatalog>({ binding: fetcher });
+      const result = await client.send('loginCode', {
+        to: '+1770000001',
+        locale: 'en',
+        input: { code: '123456' },
+        await: 'chain',
+      });
+
+      expect(result).toEqual({ ok: true, id: 'msg_01J8AWAIT01', outcome: 'accepted' });
+    });
+
+    it('keeps code and id from an undelivered answer, also from a double with only json()', async () => {
+      const body = { error: 'No channel accepted the message', code: 'undelivered', id: 'msg_X' };
+      const expected = {
+        ok: false,
+        status: 502,
+        error: 'No channel accepted the message',
+        code: 'undelivered',
+        id: 'msg_X',
+      };
+
+      const real = createMessagingClient<TestCatalog>({
+        binding: createMockFetcher(() => Response.json(body, { status: 502 })),
+      });
+      const jsonOnly = createMessagingClient<TestCatalog>({
+        binding: {
+          fetch: () =>
+            Promise.resolve({ ok: false, status: 502, json: () => Promise.resolve(body) }),
+        } as unknown as Fetcher,
+      });
+
+      for (const client of [real, jsonOnly]) {
+        const result = await client.send('loginCode', {
+          to: '+1770000001',
+          locale: 'en',
+          input: { code: '123456' },
+          await: 'chain',
+        });
+        expect(result).toEqual(expected);
       }
     });
 

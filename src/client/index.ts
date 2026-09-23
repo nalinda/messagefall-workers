@@ -9,6 +9,7 @@
 import type { Fetcher } from '@cloudflare/workers-types';
 
 import { normalizeBasePath } from '../core/base-path.js';
+import { SECRET_HEADER } from '../core/secret-header.js';
 import type { MessageRecord } from '../core/status.js';
 import { isRecord } from '../core/values.js';
 import type { InputOf, Templates } from '../templates.js';
@@ -40,13 +41,41 @@ export interface ClientSendArgs<T, K extends keyof T> {
   locale: string;
   input: InputOf<T, K>;
   delivery?: DeliveryOverrideFor<T, K>;
+  /**
+   * `'chain'` waits for the synchronous chain walk before resolving: `{ ok: true, outcome:
+   * 'accepted' }` once a provider accepted the message, `{ ok: false, code: 'undelivered' }`
+   * when every channel failed immediately. Without it an `otp` send resolves as soon as the
+   * message is recorded, before any provider is called.
+   */
+  await?: 'chain';
 }
 
 /**
  * Result returned by client send.
  */
 export type ClientSendResult =
-  { ok: true; id: string } | { ok: false; status: number; error: string };
+  | {
+      ok: true;
+      id: string;
+      /**
+       * Present when the send was awaited (`await: 'chain'`): a provider accepted the message.
+       */
+      outcome?: 'accepted';
+    }
+  | {
+      ok: false;
+      status: number;
+      error: string;
+      /**
+       * Stable failure code when the messaging Worker gave one: `undelivered` when an awaited
+       * send found every channel failing immediately.
+       */
+      code?: string;
+      /**
+       * The message id, when a record was created before the failure (`undelivered`).
+       */
+      id?: string;
+    };
 
 /**
  * Options for creating a messaging client.
@@ -60,6 +89,11 @@ export interface CreateMessagingClientOptions {
    * Base path of the messaging app (e.g. '/api/v1'). Default is '/'.
    */
   basePath?: string;
+  /**
+   * Shared secret sent in the `x-messagefall-secret` header on every request, matching the
+   * messaging app's `secret` option.
+   */
+  secret?: string;
 }
 
 /**
@@ -123,47 +157,71 @@ async function tryReadText(res: { text?: () => Promise<string> }): Promise<strin
   }
 }
 
+type ErrorResponse = {
+  json: () => Promise<unknown>;
+  text?: () => Promise<string>;
+  statusText?: string;
+  status: number;
+};
+
 /**
- * Extracts a human-readable error from a non-OK response.
+ * Reads a non-OK response's body exactly once and extracts a human-readable error from it,
+ * keeping the parsed JSON body (when there is one) for callers that need more of it.
  *
  * A `Response` body can only be consumed once: calling `.json()` and then falling back to
  * `.text()` on the same response throws "Body already used", so the fallback never actually
  * ran and a non-JSON error body (an HTML gateway page, a plain-text vendor error) was reported
  * as just the status text. This reads the body exactly once — as text, since that's what
  * `Response.text()` can always do — then tries to parse that text as JSON, rather than treating
- * `.json()` and `.text()` as independently retriable reads of the same stream.
+ * `.json()` and `.text()` as independently retriable reads of the same stream. Only an object
+ * with no `text()` (a caller-supplied double rather than a real `Response`) is read with
+ * `json()`, still exactly once.
  */
-async function extractError(res: {
-  json: () => Promise<unknown>;
-  text?: () => Promise<string>;
-  statusText?: string;
-  status: number;
-}): Promise<string> {
+async function readErrorBody(res: ErrorResponse): Promise<{ error: string; body: unknown }> {
   const text = await tryReadText(res);
   if (text !== undefined) {
     try {
-      const jsonError = parseJsonError(JSON.parse(text));
-      if (jsonError) {
-        return jsonError;
-      }
+      const body = JSON.parse(text) as unknown;
+      return { error: parseJsonError(body) ?? text, body };
     } catch {
       // Not JSON: the raw text itself is the error content.
+      return { error: text, body: undefined };
     }
-    return text;
   }
 
-  // No `text()` on this object (a caller-supplied double rather than a real `Response`): `json()`
-  // is the only other way to read the body, and it is still read exactly once.
+  let body: unknown;
   try {
-    const jsonError = parseJsonError(await res.json());
-    if (jsonError) {
-      return jsonError;
-    }
+    body = await res.json();
   } catch {
     // Ignore JSON parse errors
   }
+  return { error: parseJsonError(body) ?? (res.statusText || `HTTP ${res.status}`), body };
+}
 
-  return res.statusText || `HTTP ${res.status}`;
+/**
+ * Extracts a human-readable error from a non-OK response. See {@link readErrorBody}.
+ */
+async function extractError(res: ErrorResponse): Promise<string> {
+  const { error } = await readErrorBody(res);
+  return error;
+}
+
+/**
+ * The error of a non-OK send response, with the `code` and `id` the messaging Worker adds to an
+ * `undelivered` answer, however the body had to be read.
+ */
+async function extractFailure(
+  res: ErrorResponse
+): Promise<{ error: string; code?: string; id?: string }> {
+  const { error, body } = await readErrorBody(res);
+  if (!isRecord(body)) {
+    return { error };
+  }
+  return {
+    error,
+    ...(typeof body.code === 'string' && { code: body.code }),
+    ...(typeof body.id === 'string' && { id: body.id }),
+  };
 }
 
 /**
@@ -177,6 +235,8 @@ export function createMessagingClient<
   T extends Templates<any> = Templates<any>,
 >(options: CreateMessagingClientOptions): MessagingClient<T> {
   const prefix = normalizeBasePath(options.basePath);
+  const auth: Record<string, string> =
+    options.secret === undefined ? {} : { [SECRET_HEADER]: options.secret };
 
   return {
     async send<K extends keyof T & string>(
@@ -195,24 +255,24 @@ export function createMessagingClient<
       if (args.delivery !== undefined) {
         body.delivery = args.delivery;
       }
+      if (args.await !== undefined) {
+        body.await = args.await;
+      }
 
       const res = await options.binding.fetch(`https://messaging${prefix}/send`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...auth },
         body: JSON.stringify(body),
       });
 
       if (res.ok) {
-        const data = await res.json<{ id: string }>();
-        return { ok: true, id: data.id };
+        const data = await res.json<{ id: string; outcome?: 'accepted' }>();
+        return data.outcome === undefined
+          ? { ok: true, id: data.id }
+          : { ok: true, id: data.id, outcome: data.outcome };
       }
 
-      const error = await extractError(res);
-      return {
-        ok: false,
-        status: res.status,
-        error,
-      };
+      return { ok: false, status: res.status, ...(await extractFailure(res)) };
     },
 
     async status(id: string): Promise<MessageRecord | null> {
@@ -221,7 +281,7 @@ export function createMessagingClient<
       // different route.
       const res = await options.binding.fetch(
         `https://messaging${prefix}/status/${encodeURIComponent(id)}`,
-        { method: 'GET' }
+        { method: 'GET', headers: auth }
       );
 
       if (res.status === 404) {

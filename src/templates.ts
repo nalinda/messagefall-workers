@@ -33,6 +33,12 @@ export type WhatsAppTemplateConfig<In> =
       template: string;
       language: string | Record<Locale, string>;
       params: (input: In, locale: Locale) => string[];
+      /**
+       * The template is a Meta **authentication** template with a copy-code (or one-tap) button.
+       * `params` must then return exactly one value, the code: it is sent both as the body
+       * parameter and as the button's URL parameter, which is the component pair Meta requires.
+       */
+      authentication?: boolean;
       text?: never;
     }
   | {
@@ -61,6 +67,11 @@ export interface TemplateDef<In = unknown> {
   sms?: (input: In, locale: Locale) => string;
   email?: EmailTemplateConfig<In>;
   delivery?: DeliveryOverride;
+  /**
+   * Milliseconds before this template's chain moves to the next channel when no status has
+   * arrived. Overrides the instance's per-kind `delivery.timeout`.
+   */
+  timeout?: number;
 }
 
 /**
@@ -101,6 +112,20 @@ export function getTemplate(
   return templates
     ? (Reflect.get(templates, templateName) as TemplateDef<unknown> | undefined)
     : undefined;
+}
+
+/**
+ * Whether a catalogue has any `kind: 'otp'` template. Such a catalogue needs `MESSAGES_ENC_KEY`.
+ *
+ * @param templates - The catalogue.
+ * @returns True when at least one template is an `otp` template.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function hasOtpTemplate(templates: Templates<any> | undefined): boolean {
+  if (!templates || typeof templates !== 'object') return false;
+  return Object.values(templates).some(
+    (def) => !!def && typeof def === 'object' && (def as { kind?: unknown }).kind === 'otp'
+  );
 }
 
 /**
@@ -236,6 +261,12 @@ export function validateTemplateDef(templateName: string, def: TemplateDef<unkno
     throw new Error(`Template "${templateName}" must define at least one channel rendering`);
   }
   assertNoOtpWhatsAppText(templateName, def);
+  if (
+    def.timeout !== undefined &&
+    (typeof def.timeout !== 'number' || !Number.isFinite(def.timeout) || def.timeout <= 0)
+  ) {
+    throw new Error(`Template "${templateName}" timeout must be a positive number of milliseconds`);
+  }
   if (def.delivery) {
     validateDeliveryChannels(templateName, def.delivery, channels);
   }
@@ -302,6 +333,27 @@ export function validateInput<In>(def: TemplateDef<In>, input: unknown): In {
   return result.value;
 }
 
+/**
+ * Thrown when a WhatsApp template has no approved language for the send's locale and no
+ * `default`. The send path records it as a failed WhatsApp attempt with `errorCode`
+ * `no-template-language` and moves on to the next channel (normally SMS) without calling Meta.
+ */
+export class NoTemplateLanguageError extends Error {
+  /**
+   * The `errorCode` a status record carries for this skip.
+   */
+  static readonly code = 'no-template-language';
+  readonly locale: Locale;
+  readonly template: string;
+
+  constructor(template: string, locale: Locale) {
+    super(`WhatsApp template "${template}" has no approved language for locale "${locale}"`);
+    this.name = 'NoTemplateLanguageError';
+    this.locale = locale;
+    this.template = template;
+  }
+}
+
 function resolveWhatsAppLanguage(
   language: string | Record<string, string>,
   locale: Locale,
@@ -317,9 +369,7 @@ function resolveWhatsAppLanguage(
   if (langMap.has('default')) {
     return langMap.get('default')!;
   }
-  throw new Error(
-    `Missing language mapping for locale "${locale}" in WhatsApp template "${templateName}" and no default language configured`
-  );
+  throw new NoTemplateLanguageError(templateName, locale);
 }
 
 function renderWhatsApp<In>(
@@ -332,11 +382,18 @@ function renderWhatsApp<In>(
   }
   if ('template' in wa && typeof wa.template === 'string' && wa.template.length > 0) {
     const lang = resolveWhatsAppLanguage(wa.language, locale, wa.template);
+    const params = wa.params(input, locale);
+    if (wa.authentication === true && params.length !== 1) {
+      throw new Error(
+        `WhatsApp authentication template "${wa.template}" must render exactly one param (the code), got ${params.length}`
+      );
+    }
     return {
       templateConfig: {
         name: wa.template,
         language: lang,
-        params: wa.params(input, locale),
+        params,
+        ...(wa.authentication === true && { authentication: true }),
       },
     };
   }

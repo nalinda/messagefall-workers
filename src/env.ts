@@ -8,6 +8,7 @@ import type { DurableObjectNamespace, KVNamespace } from '@cloudflare/workers-ty
 
 import type { MessagingOptions } from './core/messaging.js';
 import { providerSetProblems } from './core/provider-set.js';
+import { sealKeyConfigProblem } from './core/seal.js';
 import { isDurableObjectNamespace } from './core/timer.js';
 import { errorMessage, isRecord } from './core/values.js';
 import { type Channel, CHANNELS } from './providers/types.js';
@@ -19,6 +20,11 @@ import { type TemplateDef, validateTemplateDef } from './templates.js';
 export interface MessagingEnv {
   MESSAGES_KV: KVNamespace;
   FALLBACK_TIMER?: DurableObjectNamespace;
+  /**
+   * Base64 32-byte key the stashed render input is encrypted with. Required when the catalogue
+   * has an `otp` template.
+   */
+  MESSAGES_ENC_KEY?: string;
   MESSAGING_DEV_UNSIGNED?: string;
   [key: string]: unknown;
 }
@@ -185,6 +191,7 @@ export function validateEnv(
   problems.push(
     ...validateDeliveryPolicy(options.delivery),
     ...validateTemplates(options.templates),
+    ...[sealKeyConfigProblem(env, options.templates)].filter((p): p is string => p !== undefined),
     ...validateProviders(env, options.providers)
   );
 

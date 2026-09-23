@@ -77,3 +77,13 @@ jobs:
       # into src/, never dist/, so a build here would change nothing.
       - name: Run integration tests
         run: bun run test:integration
+
+  pack:
+    name: Pack and install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/bun-install
+      # Proves the release tarball installs with Bun and every entry point imports.
+      - name: Pack smoke test
+        run: bun run pack:smoke

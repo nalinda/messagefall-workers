@@ -33,7 +33,7 @@ import type {
   RenderedWhatsApp,
 } from '../../src/providers/types.js';
 import { defineTemplates } from '../../src/templates.js';
-import { recordingProvider, waitFor } from '../helpers/messaging.js';
+import { recordingProvider, TEST_ENC_KEY, waitFor } from '../helpers/messaging.js';
 import { createMiniflareKV } from '../helpers/status.js';
 import { createMockExecutionContext } from '../helpers/webhook.js';
 
@@ -152,7 +152,7 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
 
     expect(app).toBeInstanceOf(Hono);
 
-    const env: MessagingEnv = { MESSAGES_KV: kv };
+    const env: MessagingEnv = { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY };
     const ctx = createMockExecutionContext();
 
     // 1. POST /send
@@ -226,7 +226,7 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
       }),
     });
 
-    const env: MessagingEnv = { MESSAGES_KV: kv };
+    const env: MessagingEnv = { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY };
     const ctx = createMockExecutionContext();
 
     const response = await app.fetch(
@@ -284,7 +284,7 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
       providers: () => ({ sms: smsProvider }),
     });
 
-    const env: MessagingEnv = { MESSAGES_KV: kv };
+    const env: MessagingEnv = { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY };
     const mockCtx = createMockExecutionContext();
 
     try {
@@ -338,7 +338,7 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
       providers: () => ({ sms: smsProvider }),
     });
 
-    const env: MessagingEnv = { MESSAGES_KV: kv };
+    const env: MessagingEnv = { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY };
 
     // 1. Invalid JSON body
     const badJsonResponse = await app.fetch(
@@ -406,7 +406,7 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
       providers: () => ({ sms: smsProvider }),
     });
 
-    const env: MessagingEnv = { MESSAGES_KV: kv };
+    const env: MessagingEnv = { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY };
 
     const response = await app.fetch(
       new Request('https://worker.local/send', {
@@ -432,7 +432,7 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
       providers: () => ({ sms: smsProvider }),
     });
 
-    const env: MessagingEnv = { MESSAGES_KV: kv };
+    const env: MessagingEnv = { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY };
 
     const response = await app.fetch(
       new Request('https://worker.local/send', {
@@ -459,7 +459,7 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
       providers: () => ({ sms: smsProvider }),
     });
 
-    const env: MessagingEnv = { MESSAGES_KV: kv };
+    const env: MessagingEnv = { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY };
 
     const sendRes = await app.fetch(
       new Request('https://worker.local/send', {
@@ -521,7 +521,7 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
       providers: () => ({ sms: smsProvider }),
     });
 
-    const env: MessagingEnv = { MESSAGES_KV: kv };
+    const env: MessagingEnv = { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY };
 
     const statusRes = await app.fetch(
       new Request('https://worker.local/status/msg_non_existent_id'),
@@ -544,7 +544,7 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
       providers: () => ({ whatsapp: waProvider }),
     });
 
-    const env: MessagingEnv = { MESSAGES_KV: kv };
+    const env: MessagingEnv = { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY };
 
     // Known provider webhook
     const knownRes = await app.fetch(
@@ -586,7 +586,7 @@ describe('createMessagingApp Hono routes and miniflare integration (Issue #13)',
       basePath: '/messaging/',
     });
 
-    const env: MessagingEnv = { MESSAGES_KV: kv };
+    const env: MessagingEnv = { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY };
 
     const reqPayload = {
       template: 'smsOnly',

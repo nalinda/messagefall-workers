@@ -16,6 +16,7 @@ import path from 'node:path';
 import { Database } from 'bun:sqlite';
 
 import type { MessageRecord } from '../../src/core/status.js';
+import { TEST_ENC_KEY } from '../helpers/messaging.js';
 
 export interface HarnessOptions {
   port?: number;
@@ -100,10 +101,13 @@ export class IntegrationHarness {
       configPath,
     ];
 
-    if (options.vars) {
-      for (const [key, value] of Object.entries(options.vars)) {
-        args.push('--var', `${key}:${value}`);
-      }
+    // Every fixture worker's catalogue has an otp template, which cannot run without a seal key.
+    const vars = {
+      MESSAGES_ENC_KEY: TEST_ENC_KEY,
+      ...options.vars,
+    };
+    for (const [key, value] of Object.entries(vars)) {
+      args.push('--var', `${key}:${value}`);
     }
 
     const proc = spawn('bunx', args, {

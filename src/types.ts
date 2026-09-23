@@ -84,4 +84,10 @@ export type {
   Templates,
   WhatsAppTemplateConfig,
 } from './templates.js';
-export { definedChannels, defineTemplates, render, TemplateValidationError } from './templates.js';
+export {
+  definedChannels,
+  defineTemplates,
+  NoTemplateLanguageError,
+  render,
+  TemplateValidationError,
+} from './templates.js';

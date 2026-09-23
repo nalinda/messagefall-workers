@@ -24,6 +24,7 @@ import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
 
 import { createMessaging } from '../../src/core/messaging.js';
+import { OTP_ERROR_WITHHELD } from '../../src/core/redact.js';
 import type {
   OutboundMeta,
   RenderedEmail,
@@ -532,11 +533,9 @@ describe('Issue #9: One-time code semantics for kind "otp"', () => {
         expect(record).not.toBeNull();
         expect(record!.status).toBe('failed');
 
-        // The error stored on the record must be scrubbed of the secret code and rendered body
+        // An otp record never keeps the vendor's text: it is withheld, not scrubbed
         const storedError = record!.chain.attempts[0]?.error;
-        expect(storedError).toBeDefined();
-        expect(storedError).not.toContain(secretCode);
-        expect(storedError).toContain('[redacted]');
+        expect(storedError).toBe(OTP_ERROR_WITHHELD);
 
         // Neither console logs nor status records leak the secret code
         for (const line of logs) {

@@ -27,6 +27,13 @@ import { getTemplate, type TemplateDef, type Templates } from '../templates.js';
  */
 const MIN_SENSITIVE_LENGTH = 4;
 
+/**
+ * What an `otp` template's status record says in place of a vendor's error text. The vendor's
+ * text can quote the code back and scrubbing cannot always find a bare code in it, so for
+ * one-time codes it is never persisted; the attempt's `errorCode` carries what can be acted on.
+ */
+export const OTP_ERROR_WITHHELD = 'Provider error (vendor text withheld for otp templates)';
+
 function collectFromString(data: string, out: Set<string>): void {
   const trimmed = data.trim();
   if (trimmed.length >= MIN_SENSITIVE_LENGTH) {
@@ -120,13 +127,11 @@ function pushBoundedMatch(
   // than destroy the error.
   //
   // Worth naming the consequence: this path is the fallback the webhook takes once `in:<id>` has
-  // expired (chain timeout, floor 60s) while the status record is still alive (7 days). So for a
-  // template whose only OTP parameter renders bare — `params: (i) => [i.code]`, as the README
-  // shows — a late vendor error quoting the code back is persisted unscrubbed on a record
-  // `GET /status/:id` serves. Neither escape is free: anchoring on a neighbouring parameter still
-  // needs literal text that a bare-value list does not have, and extending `in:<id>` to the
-  // record's TTL would keep the code in plaintext for seven days to close a gap that opens after
-  // one minute. Recorded in CHANGELOG's "Known limitations" instead.
+  // expired (chain timeout, floor 60s) while the status record is still alive (7 days). For a
+  // `notification` template whose parameter renders bare, a late vendor error quoting that value
+  // back is persisted unscrubbed. It cannot reach an `otp` record: the webhook path never keeps a
+  // vendor's text there at all (`OTP_ERROR_WITHHELD`), which is how the one-time code case is
+  // closed rather than by scrubbing.
   if (prefix.length === 0 && suffix.length === 0) {
     return;
   }

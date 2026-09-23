@@ -1,0 +1,5 @@
+# Local development only. Copy to `.dev.vars` (gitignored) before `wrangler dev`.
+# MESSAGES_ENC_KEY encrypts the one-time code the fallback chain stores; a catalogue with an otp
+# template will not start without it. In a deployed Worker set your own instead:
+#   openssl rand -base64 32 | wrangler secret put MESSAGES_ENC_KEY
+MESSAGES_ENC_KEY=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=

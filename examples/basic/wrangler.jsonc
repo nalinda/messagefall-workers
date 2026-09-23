@@ -6,6 +6,9 @@
   // Lets the unsigned webhook curls in this example's README be accepted. The library refuses
   // this bypass on any host that is not loopback (localhost, 127.0.0.1, [::1]), so it cannot
   // weaken a deployed Worker — but do not copy it into a real config.
+  //
+  // MESSAGES_ENC_KEY is deliberately not here: a key in `vars` would be committed and deployed.
+  // For `wrangler dev`, copy `.dev.vars.example` to `.dev.vars` (gitignored).
   "vars": {
     "MESSAGING_DEV_UNSIGNED": "true",
   },

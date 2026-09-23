@@ -10,8 +10,9 @@ import type { ExecutionContext, KVNamespace } from '@cloudflare/workers-types';
 import type { Channel, Provider, StatusEvent } from '../providers/types.js';
 import type { Templates } from '../templates.js';
 import { createLogger } from './logger.js';
-import { extractTemplateSensitiveStrings, scrubError } from './redact.js';
+import { extractTemplateSensitiveStrings, OTP_ERROR_WITHHELD, scrubError } from './redact.js';
 import { asRenderInput, renderInputKey } from './render-input.js';
+import { type OpenedInput, openInput, sealKeyFor } from './seal.js';
 import type { ProviderSet } from './send.js';
 import {
   type Attempt,
@@ -235,6 +236,9 @@ function updateAttempt(att: Attempt, event: StatusEvent, ref: ProviderRef): Atte
   if (event.error !== undefined) {
     updated.error = event.error;
   }
+  if (event.code !== undefined) {
+    updated.errorCode = event.code;
+  }
   return updated;
 }
 
@@ -288,6 +292,29 @@ function applyStatusUpdate(
 }
 
 /**
+ * The template input the send stashed under `in:<id>`, opened if it was sealed. Only the input's
+ * own field values, not the envelope's `to` / `email` / `locale` around them: those cannot leak
+ * the message content, and scrubbing an error for short metadata values shreds ordinary vendor
+ * error strings. Best effort: anything unreadable is simply nothing to scrub for.
+ */
+async function readStashedInput(
+  options: WebhookDispatchOptions,
+  kv: KVNamespace | undefined,
+  refId: string
+): Promise<OpenedInput> {
+  try {
+    const rawInput = await kv?.get(renderInputKey(refId));
+    if (!rawInput) {
+      return { ok: false };
+    }
+    const { input, to, email, locale } = asRenderInput(JSON.parse(rawInput) as unknown);
+    return await openInput(await sealKeyFor(options.env), { id: refId, to, email, locale }, input);
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
  * Resolves the sensitive strings to scrub from an event's error message.
  *
  * Only called when the event actually carries an `error` — the KV read here (and the
@@ -302,18 +329,9 @@ async function resolveWebhookSensitive(
 ): Promise<unknown[]> {
   const sensitive: unknown[] = [];
   const kv = options.kv ?? (options.env?.MESSAGES_KV as KVNamespace | undefined);
-  if (kv) {
-    try {
-      const rawInput = await kv.get(renderInputKey(refId));
-      if (rawInput) {
-        // Only the template input's own field values, not the envelope's `to` / `email` /
-        // `locale` around them: those cannot leak the message content, and scrubbing an error
-        // for short metadata values shreds ordinary vendor error strings.
-        sensitive.push(asRenderInput(JSON.parse(rawInput) as unknown).input);
-      }
-    } catch {
-      // ignore
-    }
+  const stashed = await readStashedInput(options, kv, refId);
+  if (stashed.ok) {
+    sensitive.push(stashed.input);
   }
 
   if (existingRecord && options.templates) {
@@ -348,8 +366,18 @@ async function handleSingleEvent(
   let scrubbedEvent: StatusEvent = event;
   if (event.error !== undefined) {
     const existingRecord = await store.get(ref.id);
-    const sensitive = await resolveWebhookSensitive(options, ref.id, existingRecord, event.error);
-    scrubbedEvent = { ...event, error: scrubError(event.error, sensitive) };
+    // An otp record never takes the vendor's text at all: scrubbing can miss a bare code once
+    // `in:<id>` has expired, and the code is the one thing that must not be persisted.
+    scrubbedEvent =
+      existingRecord?.kind === 'otp'
+        ? { ...event, error: OTP_ERROR_WITHHELD }
+        : {
+            ...event,
+            error: scrubError(
+              event.error,
+              await resolveWebhookSensitive(options, ref.id, existingRecord, event.error)
+            ),
+          };
   }
 
   // Captured from `applyStatusUpdate`'s own result rather than recomputed from `existingRecord`:

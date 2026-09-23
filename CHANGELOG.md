@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-09-23
+
+Hardens one-time-code delivery and makes the package installable. Built for a sign-in flow that sends codes over a WhatsApp authentication template with SMS fallback, in several locales, from another Worker.
+
+### Added
+
+- **Tarball releases**: every `v*` tag publishes `messagefall-workers-<version>.tgz` on its GitHub Release. Install it by URL, pinned, with no build step: `bun add messagefall-workers@https://github.com/nalinda/messagefall-workers/releases/download/v0.2.0/messagefall-workers-0.2.0.tgz`. CI proves each tarball installs with Bun and that every entry point imports.
+- **WhatsApp authentication templates**: `whatsapp.authentication: true` sends the single code param as the body parameter and as the copy-code (one-tap) URL button parameter at index 0, the component pair Meta requires.
+- **Encryption at rest**: with `MESSAGES_ENC_KEY` (32 bytes, base64), the render input stashed for fallback is encrypted with AES-256-GCM, authenticated together with the message id, recipient and locale stored beside it, in both the `in:<id>` KV entry and the `FallbackTimer`'s storage.
+- **`await: 'chain'`** on `send` (core, `POST /send` and `createMessagingClient`): waits for the synchronous chain walk, even for an `otp` send given an ExecutionContext, and reports `outcome: 'accepted'` (a provider accepted the message; not yet delivered) or `'undelivered'` (every channel failed immediately). The app answers `undelivered` with `502 { error, code: 'undelivered', id }`; the client returns `{ ok: false, status: 502, code: 'undelivered', id }`.
+- **Shared secret for `/send` and `/status/:id`**: `createMessagingApp({ secret: (env) => ... })` requires the `x-messagefall-secret` header (constant-time comparison, fails closed with `500` when the secret is missing); `createMessagingClient({ secret })` sends it. Webhook routes stay public. An app without `secret` logs `app.secret-off` once, at its first request.
+- **Failure codes**: `SendResult` and `StatusEvent` carry an optional content-free `code`, recorded on the attempt as `errorCode`. The built-in providers report `graph:<code>`, `http:<status>` and `network`.
+- **Per-template `timeout`**, overriding the per-kind `delivery.timeout`.
+- `NoTemplateLanguageError`, `OTP_ERROR_WITHHELD`, and the `SendOutcome` / `SendResponse` types on the root entry.
+
+### Changed
+
+- **Breaking:** a catalogue with a `kind: 'otp'` template requires `MESSAGES_ENC_KEY`. `createMessaging` throws `MessagingConfigError` without it and `validateEnv` reports it. A malformed key is refused by both whenever one is set, whatever the catalogue.
+- **Breaking:** an `otp` status record never stores a vendor's error text, on the send path or from a webhook. Its `error` is `OTP_ERROR_WITHHELD` and `errorCode` carries the code. `notification` errors are scrubbed as before.
+- **Breaking:** a locale missing from a WhatsApp template's `language` map, with no `default`, now throws `NoTemplateLanguageError`: the WhatsApp attempt is recorded `failed` with `errorCode: 'no-template-language'` without calling Meta, and the chain moves to the next channel. (It was a generic render error before, with the same effect on the chain.)
+
+### Fixed
+
+- The two 0.1.0 known limitations: the one-time code is no longer stored in plaintext, and a bare-value OTP parameter can no longer leak into a status record through a vendor error.
+
 ## [0.1.0] - 2026-09-21
 
 Initial release of `messagefall-workers`: an outbound messaging library for Cloudflare Workers featuring WhatsApp-first delivery with automatic SMS fallback, parallel always-on channels, typed templates, delivery-status webhooks, and Worker-to-Worker client bindings.

@@ -32,6 +32,7 @@ import {
   type RenderInput,
   sealAndReleaseChain,
 } from './render-input.js';
+import { openInput, sealKeyFor } from './seal.js';
 import {
   type AttemptRecorder,
   attemptRecorder,
@@ -78,8 +79,9 @@ export interface AdvanceChainArgs {
     providers?: ProviderSet;
     onStatus?: (event: StatusCallbackEvent) => void | Promise<void>;
     /**
-     * Re-arm timeout override. When absent the record's kind selects it from
-     * `options.delivery.timeout`, defaulting to 30s for `otp` and 300s for `notification`.
+     * Re-arm timeout override, ahead of everything else. When absent the template's own
+     * `timeout` applies, else the record's kind selects it from `options.delivery.timeout`,
+     * defaulting to 30s for `otp` and 300s for `notification`.
      */
     fallbackTimeoutMs?: number;
     kv?: KVNamespace;
@@ -266,6 +268,12 @@ const INPUT_LOST: UnusableInput = {
   error: 'Render input is no longer available; the message cannot be rebuilt for fallback',
 };
 
+const INPUT_UNSEALABLE: UnusableInput = {
+  event: 'fallback.input-unsealable',
+  error:
+    'Render input could not be decrypted (MESSAGES_ENC_KEY missing or rotated); the message cannot be rebuilt for fallback',
+};
+
 const INPUT_INVALID: UnusableInput = {
   event: 'fallback.input-invalid',
   error:
@@ -385,6 +393,19 @@ function rebuildRequest(
 }
 
 /**
+ * The seal key for this advance, or undefined. A malformed key cannot open anything, so it is
+ * treated as absent here: the advance then records the input as unsealable rather than throwing
+ * out of the alarm into a platform retry that could never succeed.
+ */
+async function sealKeyOrNone(env: MessagingEnv): Promise<CryptoKey | undefined> {
+  try {
+    return await sealKeyFor(env);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Advances delivery fallback chain when an attempt fails or times out.
  *
  * Resolves the channels still untried, rebuilds the render inputs, then delegates the walk to
@@ -414,12 +435,33 @@ export async function advanceChain(args: AdvanceChainArgs): Promise<void> {
     return;
   }
 
-  const payload = await resolveInputPayload(args, kv);
+  // `stored` is what KV and the timer hold — sealed when the deployment has a key — and is what
+  // a re-arm hands back to the timer; only `payload` ever carries the opened input.
+  const stored = await resolveInputPayload(args, kv);
   const providers = toProviderSet(args.options.providers);
-  if (!isRenderable(payload)) {
+  if (!isRenderable(stored)) {
     await finalizeUnusableInput(args, initialRecord, providers, nextChannels[0], kv, INPUT_LOST);
     return;
   }
+  // Opened against the very recipient and locale the rebuilt send will use: a `to` rewritten
+  // beside the ciphertext fails to open instead of receiving the code.
+  const opened = await openInput(
+    await sealKeyOrNone(args.env),
+    { id: args.id, to: stored.to, email: stored.email, locale: stored.locale },
+    stored.input
+  );
+  if (!opened.ok) {
+    await finalizeUnusableInput(
+      args,
+      initialRecord,
+      providers,
+      nextChannels[0],
+      kv,
+      INPUT_UNSEALABLE
+    );
+    return;
+  }
+  const payload = { ...stored, input: opened.input };
 
   const template = getTemplate(args.options.templates, initialRecord.template);
   // `rebuildRequest` revalidates the stashed input, so it can throw here where every other
@@ -465,8 +507,8 @@ export async function advanceChain(args: AdvanceChainArgs): Promise<void> {
       args.options.timer,
       args.id,
       args.options.fallbackTimeoutMs ??
-        chainTimeoutMs(initialRecord.kind, args.options.delivery?.timeout),
-      payload
+        chainTimeoutMs(initialRecord.kind, args.options.delivery?.timeout, template?.timeout),
+      stored
     );
   });
 }

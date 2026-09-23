@@ -203,6 +203,8 @@ describe('Entry points export documented functions', () => {
       'EmailRecipientError',
       'MessageRecordNotFoundError',
       'MessagingConfigError',
+      'NoTemplateLanguageError',
+      'OTP_ERROR_WITHHELD',
       'PolicyError',
       'ProviderConfigError',
       'RecipientError',

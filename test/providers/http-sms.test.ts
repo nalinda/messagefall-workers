@@ -214,6 +214,7 @@ describe('httpSms provider', () => {
       if (!result.ok) {
         expect(result.retryable).toBe(tc.expectedRetryable);
         expect(result.error).toBe(`${tc.status} ${tc.body}`);
+        expect(result.code).toBe(`http:${tc.status}`);
       }
     }
   });
@@ -249,6 +250,7 @@ describe('httpSms provider', () => {
     if (!result.ok) {
       expect(result.retryable).toBe(true);
       expect(result.error).toBe('Connection reset by peer (ECONNRESET)');
+      expect(result.code).toBe('network');
     }
   });
 

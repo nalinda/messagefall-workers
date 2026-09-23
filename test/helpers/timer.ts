@@ -26,6 +26,7 @@ import type {
   SendResult,
 } from '../../src/providers/types.js';
 import { parseStatusEvents } from '../durable/fixtures/timer-catalogue.js';
+import { TEST_ENC_KEY } from './messaging.js';
 
 export { timerTemplates } from '../durable/fixtures/timer-catalogue.js';
 
@@ -493,7 +494,9 @@ export function timerEnv(
   kv: MessagingEnv['MESSAGES_KV'],
   timer?: DurableObjectNamespace
 ): MessagingEnv {
-  return timer ? { MESSAGES_KV: kv, FALLBACK_TIMER: timer } : { MESSAGES_KV: kv };
+  return timer
+    ? { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY, FALLBACK_TIMER: timer }
+    : { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY };
 }
 
 /**

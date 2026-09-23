@@ -27,6 +27,7 @@ import {
   memoryKV,
   newEnv,
   pingTemplates as templates,
+  TEST_ENC_KEY,
   waitFor,
 } from '../helpers/messaging.js';
 
@@ -469,7 +470,7 @@ describe('createMessaging late confirmation for a superseded channel', () => {
     const kv = memoryKV();
     const timer = createMockFallbackTimer();
     const messaging = createMessaging(
-      { MESSAGES_KV: kv },
+      { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
       {
         templates: otpTemplates,
         providers: () => ({ whatsapp, sms, email }),

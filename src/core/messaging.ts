@@ -14,11 +14,13 @@ import { advanceChain } from './fallback.js';
 import { DEFAULT_POLICY, type DeliveryOverride, type DeliveryPolicy } from './policy.js';
 import { validateProviderSet } from './provider-set.js';
 import { sealAndReleaseChain } from './render-input.js';
+import { sealKeyConfigProblem, sealKeyFor } from './seal.js';
 import {
   notifyStatus,
   type ProviderSet,
   runSend,
   type SendContext,
+  type SendResponse,
   type StatusCallbackEvent,
 } from './send.js';
 import {
@@ -38,7 +40,13 @@ import {
 import { applyStatusEvents, createWebhookHandler, type WebhookDispatchOptions } from './webhook.js';
 
 export { ProviderConfigError } from './provider-set.js';
-export type { ProviderSet, SendContext, StatusCallbackEvent } from './send.js';
+export type {
+  ProviderSet,
+  SendContext,
+  SendOutcome,
+  SendResponse,
+  StatusCallbackEvent,
+} from './send.js';
 export { E164, EmailRecipientError, isEmailAddress, RecipientError } from './send.js';
 
 /**
@@ -65,13 +73,18 @@ export interface SendArgs<T, K extends keyof T> {
   locale: string;
   input: InputOf<T, K>;
   delivery?: DeliveryOverride;
+  /**
+   * `'chain'` waits for the synchronous chain walk and resolves with an `outcome`
+   * (`'accepted'` or `'undelivered'`), even for an `otp` send given an ExecutionContext.
+   */
+  await?: 'chain';
 }
 
 /**
  * Messaging instance returned by createMessaging.
  */
 export interface Messaging<T> {
-  send<K extends keyof T>(args: SendArgs<T, K>, ctx?: SendContext): Promise<{ id: string }>;
+  send<K extends keyof T>(args: SendArgs<T, K>, ctx?: SendContext): Promise<SendResponse>;
   status(id: string): Promise<MessageRecord | null>;
   /**
    * Handles a provider's delivery-status webhook (#5): 404 for an unknown provider or one
@@ -268,6 +281,28 @@ function requireKv(env: MessagingEnv, options: { kv?: KVNamespace }): KVNamespac
 }
 
 /**
+ * A catalogue with an `otp` template must be deployed with `MESSAGES_ENC_KEY`: the fallback chain
+ * stashes the render input between requests, and for such a template that input is the code.
+ * Refusing to build the instance is what keeps the code from ever reaching KV or Durable Object
+ * storage in the clear. A key that is set must also be well-formed, whatever the catalogue: a bad
+ * one would make every send skip its stash and its fallback timer, so a chain whose first channel
+ * never reports would never fall back.
+ *
+ * @throws {MessagingConfigError} If an `otp` template exists and the binding is absent, or the
+ * binding is set but is not a 32-byte base64 key.
+ */
+function requireSealKeyForOtp(
+  env: MessagingEnv,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  templates: Templates<any>
+): void {
+  const problem = sealKeyConfigProblem(env, templates);
+  if (problem) {
+    throw new MessagingConfigError(problem);
+  }
+}
+
+/**
  * The status store `createMessaging` would use for `env` and `options`: `options.kv` else
  * `env.MESSAGES_KV`, memoised per namespace and TTL. The one resolution every path shares —
  * the request path, the webhook bridge and the `FallbackTimer` Durable Object — so a missing
@@ -399,6 +434,7 @@ export function createMessaging<T extends Templates<any>>(
   options: MessagingOptions<T>
 ): Messaging<T> {
   const kv = requireKv(env, options);
+  requireSealKeyForOtp(env, options.templates);
   registerMessagingOptions(options);
   announceTimerOff(env, options.timer);
   const defaults: DeliveryPolicy = {
@@ -426,6 +462,7 @@ export function createMessaging<T extends Templates<any>>(
           kv,
           timer: resolveTimer(env, options.timer),
           timeout: options.delivery?.timeout,
+          sealKey: () => sealKeyFor(env),
         },
         {
           templateName,
@@ -435,6 +472,7 @@ export function createMessaging<T extends Templates<any>>(
           locale: args.locale,
           input: args.input,
           delivery: args.delivery,
+          ...(args.await === 'chain' && { await: 'chain' as const }),
         },
         ctx
       );

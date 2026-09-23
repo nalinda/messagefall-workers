@@ -49,8 +49,9 @@ export function messagesUrl(apiVersion: string, phoneNumberId: string): string {
  * Build the Cloud API `/messages` body for a rendered WhatsApp message.
  *
  * A `template` renders to a template message with one body component whose
- * parameters are the template params in order; `text` renders to a plain
- * text message. Template takes precedence when both are present.
+ * parameters are the template params in order; an authentication template adds
+ * the copy-code button component carrying the same code. `text` renders to a
+ * plain text message. Template takes precedence when both are present.
  *
  * @throws When the message carries neither a template nor text.
  */
@@ -71,12 +72,7 @@ export function buildMessageBody(
       template: {
         name: templateConfig.name,
         language: { code: templateConfig.language },
-        components: [
-          {
-            type: 'body',
-            parameters: templateConfig.params.map((text) => ({ type: 'text', text })),
-          },
-        ],
+        components: templateComponents(templateConfig),
       },
     };
   }
@@ -90,6 +86,31 @@ export function buildMessageBody(
   }
 
   throw new Error('meta-whatsapp: message has neither a template nor text to send');
+}
+
+/**
+ * The `components` of a template message. An authentication template's copy-code (and one-tap)
+ * button is a URL button at index 0 whose single text parameter is the code, alongside the body
+ * parameter carrying the same code; Meta rejects the send without it.
+ */
+function templateComponents(
+  config: NonNullable<RenderedWhatsApp['templateConfig']>
+): Record<string, unknown>[] {
+  const body = {
+    type: 'body',
+    parameters: config.params.map((text) => ({ type: 'text', text })),
+  };
+  if (config.authentication !== true) {
+    return [body];
+  }
+  const [code] = config.params;
+  if (typeof code !== 'string' || config.params.length !== 1) {
+    throw new Error('meta-whatsapp: an authentication template needs exactly one param, the code');
+  }
+  return [
+    body,
+    { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: code }] },
+  ];
 }
 
 function isGraphError(value: unknown): value is { error: GraphError } {
@@ -113,6 +134,7 @@ export function mapErrorResponse(status: number, body: unknown, rawText: string)
     return {
       ok: false,
       error: `Graph error ${code}: ${message}`,
+      code: `graph:${code}`,
       retryable: isRetryableStatus(status) || RETRYABLE_GRAPH_CODES.has(code),
     };
   }
@@ -120,6 +142,7 @@ export function mapErrorResponse(status: number, body: unknown, rawText: string)
   return {
     ok: false,
     error: formatHttpError(status, rawText),
+    code: `http:${status}`,
     retryable: isRetryableStatus(status),
   };
 }
@@ -163,6 +186,7 @@ export async function sendViaGraph(
     return {
       ok: false,
       error: errorMessage(err),
+      code: 'network',
       retryable: true,
     };
   }
