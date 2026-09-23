@@ -39,6 +39,7 @@ export type LogEvent =
   | 'send.observer-failed'
   | 'send.index-failed'
   | 'send.stash-failed'
+  | 'send.seal-failed'
   | 'send.retry'
   | 'send.channel-skipped'
   | 'webhook.applied'
@@ -55,6 +56,7 @@ export type LogEvent =
   | 'timer.cancelled'
   | 'timer.gave-up'
   | 'timer.off'
+  | 'app.secret-off'
   | 'timer.options-replaced'
   | 'timer.unconfigured'
   // Provider-owned events. A provider must not write to the console directly (the lint rule in

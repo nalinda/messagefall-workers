@@ -15,14 +15,14 @@ Hardens one-time-code delivery and makes the package installable. Built for a si
 - **WhatsApp authentication templates**: `whatsapp.authentication: true` sends the single code param as the body parameter and as the copy-code (one-tap) URL button parameter at index 0, the component pair Meta requires.
 - **Encryption at rest**: with `MESSAGES_ENC_KEY` (32 bytes, base64), the render input stashed for fallback is encrypted with AES-256-GCM, bound to the message id, in both the `in:<id>` KV entry and the `FallbackTimer`'s storage.
 - **`await: 'chain'`** on `send` (core, `POST /send` and `createMessagingClient`): waits for the synchronous chain walk, even for an `otp` send given an ExecutionContext, and reports `outcome: 'accepted'` (a provider accepted the message; not yet delivered) or `'undelivered'` (every channel failed immediately). The app answers `undelivered` with `502 { error, code: 'undelivered', id }`; the client returns `{ ok: false, status: 502, code: 'undelivered', id }`.
-- **Shared secret for `/send` and `/status/:id`**: `createMessagingApp({ secret: (env) => ... })` requires the `x-messagefall-secret` header (constant-time comparison, fails closed with `500` when the secret is missing); `createMessagingClient({ secret })` sends it. Webhook routes stay public.
+- **Shared secret for `/send` and `/status/:id`**: `createMessagingApp({ secret: (env) => ... })` requires the `x-messagefall-secret` header (constant-time comparison, fails closed with `500` when the secret is missing); `createMessagingClient({ secret })` sends it. Webhook routes stay public. An app without `secret` logs `app.secret-off` once, at its first request.
 - **Failure codes**: `SendResult` and `StatusEvent` carry an optional content-free `code`, recorded on the attempt as `errorCode`. The built-in providers report `graph:<code>`, `http:<status>` and `network`.
 - **Per-template `timeout`**, overriding the per-kind `delivery.timeout`.
 - `NoTemplateLanguageError`, `EncryptionKeyError`, `OTP_ERROR_WITHHELD`, and the `SendOutcome` / `SendResponse` types on the root entry.
 
 ### Changed
 
-- **Breaking:** a catalogue with a `kind: 'otp'` template requires `MESSAGES_ENC_KEY`. `createMessaging` throws `MessagingConfigError` without it and `validateEnv` reports it; a malformed key is reported whenever one is set.
+- **Breaking:** a catalogue with a `kind: 'otp'` template requires `MESSAGES_ENC_KEY`. `createMessaging` throws `MessagingConfigError` without it and `validateEnv` reports it. A malformed key is refused by both whenever one is set, whatever the catalogue.
 - **Breaking:** an `otp` status record never stores a vendor's error text, on the send path or from a webhook. Its `error` is `OTP_ERROR_WITHHELD` and `errorCode` carries the code. `notification` errors are scrubbed as before.
 - **Breaking:** a locale missing from a WhatsApp template's `language` map, with no `default`, now throws `NoTemplateLanguageError`: the WhatsApp attempt is recorded `failed` with `errorCode: 'no-template-language'` without calling Meta, and the chain moves to the next channel. (It was a generic render error before, with the same effect on the chain.)
 

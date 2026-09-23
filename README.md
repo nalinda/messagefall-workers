@@ -582,7 +582,7 @@ Every provider that reports delivery gets its own route at `/webhooks/<provider 
 
 A request to `/webhooks/<name>` for a provider that is not configured returns 404. A provider whose `parse` throws returns 401. Unsigned payloads are never accepted outside development.
 
-The webhook routes are the only routes that need to be public. `/send` and `/status` are meant to be reached over a service binding, but a Worker with a public hostname serves them there too. Pass `secret` to `createMessagingApp` (and the same value to `createMessagingClient`) and both routes answer `401` without the matching `x-messagefall-secret` header, compared in constant time. If `secret` returns nothing at runtime they answer `500` rather than open. Webhook routes are unaffected.
+The webhook routes are the only routes that need to be public. `/send` and `/status` are meant to be reached over a service binding, but a Worker with a public hostname serves them there too. Pass `secret` to `createMessagingApp` (and the same value to `createMessagingClient`) and both routes answer `401` without the matching `x-messagefall-secret` header, compared in constant time. If `secret` returns nothing at runtime they answer `500` rather than open. Webhook routes are unaffected. An app without `secret` logs `app.secret-off` once, at its first request, so an unprotected deployment is visible in the logs.
 
 ## Local development
 

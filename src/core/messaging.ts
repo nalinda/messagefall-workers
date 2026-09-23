@@ -14,7 +14,7 @@ import { advanceChain } from './fallback.js';
 import { DEFAULT_POLICY, type DeliveryOverride, type DeliveryPolicy } from './policy.js';
 import { validateProviderSet } from './provider-set.js';
 import { sealAndReleaseChain } from './render-input.js';
-import { ENC_KEY_BINDING, rawSealKey, sealKeyFor } from './seal.js';
+import { ENC_KEY_BINDING, rawSealKey, sealKeyFor, sealKeyProblem } from './seal.js';
 import {
   notifyStatus,
   type ProviderSet,
@@ -284,21 +284,31 @@ function requireKv(env: MessagingEnv, options: { kv?: KVNamespace }): KVNamespac
  * A catalogue with an `otp` template must be deployed with `MESSAGES_ENC_KEY`: the fallback chain
  * stashes the render input between requests, and for such a template that input is the code.
  * Refusing to build the instance is what keeps the code from ever reaching KV or Durable Object
- * storage in the clear. The key's format is checked where it is imported (`./seal.js`) and at
- * startup by `validateEnv`.
+ * storage in the clear. A key that is set must also be well-formed, whatever the catalogue: a bad
+ * one would make every send skip its stash and its fallback timer, so a chain whose first channel
+ * never reports would never fall back.
  *
- * @throws {MessagingConfigError} If an `otp` template exists and the binding is absent.
+ * @throws {MessagingConfigError} If an `otp` template exists and the binding is absent, or the
+ * binding is set but is not a 32-byte base64 key.
  */
 function requireSealKeyForOtp(
   env: MessagingEnv,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   templates: Templates<any>
 ): void {
-  if (rawSealKey(env) === undefined && hasOtpTemplate(templates)) {
-    throw new MessagingConfigError(
-      `${ENC_KEY_BINDING} is required when the catalogue has an otp template: ` +
-        'the fallback chain stores the code between requests and it is encrypted with this key'
-    );
+  const raw = rawSealKey(env);
+  if (raw === undefined) {
+    if (hasOtpTemplate(templates)) {
+      throw new MessagingConfigError(
+        `${ENC_KEY_BINDING} is required when the catalogue has an otp template: ` +
+          'the fallback chain stores the code between requests and it is encrypted with this key'
+      );
+    }
+    return;
+  }
+  const problem = sealKeyProblem(raw);
+  if (problem) {
+    throw new MessagingConfigError(problem);
   }
 }
 

@@ -30,10 +30,17 @@ import { createMockExecutionContext } from '../helpers/webhook.js';
 const TO = '+94771234567';
 const CODE = '731904';
 
+// The Sinhala and Tamil texts run past 160 characters, so any truncation or splitting at the
+// GSM (160) or UCS-2 (70) segment length inside the library would show in the Unicode test.
+const SI_TAIL =
+  ' මෙම කේතය විනාඩි දහයකින් කල් ඉකුත් වේ. කිසිවෙකුටත් මෙම කේතය ලබා නොදෙන්න, බැංකුවකට හෝ අපගේ කාර්ය මණ්ඩලයට වුවද. ඔබ මෙය ඉල්ලා නොසිටියේ නම් මෙම පණිවිඩය නොසලකා හරින්න. ස්තූතියි.';
+const TA_TAIL =
+  ' இந்தக் குறியீடு பத்து நிமிடங்களில் காலாவதியாகும். இதை யாருடனும் பகிர வேண்டாம். நீங்கள் இதைக் கோரவில்லை என்றால் இந்தச் செய்தியைப் புறக்கணிக்கவும். நன்றி.';
+
 const SMS_TEXT = new Map<string, (code: string) => string>([
   ['en', (code) => `Your sign-in code is ${code}`],
-  ['si', (code) => `ඔබගේ පිවිසුම් කේතය ${code}`],
-  ['ta', (code) => `உங்கள் உள்நுழைவு குறியீடு ${code}`],
+  ['si', (code) => `ඔබගේ පිවිසුම් කේතය ${code}${SI_TAIL}`],
+  ['ta', (code) => `உங்கள் உள்நுழைவு குறியீடு ${code}${TA_TAIL}`],
 ]);
 
 function smsText(code: string, locale: string): string {
@@ -292,7 +299,7 @@ describe('sign-in codes: locale with no approved WhatsApp template language', ()
 
     expect(result.outcome).toBe('accepted');
     expect(wa.calls).toHaveLength(0);
-    expect(sms.calls.map((c) => c.text)).toEqual([`ඔබගේ පිවිසුම් කේතය ${CODE}`]);
+    expect(sms.calls.map((c) => c.text)).toEqual([smsText(CODE, 'si')]);
     const [whatsapp] = (await messaging.status(result.id))!.chain.attempts;
     expect(whatsapp).toMatchObject({
       channel: 'whatsapp',
@@ -356,6 +363,7 @@ describe('sign-in codes: Unicode SMS through http-sms', () => {
       await messaging.send({ template: 'loginCode', to: TO, locale, input: { code: CODE } });
 
       const expected = smsText(CODE, locale);
+      expect(expected.length).toBeGreaterThan(160);
       expect(seen).toEqual([expected]);
       expect(JSON.parse(bodies[0]) as unknown).toEqual({ to: TO, text: expected, unicode: true });
     }

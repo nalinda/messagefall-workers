@@ -7,6 +7,7 @@
 import { Hono, type MiddlewareHandler } from 'hono';
 
 import { normalizeBasePath } from '../core/base-path.js';
+import { createLogger } from '../core/logger.js';
 import {
   createMessaging,
   type MessagingOptions,
@@ -44,6 +45,8 @@ async function isSecretMatch(given: string, expected: string): Promise<boolean> 
   }
   return diff === 0;
 }
+
+const logger = createLogger();
 
 function getExecutionContext(c: { executionCtx: unknown }): SendContext | undefined {
   try {
@@ -119,6 +122,11 @@ export function createMessagingApp<E extends MessagingEnv = MessagingEnv>(
       // Without the FALLBACK_TIMER binding chain fallback is driven by explicit failure
       // statuses only; said once per app so a missing binding is visible in the logs.
       announceTimerOff(c.env, options.timer, app);
+      if (!options.secret) {
+        // Said once per app: without `secret`, /send and /status answer anyone who can reach the
+        // Worker, which is everyone once it has the public hostname vendor webhooks need.
+        logger.warn('app.secret-off');
+      }
       isValidated = true;
     }
     await next();

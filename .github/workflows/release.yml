@@ -36,7 +36,12 @@ jobs:
 
       - name: Pack and prove the tarball installs
         id: pack
-        run: echo "tarball=$(scripts/pack-smoke.sh "$RUNNER_TEMP/release" | tail -n 1)" >> "$GITHUB_OUTPUT"
+        # Assigned before it is echoed: a failure inside `$(...)` in echo's arguments is lost.
+        run: |
+          out="$(scripts/pack-smoke.sh "$RUNNER_TEMP/release")"
+          tarball="$(printf '%s\n' "$out" | tail -n 1)"
+          test -f "$tarball"
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
 
       - name: Extract release notes from CHANGELOG
         run: |

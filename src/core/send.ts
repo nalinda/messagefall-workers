@@ -864,9 +864,11 @@ async function stashChainInput(
     // as a bare payload and lose its recipient. `null` round-trips and renders the same.
     input = await sealInput(await deps.sealKey?.(), id, req.input ?? null);
   } catch {
-    // Never fall back to writing the input in the clear: the send proceeds without a stash and a
-    // later fallback degrades through `finalizeUnusableInput`, exactly as a failed KV write does.
-    logger.warn('send.stash-failed', { id, kind: req.template.kind });
+    // Never fall back to writing the input in the clear, to KV or to the timer: the send proceeds
+    // with neither, so this chain has no timed fallback and a `failed` status finds no input.
+    // Its own event, because unlike `send.stash-failed` the timer is lost too. `createMessaging`
+    // refuses a malformed key, so this is a runtime crypto fault, not a configuration one.
+    logger.error('send.seal-failed', { id, kind: req.template.kind });
     return;
   }
   const inputPayload: RenderInput = {

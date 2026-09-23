@@ -12,7 +12,7 @@ import { createMessagingClient } from '../../src/client/index.js';
 import type { MessagingEnv } from '../../src/env.js';
 import type { RenderedSms } from '../../src/providers/types.js';
 import { defineTemplates } from '../../src/templates.js';
-import { memoryKV, recordingProvider, TEST_ENC_KEY } from '../helpers/messaging.js';
+import { captureConsole, memoryKV, recordingProvider, TEST_ENC_KEY } from '../helpers/messaging.js';
 import { createMockExecutionContext } from '../helpers/webhook.js';
 
 const SECRET = 'correct horse battery staple';
@@ -81,6 +81,39 @@ describe('createMessagingApp secret', () => {
     const fetchApp = setup({ MESSAGES_KV: memoryKV() });
     const response = await fetchApp(sendRequest({ [SECRET_HEADER]: '' }));
     expect(response.status).toBe(500);
+  });
+
+  it('warns once, at the first request, when an app has no secret', async () => {
+    const app = createMessagingApp({
+      templates,
+      providers: () => ({ sms: recordingProvider<RenderedSms>('sms', 'rec-sms') }),
+      delivery: { fallback: ['sms'], always: [] },
+    });
+    const bindings: MessagingEnv = { MESSAGES_KV: memoryKV() };
+    const { logs, restore } = captureConsole();
+    try {
+      for (let i = 0; i < 2; i += 1) {
+        await app.fetch(
+          sendRequest(),
+          bindings,
+          createMockExecutionContext() as unknown as ExecutionContext
+        );
+      }
+    } finally {
+      restore();
+    }
+    expect(logs.filter((line) => line.includes('app.secret-off'))).toHaveLength(1);
+  });
+
+  it('does not warn when the app has a secret', async () => {
+    const fetchApp = setup();
+    const { logs, restore } = captureConsole();
+    try {
+      await fetchApp(sendRequest({ [SECRET_HEADER]: SECRET }));
+    } finally {
+      restore();
+    }
+    expect(logs.some((line) => line.includes('app.secret-off'))).toBe(false);
   });
 
   it('leaves webhook routes public', async () => {

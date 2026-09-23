@@ -79,8 +79,9 @@ export interface AdvanceChainArgs {
     providers?: ProviderSet;
     onStatus?: (event: StatusCallbackEvent) => void | Promise<void>;
     /**
-     * Re-arm timeout override. When absent the record's kind selects it from
-     * `options.delivery.timeout`, defaulting to 30s for `otp` and 300s for `notification`.
+     * Re-arm timeout override, ahead of everything else. When absent the template's own
+     * `timeout` applies, else the record's kind selects it from `options.delivery.timeout`,
+     * defaulting to 30s for `otp` and 300s for `notification`.
      */
     fallbackTimeoutMs?: number;
     kv?: KVNamespace;
