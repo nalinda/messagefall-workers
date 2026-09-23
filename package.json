@@ -1,6 +1,6 @@
 {
   "name": "messagefall-workers",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Outbound messaging for Cloudflare Workers: WhatsApp first with SMS fallback, email, typed templates, delivery-status webhooks, and a client for Worker-to-Worker sends",
   "type": "module",
@@ -55,6 +55,7 @@
     "test": "bun test",
     "test:exports": "bun test test/exports.test.ts",
     "test:integration": "bun test test/integration/integration.test.ts",
+    "pack:smoke": "scripts/pack-smoke.sh",
     "prepare": "husky"
   },
   "peerDependencies": {

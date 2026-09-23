@@ -37,6 +37,7 @@ const templates = defineTemplates({
     whatsapp: {
       template: 'login_code', // approved authentication template
       language: { en: 'en' },
+      authentication: true, // sends the copy-code button with the code
       params: ({ code }) => [code],
     },
     sms: ({ code }) => `Your code is ${code}`,
