@@ -862,7 +862,11 @@ async function stashChainInput(
     // `JSON.stringify` drops a key whose value is `undefined`, and `asRenderInput` recognises
     // the envelope by its `input` field — so an input-less template would come back out of KV
     // as a bare payload and lose its recipient. `null` round-trips and renders the same.
-    input = await sealInput(await deps.sealKey?.(), id, req.input ?? null);
+    input = await sealInput(
+      await deps.sealKey?.(),
+      { id, to: req.to, email: req.email, locale: req.locale },
+      req.input ?? null
+    );
   } catch {
     // Never fall back to writing the input in the clear, to KV or to the timer: the send proceeds
     // with neither, so this chain has no timed fallback and a `failed` status finds no input.

@@ -443,7 +443,13 @@ export async function advanceChain(args: AdvanceChainArgs): Promise<void> {
     await finalizeUnusableInput(args, initialRecord, providers, nextChannels[0], kv, INPUT_LOST);
     return;
   }
-  const opened = await openInput(await sealKeyOrNone(args.env), args.id, stored.input);
+  // Opened against the very recipient and locale the rebuilt send will use: a `to` rewritten
+  // beside the ciphertext fails to open instead of receiving the code.
+  const opened = await openInput(
+    await sealKeyOrNone(args.env),
+    { id: args.id, to: stored.to, email: stored.email, locale: stored.locale },
+    stored.input
+  );
   if (!opened.ok) {
     await finalizeUnusableInput(
       args,

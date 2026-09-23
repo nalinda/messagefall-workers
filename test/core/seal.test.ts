@@ -43,40 +43,62 @@ function statusWebhook(providerId: string, error: string): Request {
 describe('sealInput / openInput', () => {
   it('round-trips an input and never carries it in the clear', async () => {
     const key = await importSealKey(TEST_ENC_KEY);
-    const sealed = await sealInput(key, 'msg_1', { code: CODE });
+    const sealed = await sealInput(key, { id: 'msg_1' }, { code: CODE });
 
     expect(isSealed(sealed)).toBe(true);
     expect(JSON.stringify(sealed)).not.toContain(CODE);
-    expect(await openInput(key, 'msg_1', sealed)).toEqual({ ok: true, input: { code: CODE } });
+    expect(await openInput(key, { id: 'msg_1' }, sealed)).toEqual({
+      ok: true,
+      input: { code: CODE },
+    });
   });
 
   it('uses a fresh IV per seal', async () => {
     const key = await importSealKey(TEST_ENC_KEY);
-    const a = await sealInput(key, 'msg_1', { code: CODE });
-    const b = await sealInput(key, 'msg_1', { code: CODE });
+    const a = await sealInput(key, { id: 'msg_1' }, { code: CODE });
+    const b = await sealInput(key, { id: 'msg_1' }, { code: CODE });
     expect(JSON.stringify(a)).not.toBe(JSON.stringify(b));
   });
 
   it('refuses an envelope opened under another message id (bound as additional data)', async () => {
     const key = await importSealKey(TEST_ENC_KEY);
-    const sealed = await sealInput(key, 'msg_1', { code: CODE });
-    expect(await openInput(key, 'msg_2', sealed)).toEqual({ ok: false });
+    const sealed = await sealInput(key, { id: 'msg_1' }, { code: CODE });
+    expect(await openInput(key, { id: 'msg_2' }, sealed)).toEqual({ ok: false });
+  });
+
+  it('refuses an envelope whose recipient or locale was rewritten beside it', async () => {
+    const key = await importSealKey(TEST_ENC_KEY);
+    const context = { id: 'msg_1', to: TO, locale: 'en' };
+    const sealed = await sealInput(key, context, { code: CODE });
+
+    expect(await openInput(key, context, sealed)).toEqual({ ok: true, input: { code: CODE } });
+    expect(await openInput(key, { ...context, to: '+19995550100' }, sealed)).toEqual({
+      ok: false,
+    });
+    expect(await openInput(key, { ...context, locale: 'si' }, sealed)).toEqual({ ok: false });
+    expect(await openInput(key, { ...context, email: 'x@example.com' }, sealed)).toEqual({
+      ok: false,
+    });
   });
 
   it('refuses an envelope under a different key, or with no key', async () => {
-    const sealed = await sealInput(await importSealKey(TEST_ENC_KEY), 'msg_1', { code: CODE });
-    expect(await openInput(await importSealKey(OTHER_KEY), 'msg_1', sealed)).toEqual({
+    const sealed = await sealInput(
+      await importSealKey(TEST_ENC_KEY),
+      { id: 'msg_1' },
+      { code: CODE }
+    );
+    expect(await openInput(await importSealKey(OTHER_KEY), { id: 'msg_1' }, sealed)).toEqual({
       ok: false,
     });
-    expect(await openInput(undefined, 'msg_1', sealed)).toEqual({ ok: false });
+    expect(await openInput(undefined, { id: 'msg_1' }, sealed)).toEqual({ ok: false });
   });
 
   it('passes an unsealed value through, and seals nothing without a key', async () => {
-    expect(await openInput(undefined, 'msg_1', { code: CODE })).toEqual({
+    expect(await openInput(undefined, { id: 'msg_1' }, { code: CODE })).toEqual({
       ok: true,
       input: { code: CODE },
     });
-    expect(await sealInput(undefined, 'msg_1', { code: CODE })).toEqual({ code: CODE });
+    expect(await sealInput(undefined, { id: 'msg_1' }, { code: CODE })).toEqual({ code: CODE });
   });
 });
 
@@ -213,6 +235,33 @@ describe('a sealed stash on the asynchronous paths', () => {
     expect(record?.chain.status).toBe('failed');
     expect(logs.some((line) => line.includes('fallback.input-unsealable'))).toBe(true);
     expect(logs.join('\n')).not.toContain(CODE);
+  });
+
+  it('does not send the code to a recipient rewritten in in:<id>', async () => {
+    const kv = memoryKV();
+    const providers = timerProviders();
+    const messaging = createMessaging(
+      { MESSAGES_KV: kv, MESSAGES_ENC_KEY: TEST_ENC_KEY },
+      {
+        templates: timerTemplates,
+        providers: () => ({ whatsapp: providers.whatsapp, sms: providers.sms }),
+      }
+    );
+    const { id } = await messaging.send({
+      template: 'loginCode',
+      to: TO,
+      locale: 'en',
+      input: { code: CODE },
+    });
+
+    // Someone with KV write access but not the key points the fallback at their own number.
+    const stash = JSON.parse((await kv.get(`in:${id}`)) ?? '{}') as Record<string, unknown>;
+    await kv.put(`in:${id}`, JSON.stringify({ ...stash, to: '+19995550100' }));
+    await messaging.handleWebhook('wa', statusWebhook('wa_1', 'undeliverable'));
+
+    expect(providers.sms.calls).toHaveLength(0);
+    const record = await messaging.status(id);
+    expect(record?.chain.attempts.at(1)?.error).toContain('could not be decrypted');
   });
 
   it('scrubs a notification webhook error against the sealed stash', async () => {

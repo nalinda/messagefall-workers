@@ -480,7 +480,7 @@ The top-level `status` is the chain's status, or the worst of the `always` attem
 
 The status record itself holds no message content, but the fallback chain has to be able to re-render the message on the next channel once the first one fails. So every send with a chain writes its **render input** to a second KV key, `in:<id>`, and hands the same payload to the fallback timer's Durable Object. That payload is the input you passed to `send`, plus the recipient and locale; for an `otp` template the input is the code.
 
-With `MESSAGES_ENC_KEY` set, the input is encrypted with AES-256-GCM before either write, bound to the message id, and only decrypted in memory by the fallback advance that re-renders it (and by the webhook path that scrubs a `notification`'s vendor errors). The recipient and locale beside it stay readable. The key is required whenever the catalogue has an `otp` template and optional otherwise; without it a `notification`'s input is stored as it is.
+With `MESSAGES_ENC_KEY` set, the input is encrypted with AES-256-GCM before either write and only decrypted in memory by the fallback advance that re-renders it (and by the webhook path that scrubs a `notification`'s vendor errors). The recipient and locale beside it stay readable, but they are authenticated with the ciphertext along with the message id: an entry copied to another message, or whose recipient has been rewritten, fails to decrypt instead of sending the code somewhere else. The key is required whenever the catalogue has an `otp` template and optional otherwise; without it a `notification`'s input is stored as it is.
 
 ```sh
 openssl rand -base64 32 | wrangler secret put MESSAGES_ENC_KEY

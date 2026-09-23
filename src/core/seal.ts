@@ -9,8 +9,11 @@
  * opened at the two places that need the plaintext back: the fallback advance that re-renders it,
  * and the webhook scrubber that redacts it from a vendor error.
  *
- * The ciphertext is bound to its message id as additional authenticated data, so a sealed input
- * copied under another message's key fails to open rather than rendering someone else's code.
+ * The ciphertext is bound to its message id, recipient and locale as additional authenticated
+ * data. Those fields sit beside it in the clear (the fallback path needs no key to read them), so
+ * binding them is what stops a sealed input from being opened for a different message, or for
+ * a recipient rewritten in KV: either fails to open rather than sending someone's code to someone
+ * else.
  *
  * @module
  */
@@ -26,6 +29,22 @@ export const ENC_KEY_BINDING = 'MESSAGES_ENC_KEY';
 
 const KEY_BYTES = 32;
 const IV_BYTES = 12;
+
+/**
+ * What a sealed input is bound to: the message and the fields stored beside it that decide where
+ * and how the opened input is sent.
+ */
+export interface SealContext {
+  id: string;
+  to?: string;
+  email?: string;
+  locale?: string;
+}
+
+function additionalData(context: SealContext): Uint8Array<ArrayBuffer> {
+  const { id, to, email, locale } = context;
+  return new TextEncoder().encode(JSON.stringify([id, to ?? null, email ?? null, locale ?? null]));
+}
 
 /**
  * A template input as it is stored once sealed. Recognised by its `$sealed` field, which no
@@ -177,18 +196,18 @@ export function isSealed(value: unknown): value is SealedInput {
 }
 
 /**
- * Seals a template input for message `id`. With no key the input is returned unchanged, which is
+ * Seals a template input for one message. With no key the input is returned unchanged, which is
  * how a deployment without `MESSAGES_ENC_KEY` behaves (only allowed when it has no `otp`
  * template).
  *
  * @param key - The seal key, or undefined.
- * @param id - Message id, bound to the ciphertext as additional data.
+ * @param context - Message id, recipient and locale, bound to the ciphertext as additional data.
  * @param input - The template input.
  * @returns The sealed envelope, or the input itself when there is no key.
  */
 export async function sealInput(
   key: CryptoKey | undefined,
-  id: string,
+  context: SealContext,
   input: unknown
 ): Promise<unknown> {
   if (!key) {
@@ -197,7 +216,7 @@ export async function sealInput(
   const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
   const plaintext = new TextEncoder().encode(JSON.stringify(input ?? null));
   const ct = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(id) },
+    { name: 'AES-GCM', iv, additionalData: additionalData(context) },
     key,
     plaintext
   );
@@ -214,17 +233,17 @@ export async function sealInput(
 export type OpenedInput = { ok: true; input: unknown } | { ok: false };
 
 /**
- * Opens a stored template input for message `id`. A value that was never sealed is returned as
- * it is.
+ * Opens a stored template input. A value that was never sealed is returned as it is.
  *
  * @param key - The seal key, or undefined.
- * @param id - Message id the envelope must be bound to.
+ * @param context - Message id, recipient and locale the envelope must be bound to: the values
+ * stored beside it, exactly as they will be used.
  * @param stored - The stored value.
  * @returns The plaintext input, or `{ ok: false }` when a sealed value cannot be opened.
  */
 export async function openInput(
   key: CryptoKey | undefined,
-  id: string,
+  context: SealContext,
   stored: unknown
 ): Promise<OpenedInput> {
   if (!isSealed(stored)) {
@@ -238,7 +257,7 @@ export async function openInput(
       {
         name: 'AES-GCM',
         iv: fromBase64(stored.$sealed.iv),
-        additionalData: new TextEncoder().encode(id),
+        additionalData: additionalData(context),
       },
       key,
       fromBase64(stored.$sealed.ct)

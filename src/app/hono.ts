@@ -15,16 +15,14 @@ import {
   UnknownTemplateError,
 } from '../core/messaging.js';
 import { PolicyError } from '../core/policy.js';
+import { SECRET_HEADER } from '../core/secret-header.js';
 import { EmailRecipientError, RecipientError, type SendContext } from '../core/send.js';
 import { announceTimerOff, registerMessagingOptions } from '../core/timer.js';
 import { errorMessage, isRecord } from '../core/values.js';
 import { type MessagingEnv, validateEnv } from '../env.js';
 import { TemplateValidationError } from '../templates.js';
 
-/**
- * The request header a caller presents the shared secret in. `createMessagingClient` sets it.
- */
-export const SECRET_HEADER = 'x-messagefall-secret';
+export { SECRET_HEADER } from '../core/secret-header.js';
 
 /**
  * Compares two strings without an early exit that would let response time reveal how much of a

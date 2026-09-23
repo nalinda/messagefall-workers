@@ -307,8 +307,8 @@ async function readStashedInput(
     if (!rawInput) {
       return { ok: false };
     }
-    const stored = asRenderInput(JSON.parse(rawInput) as unknown).input;
-    return await openInput(await sealKeyFor(options.env), refId, stored);
+    const { input, to, email, locale } = asRenderInput(JSON.parse(rawInput) as unknown);
+    return await openInput(await sealKeyFor(options.env), { id: refId, to, email, locale }, input);
   } catch {
     return { ok: false };
   }

@@ -1838,7 +1838,13 @@ describe('Issue #3: createMessaging send pipeline', () => {
       ]);
       expect([stored.to, stored.email, stored.locale]).toEqual([TO, 'customer@example.com', 'fr']);
       // Sealed with the env's key and bound to this message id.
-      expect(await openInput(await importSealKey(TEST_ENC_KEY), id, stored.input)).toEqual({
+      expect(
+        await openInput(
+          await importSealKey(TEST_ENC_KEY),
+          { id, to: TO, email: 'customer@example.com', locale: 'fr' },
+          stored.input
+        )
+      ).toEqual({
         ok: true,
         input: INPUT,
       });

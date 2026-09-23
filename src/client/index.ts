@@ -9,6 +9,7 @@
 import type { Fetcher } from '@cloudflare/workers-types';
 
 import { normalizeBasePath } from '../core/base-path.js';
+import { SECRET_HEADER } from '../core/secret-header.js';
 import type { MessageRecord } from '../core/status.js';
 import { isRecord } from '../core/values.js';
 import type { InputOf, Templates } from '../templates.js';
@@ -234,10 +235,8 @@ export function createMessagingClient<
   T extends Templates<any> = Templates<any>,
 >(options: CreateMessagingClientOptions): MessagingClient<T> {
   const prefix = normalizeBasePath(options.basePath);
-  // Kept in step with `SECRET_HEADER` in the app module, which this entry must not import (it
-  // would pull in the optional `hono` peer).
   const auth: Record<string, string> =
-    options.secret === undefined ? {} : { 'x-messagefall-secret': options.secret };
+    options.secret === undefined ? {} : { [SECRET_HEADER]: options.secret };
 
   return {
     async send<K extends keyof T & string>(
